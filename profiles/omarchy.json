@@ -1,0 +1,7 @@
+{
+  "id": "omarchy",
+  "name": "Omarchy 原生模式",
+  "description": "系统默认原生快捷键，无任何覆盖修改，适合学习与原生对比",
+  "version": "1.0.0",
+  "bindings": []
+}

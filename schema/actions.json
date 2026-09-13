@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OmniPal Action Catalog",
+  "version": "0.4.0",
+  "actions": [
+    {
+      "id": "close_window",
+      "name": "关闭当前窗口",
+      "category": "window",
+      "description": "关闭或终止当前具有焦点的窗口",
+      "dispatcher": "killactive",
+      "default_arg": ""
+    },
+    {
+      "id": "maximize_window",
+      "name": "最大化/全屏窗口",
+      "category": "window",
+      "description": "将当前活动窗口最大化或切换至全屏",
+      "dispatcher": "fullscreen",
+      "default_arg": "1"
+    },
+    {
+      "id": "restore_window",
+      "name": "还原/退出全屏",
+      "category": "window",
+      "description": "还原最大化窗口或切换窗口浮动状态",
+      "dispatcher": "fullscreen",
+      "default_arg": "0"
+    },
+    {
+      "id": "toggle_floating",
+      "name": "切换浮动/平铺",
+      "category": "window",
+      "description": "切换当前窗口的浮动与平铺状态",
+      "dispatcher": "togglefloating",
+      "default_arg": ""
+    },
+    {
+      "id": "snap_left",
+      "name": "窗口向左吸附/平铺",
+      "category": "snap",
+      "description": "将当前窗口移至左侧分割或左工作区",
+      "dispatcher": "movewindow",
+      "default_arg": "l"
+    },
+    {
+      "id": "snap_right",
+      "name": "窗口向右吸附/平铺",
+      "category": "snap",
+      "description": "将当前窗口移至右侧分割或右工作区",
+      "dispatcher": "movewindow",
+      "default_arg": "r"
+    },
+    {
+      "id": "app_launcher",
+      "name": "应用启动器/全局搜索",
+      "category": "launcher",
+      "description": "打开系统应用菜单或聚合搜索栏",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-menu toggle root"
+    },
+    {
+      "id": "file_manager",
+      "name": "文件管理器",
+      "category": "apps",
+      "description": "快速打开系统文件浏览器",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-file-manager"
+    },
+    {
+      "id": "lock_screen",
+      "name": "锁定屏幕",
+      "category": "system",
+      "description": "立即锁定当前桌面会话",
+      "dispatcher": "exec",
+      "default_arg": "loginctl lock-session"
+    },
+    {
+      "id": "screenshot_region",
+      "name": "区域截图",
+      "category": "tools",
+      "description": "交互式框选屏幕区域并截图保存",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-capture-screenshot region"
+    },
+    {
+      "id": "screenshot_fullscreen",
+      "name": "全屏截图",
+      "category": "tools",
+      "description": "截取当前屏幕的完整画面",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-capture-screenshot output"
+    },
+    {
+      "id": "clipboard_history",
+      "name": "剪贴板历史",
+      "category": "tools",
+      "description": "唤出剪贴板历史记录浮层",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-shell shell toggle omarchy.clipboard"
+    },
+    {
+      "id": "emoji_picker",
+      "name": "Emoji 选择器",
+      "category": "tools",
+      "description": "快速选择并输入表情符号",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-shell shell toggle omarchy.emojis"
+    },
+    {
+      "id": "task_view",
+      "name": "任务视图 / 概览",
+      "category": "navigation",
+      "description": "打开多工作区与窗口概览界面",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-menu keybindings"
+    },
+    {
+      "id": "workspace_next",
+      "name": "下一工作区",
+      "category": "navigation",
+      "description": "切换到右侧/下一个工作区",
+      "dispatcher": "workspace",
+      "default_arg": "m+1"
+    },
+    {
+      "id": "workspace_prev",
+      "name": "上一工作区",
+      "category": "navigation",
+      "description": "切换到左侧/上一个工作区",
+      "dispatcher": "workspace",
+      "default_arg": "m-1"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "id": "mac",
+  "name": "macOS 习惯模式",
+  "description": "还原 macOS 常用操作快捷键（Super+Q 关闭、Super+空格启动器、Super+Shift+4 区域截图等）",
+  "version": "1.0.0",
+  "bindings": [
+    {
+      "action": "close_window",
+      "mod": "SUPER",
+      "key": "Q"
+    },
+    {
+      "action": "app_launcher",
+      "mod": "SUPER",
+      "key": "space"
+    },
+    {
+      "action": "lock_screen",
+      "mod": "SUPER CTRL",
+      "key": "Q"
+    },
+    {
+      "action": "maximize_window",
+      "mod": "SUPER CTRL",
+      "key": "F"
+    },
+    {
+      "action": "screenshot_region",
+      "mod": "SUPER SHIFT",
+      "key": "4"
+    },
+    {
+      "action": "screenshot_fullscreen",
+      "mod": "SUPER SHIFT",
+      "key": "3"
+    },
+    {
+      "action": "task_view",
+      "mod": "SUPER",
+      "key": "Up"
+    },
+    {
+      "action": "workspace_prev",
+      "mod": "SUPER CTRL",
+      "key": "Left"
+    },
+    {
+      "action": "workspace_next",
+      "mod": "SUPER CTRL",
+      "key": "Right"
+    }
+  ]
+}

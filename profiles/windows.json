@@ -1,0 +1,63 @@
+{
+  "id": "windows",
+  "name": "Windows 11 习惯模式",
+  "description": "还原 Windows 常用快捷键习惯（Alt+F4 关闭、Super+方向键吸附、Super+E 文件管理器等）",
+  "version": "1.0.0",
+  "bindings": [
+    {
+      "action": "close_window",
+      "mod": "ALT",
+      "key": "F4"
+    },
+    {
+      "action": "snap_left",
+      "mod": "SUPER",
+      "key": "Left"
+    },
+    {
+      "action": "snap_right",
+      "mod": "SUPER",
+      "key": "Right"
+    },
+    {
+      "action": "maximize_window",
+      "mod": "SUPER",
+      "key": "Up"
+    },
+    {
+      "action": "restore_window",
+      "mod": "SUPER",
+      "key": "Down"
+    },
+    {
+      "action": "file_manager",
+      "mod": "SUPER",
+      "key": "E"
+    },
+    {
+      "action": "lock_screen",
+      "mod": "SUPER",
+      "key": "L"
+    },
+    {
+      "action": "task_view",
+      "mod": "SUPER",
+      "key": "Tab"
+    },
+    {
+      "action": "clipboard_history",
+      "mod": "SUPER",
+      "key": "V"
+    },
+    {
+      "action": "screenshot_region",
+      "mod": "SUPER SHIFT",
+      "key": "S"
+    },
+    {
+      "action": "emoji_picker",
+      "mod": "SUPER",
+      "key": "period"
+    }
+  ]
+}

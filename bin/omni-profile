@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""
+OmniPal Command-Line Interface (omni-profile)
+Direct controller for OmniPal runtime engine.
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+# Add project root to sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from engine.engine import OmniPalEngine, run_daemon
+
+def cmd_status(engine: OmniPalEngine, args):
+    state = engine.get_state()
+    if args.json:
+        print(json.dumps(state, indent=2, ensure_ascii=False))
+    else:
+        print("OmniPal 状态信息:")
+        print(f"  当前模式: {state.get('name', state.get('mode'))} ({state.get('mode')})")
+        print(f"  生效快捷键数: {state.get('active_bindings_count', 0)}")
+        print(f"  引擎状态: {state.get('status', 'idle')}")
+        if "updated_at" in state:
+            print(f"  更新时间: {state.get('updated_at')}")
+
+def cmd_switch(engine: OmniPalEngine, args):
+    mode = args.mode.lower().strip()
+    try:
+        success = engine.switch_mode(mode)
+        if success:
+            state = engine.get_state()
+            print(f"✅ 已切换至: {state.get('name')} ({mode})")
+        else:
+            print(f"❌ 切换至 {mode} 失败", file=sys.stderr)
+            sys.exit(1)
+    except Exception as e:
+        print(f"❌ 错误: {e}", file=sys.stderr)
+        sys.exit(1)
+
+def cmd_cycle(engine: OmniPalEngine, args):
+    try:
+        next_mode = engine.cycle_mode()
+        state = engine.get_state()
+        print(f"🔄 已轮转至: {state.get('name')} ({next_mode})")
+    except Exception as e:
+        print(f"❌ 轮转失败: {e}", file=sys.stderr)
+        sys.exit(1)
+
+def cmd_restore(engine: OmniPalEngine, args):
+    try:
+        success = engine.restore()
+        if success:
+            print("✅ 已恢复系统原始快捷键绑定（零残留）")
+        else:
+            print("❌ 恢复原始绑定时发生错误", file=sys.stderr)
+            sys.exit(1)
+    except Exception as e:
+        print(f"❌ 恢复失败: {e}", file=sys.stderr)
+        sys.exit(1)
+
+def cmd_cheatsheet(engine: OmniPalEngine, args):
+    sheet = engine.cheatsheet(args.mode)
+    state = engine.get_state()
+    mode_name = args.mode or state.get("mode", "omarchy")
+    if args.json:
+        print(json.dumps(sheet, indent=2, ensure_ascii=False))
+        return
+
+    print(f"=== OmniPal 快捷键速查表 [{mode_name}] ===")
+    if not sheet:
+        print("  （原生模式下使用系统默认快捷键，无覆盖）")
+        return
+
+    col1_w = max(len(item["key"]) for item in sheet) + 2
+    col2_w = max(len(item["name"]) for item in sheet) + 4
+
+    print(f"{'快捷键'.ljust(col1_w)}{'功能名称'.ljust(col2_w)}{'功能描述'}")
+    print("-" * 65)
+    for item in sheet:
+        key_str = item["key"].ljust(col1_w)
+        name_str = item["name"].ljust(col2_w)
+        desc_str = item["description"]
+        print(f"{key_str}{name_str}{desc_str}")
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="omni-profile",
+        description="OmniPal 运行时内存热切换控制工具"
+    )
+    subparsers = parser.add_subparsers(dest="command", help="子命令")
+
+    # status
+    p_status = subparsers.add_parser("status", help="查看当前模式与状态")
+    p_status.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_status.set_defaults(func=cmd_status)
+
+    # switch
+    p_switch = subparsers.add_parser("switch", help="切换至指定快捷键模式")
+    p_switch.add_argument("mode", choices=["windows", "mac", "omarchy"], help="目标模式")
+    p_switch.set_defaults(func=cmd_switch)
+
+    # cycle
+    p_cycle = subparsers.add_parser("cycle", help="在可用模式间轮转切换")
+    p_cycle.set_defaults(func=cmd_cycle)
+
+    # restore
+    p_restore = subparsers.add_parser("restore", help="撤销所有覆盖，恢复系统原始快捷键")
+    p_restore.set_defaults(func=cmd_restore)
+
+    # cheatsheet
+    p_cheat = subparsers.add_parser("cheatsheet", help="查看当前模式快捷键速查表")
+    p_cheat.add_argument("mode", nargs="?", default=None, choices=["windows", "mac", "omarchy"], help="指定模式（默认当前）")
+    p_cheat.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_cheat.set_defaults(func=cmd_cheatsheet)
+
+    # daemon
+    p_daemon = subparsers.add_parser("daemon", help="前台运行守护进程（带自动退出恢复）")
+    p_daemon.set_defaults(func=lambda engine, args: run_daemon())
+
+    args = parser.parse_args()
+    if not args.command:
+        parser.print_help()
+        sys.exit(0)
+
+    engine = OmniPalEngine(PROJECT_ROOT)
+    args.func(engine, args)
+
+if __name__ == "__main__":
+    main()
