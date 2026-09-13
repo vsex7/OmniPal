@@ -19,7 +19,7 @@ command -v hyprctl >/dev/null 2>&1 || { echo "❌ 缺少依赖: hyprctl (Hyprlan
 
 # 2. 预先校验一致性
 echo "🔍 运行 Profile 与 Schema 一致性校验..."
-python3 "${PROJECT_ROOT}/scripts/check-consistency.py"
+python3 "${PROJECT_ROOT}/scripts/check_consistency.py"
 
 # 3. 创建 CLI 符号链接
 mkdir -p "${HOME}/.local/bin"
@@ -44,7 +44,7 @@ mkdir -p "${SYSTEMD_USER_DIR}"
 cat > "${SERVICE_FILE}" <<EOF
 [Unit]
 Description=OmniPal Runtime Hot-Switching Daemon
-Documentation=https://github.com/abyss/OmniPal
+Documentation=https://github.com/vsex7/OmniPal
 PartOf=graphical-session.target
 
 [Service]

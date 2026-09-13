@@ -105,10 +105,51 @@ def cmd_benchmark(engine: OmniPalEngine, args):
     avg = round((res.get('switch_windows_ms', 0) + res.get('switch_mac_ms', 0)) / 2, 2)
     print(f"\n🚀 平均内存热切换延迟: {avg} ms（严守 < 5ms 规范指标）")
 
+def cmd_doctor(engine: OmniPalEngine, args):
+    diag = engine.doctor()
+    if args.json:
+        print(json.dumps(diag, indent=2, ensure_ascii=False))
+        if not diag["healthy"]:
+            sys.exit(1)
+        return
+
+    print("🩺 OmniPal 系统健康诊断与一致性报告:")
+    print(f"  • 版本: {diag['version']}")
+    print(f"  • 状态: {'✅ 健康' if diag['healthy'] else '❌ 存在异常'}")
+
+    daemon_info = diag.get("daemon", {})
+    if daemon_info.get("running"):
+        print(f"  • 守护进程 (Daemon): 运行中 (PID {daemon_info.get('pid')})")
+    else:
+        print("  • 守护进程 (Daemon): 未运行 (无活动常驻进程)")
+
+    sock_info = diag.get("socket2", {})
+    if sock_info.get("connected"):
+        print(f"  • Hyprland Socket2: 已连通 ({sock_info.get('path')})")
+    else:
+        print(f"  • Hyprland Socket2: ❌ 未连通 ({sock_info.get('path') or '未找到'})")
+
+    state = diag.get("state", {})
+    print(f"  • 当前模式: {state.get('name', '未知')} ({state.get('mode', '未知')})")
+
+    ov = diag.get("overlay", {})
+    print(f"  • 内存热绑定生效: {ov.get('verified_in_hyprland')}/{ov.get('count')} 项匹配")
+
+    print(f"  • Schema 与 Profile 一致性: {'✅ 100% 校验通过' if diag.get('consistency') else '❌ 校验失败'}")
+
+    issues = diag.get("issues", [])
+    if issues:
+        print("\n⚠️ 诊断发现的问题:")
+        for iss in issues:
+            print(f"    - {iss}")
+        sys.exit(1)
+    else:
+        print("\n🎉 系统运行良好，无冲突与异常。")
+
 def main():
     parser = argparse.ArgumentParser(
         prog="omni-profile",
-        description="OmniPal 运行时内存热切换控制工具"
+        description="OmniPal 运行时内存热切换控制工具 (v1.0.0)"
     )
     subparsers = parser.add_subparsers(dest="command", help="子命令")
 
@@ -145,6 +186,11 @@ def main():
     p_bench = subparsers.add_parser("benchmark", help="执行性能基准测试与耗时统计")
     p_bench.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_bench.set_defaults(func=cmd_benchmark)
+
+    # doctor
+    p_doc = subparsers.add_parser("doctor", help="执行系统状态与按键一致性健康诊断")
+    p_doc.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_doc.set_defaults(func=cmd_doctor)
 
     # daemon
     p_daemon = subparsers.add_parser("daemon", help="前台运行守护进程（带自动退出恢复）")

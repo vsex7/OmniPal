@@ -106,5 +106,46 @@ class TestOmniPal(unittest.TestCase):
         self.assertIn("restore_ms", metrics)
         self.assertIn("state_write_ms", metrics)
 
+    def test_doctor_diagnostics(self):
+        """Validates doctor diagnostic engine reports structured health metrics."""
+        diag = self.engine.doctor()
+        self.assertIn("healthy", diag)
+        self.assertIn("version", diag)
+        self.assertIn("daemon", diag)
+        self.assertIn("socket2", diag)
+        self.assertIn("state", diag)
+        self.assertIn("overlay", diag)
+        self.assertIn("consistency", diag)
+        self.assertTrue(diag["consistency"])
+
+    def test_idempotent_switch_and_restore(self):
+        """Ensures that repeated switch and restore calls remain idempotent and safe."""
+        for _ in range(3):
+            self.assertTrue(self.engine.switch_mode("windows"))
+            state = self.engine.get_state()
+            self.assertEqual(state["mode"], "windows")
+            self.assertEqual(state["active_bindings_count"], 13)
+
+        for _ in range(2):
+            self.assertTrue(self.engine.restore())
+            state = self.engine.get_state()
+            self.assertEqual(state["mode"], "omarchy")
+            self.assertEqual(state["active_bindings_count"], 0)
+
+    def test_rollback_on_eval_failure(self):
+        """Verifies that engine rolls back to clean state when Hyprland eval fails."""
+        original_eval = self.engine._eval_lua
+        try:
+            # Force eval to return False to simulate Hyprland error
+            self.engine._eval_lua = lambda code: False
+            success = self.engine.switch_mode("windows")
+            self.assertFalse(success)
+            state = self.engine.get_state()
+            # Must roll back to baseline omarchy mode
+            self.assertEqual(state["mode"], "omarchy")
+            self.assertEqual(state["active_bindings_count"], 0)
+        finally:
+            self.engine._eval_lua = original_eval
+
 if __name__ == "__main__":
     unittest.main()

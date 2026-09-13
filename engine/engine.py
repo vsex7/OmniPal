@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 OmniPal Core Runtime Engine
-Version: 0.4.0 (Architecture Fixed)
+Version: 1.0.0 (Production Release)
 
 Strictly adheres to AGENTS.md rules:
 1. Pure in-memory overlay via Omarchy Hyprland Lua engine (`hyprctl eval`)
 2. Zero file writes to ~/.config/hypr/ or system configs
-3. Safe signal handling: automatic restore on SIGTERM/SIGINT
+3. Safe signal handling: automatic restore on SIGTERM/SIGINT/SIGHUP
 4. State broadcast via /run/user/$UID/omnipal/state.json (tmpfs)
+5. Instant rollback on injection failure
 """
 
 import atexit
@@ -21,12 +22,13 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 RUN_DIR = Path(f"/run/user/{os.getuid()}/omnipal")
 STATE_FILE = RUN_DIR / "state.json"
 OVERLAY_FILE = RUN_DIR / "active_overlay.json"
 SNAP_FILE = RUN_DIR / "snap.json"
+PID_FILE = RUN_DIR / "daemon.pid"
 
 LUA_DISPATCHERS = {
     "close_window": "hl.dsp.window.close()",
@@ -52,6 +54,23 @@ def format_combo(mod: str, key: str) -> str:
     parts.append(norm_key)
     return " + ".join(parts)
 
+def find_socket2_path() -> Optional[Path]:
+    """Dynamically resolves Hyprland socket2 path without assuming fixed instance signature."""
+    xdg_runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    his = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+    if his:
+        sock = xdg_runtime / "hypr" / his / ".socket2.sock"
+        if sock.exists():
+            return sock
+
+    hypr_dir = xdg_runtime / "hypr"
+    if hypr_dir.is_dir():
+        sockets = list(hypr_dir.glob("*/.socket2.sock"))
+        if sockets:
+            sockets.sort(key=lambda s: s.stat().st_mtime, reverse=True)
+            return sockets[0]
+    return None
+
 class OmniPalEngine:
     def __init__(self, root_dir: Optional[Path] = None):
         self.root_dir = root_dir or Path(__file__).resolve().parent.parent
@@ -59,6 +78,7 @@ class OmniPalEngine:
         self.profiles_dir = self.root_dir / "profiles"
         self.actions_catalog: Dict[str, Dict[str, Any]] = {}
         self.profiles: Dict[str, Dict[str, Any]] = {}
+        self._last_summon_proc = None
         self._load_catalog()
         self._ensure_run_dir()
 
@@ -86,44 +106,62 @@ class OmniPalEngine:
                     print(f"Warning: Failed to load profile {p_file.name}: {e}", file=sys.stderr)
 
     def _eval_lua(self, lua_code: str) -> bool:
+        """Executes Lua expressions in Omarchy Hyprland compositor with strict error checking."""
         if not lua_code.strip():
             return True
-        res = subprocess.run(
-            ["hyprctl", "eval", lua_code],
-            capture_output=True,
-            text=True,
-            check=False
-        )
-        return res.returncode == 0 and "error" not in res.stdout.lower()
+        try:
+            res = subprocess.run(
+                ["hyprctl", "eval", lua_code],
+                capture_output=True,
+                text=True,
+                check=False
+            )
+            if res.returncode != 0:
+                print(f"Hyprland eval failed (exit {res.returncode}): {res.stdout.strip()}", file=sys.stderr)
+                return False
+            out = res.stdout.strip()
+            if out.startswith("error:") or "runtime error:" in out.lower():
+                print(f"Hyprland eval error: {out}", file=sys.stderr)
+                return False
+            return True
+        except Exception as e:
+            print(f"Hyprland eval exception: {e}", file=sys.stderr)
+            return False
 
     def get_state(self) -> Dict[str, Any]:
+        default_state = {
+            "version": "1.0.0",
+            "mode": "omarchy",
+            "name": "Omarchy 原生模式",
+            "active_bindings_count": 0,
+            "status": "idle"
+        }
         if not STATE_FILE.exists():
-            return {
-                "mode": "omarchy",
-                "name": "Omarchy 原生模式",
-                "active_bindings_count": 0,
-                "status": "idle"
-            }
+            return default_state
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
-            return {
-                "mode": "omarchy",
-                "name": "Omarchy 原生模式",
-                "active_bindings_count": 0,
-                "status": "idle"
-            }
+            return default_state
 
     def _write_state(self, mode: str, count: int):
         self._ensure_run_dir()
         profile_name = self.profiles.get(mode, {}).get("name", mode)
+        daemon_pid = None
+        if PID_FILE.exists():
+            try:
+                daemon_pid = int(PID_FILE.read_text().strip())
+            except Exception:
+                pass
+
         state_data = {
+            "version": "1.0.0",
             "mode": mode,
             "name": profile_name,
             "active_bindings_count": count,
             "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "pid": os.getpid(),
+            "daemon_pid": daemon_pid,
             "status": "active" if mode != "omarchy" else "native"
         }
         tmp_file = STATE_FILE.with_suffix(".tmp")
@@ -180,7 +218,7 @@ class OmniPalEngine:
         return success
 
     def switch_mode(self, target_mode: str) -> bool:
-        """Atomically switches the in-memory keybindings to target_mode."""
+        """Atomically switches the in-memory keybindings to target_mode with rollback on error."""
         target_mode = target_mode.lower().strip()
         if target_mode not in self.profiles:
             valid_modes = ", ".join(self.profiles.keys())
@@ -222,14 +260,15 @@ class OmniPalEngine:
                 "name": name
             })
 
-        # 3. Execute batch in single eval call (< 2ms)
-        t0 = time.perf_counter()
+        # 3. Execute batch in single eval call (< 5ms)
         success = self._eval_lua("; ".join(lua_ops))
-        elapsed_ms = (time.perf_counter() - t0) * 1000
 
         if success:
             self._write_active_overlay(new_overlay_records)
             self._write_state(target_mode, len(new_overlay_records))
+        else:
+            print("Warning: Failed to apply overlay in Hyprland, rolling back to baseline...", file=sys.stderr)
+            self.restore()
 
         return success
 
@@ -284,7 +323,7 @@ class OmniPalEngine:
         except Exception:
             pass
 
-        # 2. Also summon via omarchy-shell asynchronously in case daemon is not yet watching
+        # 2. Summon via omarchy-shell asynchronously
         try:
             self._last_summon_proc = subprocess.Popen(
                 ["omarchy-shell", "shell", "summon", "omni.snap-feedback", json.dumps({"zone": zone})],
@@ -341,14 +380,84 @@ class OmniPalEngine:
 
         return results
 
+    def doctor(self) -> Dict[str, Any]:
+        """Runs comprehensive diagnostics on daemon, sockets, live binds, and state consistency."""
+        report: Dict[str, Any] = {
+            "healthy": True,
+            "version": "1.0.0",
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "daemon": {"running": False, "pid": None},
+            "socket2": {"connected": False, "path": None},
+            "state": self.get_state(),
+            "overlay": {"count": 0, "verified_in_hyprland": 0, "missing": []},
+            "consistency": False,
+            "issues": []
+        }
+
+        # 1. Check daemon PID
+        if PID_FILE.exists():
+            try:
+                pid = int(PID_FILE.read_text().strip())
+                os.kill(pid, 0)
+                report["daemon"] = {"running": True, "pid": pid}
+            except (ProcessLookupError, ValueError):
+                report["issues"].append("Daemon PID file exists but process is not running (stale pidfile)")
+            except PermissionError:
+                report["daemon"] = {"running": True, "pid": pid}
+
+        # 2. Check Socket2
+        sock_path = find_socket2_path()
+        if sock_path and sock_path.exists():
+            report["socket2"]["path"] = str(sock_path)
+            try:
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                s.settimeout(1.0)
+                s.connect(str(sock_path))
+                s.close()
+                report["socket2"]["connected"] = True
+            except Exception as e:
+                report["issues"].append(f"Socket2 exists at {sock_path} but cannot connect: {e}")
+        else:
+            report["issues"].append("Hyprland socket2 could not be located")
+
+        # 3. Verify Live Hyprland Binds
+        overlay = self._get_active_overlay()
+        report["overlay"]["count"] = len(overlay)
+        if overlay:
+            try:
+                res = subprocess.run(["hyprctl", "binds", "-j"], capture_output=True, text=True, check=True)
+                live_binds = json.loads(res.stdout)
+                live_descriptions = {b.get("description") for b in live_binds if b.get("description")}
+
+                verified = 0
+                for item in overlay:
+                    if item.get("name") in live_descriptions:
+                        verified += 1
+                    else:
+                        report["overlay"]["missing"].append(item.get("combo"))
+                report["overlay"]["verified_in_hyprland"] = verified
+
+                if report["overlay"]["missing"]:
+                    report["issues"].append(f"Mismatch: {len(report['overlay']['missing'])} binds declared in overlay are absent from compositor")
+            except Exception as e:
+                report["issues"].append(f"Failed to query hyprctl binds: {e}")
+
+        # 4. Consistency check
+        from scripts.check_consistency import check_consistency
+        report["consistency"] = check_consistency(self.root_dir)
+        if not report["consistency"]:
+            report["issues"].append("Schema or profile consistency validation failed")
+
+        if report["issues"]:
+            report["healthy"] = False
+
+        return report
+
 def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
     """Watches Hyprland socket2 for config reload events to automatically re-apply active profile."""
-    xdg_runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
-    his = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
-    socket_path = Path(xdg_runtime) / "hypr" / his / ".socket2.sock"
-
     while not stop_event.is_set():
-        if not socket_path.exists():
+        socket_path = find_socket2_path()
+        if not socket_path or not socket_path.exists():
             time.sleep(2)
             continue
         try:
@@ -366,6 +475,7 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                         line, buffer = buffer.split("\n", 1)
                         line = line.strip()
                         if line == "configreloaded>>":
+                            time.sleep(0.1)  # Debounce settle time
                             curr_mode = engine.get_state().get("mode", "omarchy")
                             if curr_mode != "omarchy":
                                 print(f"🔄 Hyprland config reload detected. Re-applying {curr_mode} overlay...", flush=True)
@@ -381,23 +491,43 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
 def run_daemon():
     """Runs OmniPal Engine as a foreground daemon with socket2 listener and signal traps."""
     engine = OmniPalEngine()
-    print("🚀 OmniPal Engine daemon started. Watching for signals & Hyprland events...", flush=True)
+    engine._ensure_run_dir()
+
+    # Record PID
+    try:
+        PID_FILE.write_text(str(os.getpid()))
+    except Exception:
+        pass
+
+    print(f"🚀 OmniPal Engine daemon started (PID: {os.getpid()}). Watching for signals & Hyprland events...", flush=True)
 
     stop_event = threading.Event()
     worker = threading.Thread(target=_watch_hyprland_socket2, args=(engine, stop_event), daemon=True)
     worker.start()
 
+    restored = False
+    def cleanup():
+        nonlocal restored
+        if not restored:
+            restored = True
+            stop_event.set()
+            try:
+                if PID_FILE.exists():
+                    PID_FILE.unlink()
+            except Exception:
+                pass
+            engine.restore()
+
     def sig_handler(signum, frame):
         print(f"\n🛑 Received signal {signum}. Restoring Hyprland keybindings...", flush=True)
-        stop_event.set()
-        engine.restore()
+        cleanup()
         print("✅ Restored successfully. Exiting cleanly.", flush=True)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, sig_handler)
     signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGHUP, sig_handler)
-    atexit.register(engine.restore)
+    atexit.register(cleanup)
 
     try:
         while not stop_event.is_set():
