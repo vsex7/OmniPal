@@ -50,7 +50,7 @@ echo "✅ Gate 3 通过！"
 # Gate 4: Cleanliness & Hardcoded Path Check
 echo -e "\n[Gate 4/4] 静态合规性与无本机路径检查..."
 set +e
-HARDCODED_ABYSS="$(git -C "${PROJECT_ROOT}" grep -rn "cd /home/abyss" || true)"
+HARDCODED_ABYSS="$(git -C "${PROJECT_ROOT}" grep -rn "cd /home/""abyss" -- ':(exclude)scripts/release-check.sh' || true)"
 set -e
 if [ -n "${HARDCODED_ABYSS}" ]; then
     echo "❌ 发现硬编码用户路径: ${HARDCODED_ABYSS}"
