@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "omni.snap-feedback",
+  "name": "OmniPal Snap Feedback",
+  "version": "0.4.0",
+  "author": "OmniPal",
+  "license": "MIT",
+  "description": "窗口分屏/吸附动效反馈 HUD。在分屏或最大化时展示平滑的高亮过渡指示，提供类似 Windows 11 的视觉反馈。",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "SnapFeedback.qml"
+  }
+}

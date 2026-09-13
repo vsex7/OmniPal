@@ -32,7 +32,18 @@ if [ -L "${BIN_TARGET}" ] || [ -f "${BIN_TARGET}" ]; then
     echo "🗑️ 已移除 CLI: ${BIN_TARGET}"
 fi
 
-# 4. 清理内存运行时临时目录
+# 4. 移除 Quickshell 插件软链接
+OMARCHY_PLUGINS_DIR="${HOME}/.config/omarchy/plugins"
+if [ -d "${OMARCHY_PLUGINS_DIR}" ]; then
+    for p_link in "${OMARCHY_PLUGINS_DIR}"/omni.*; do
+        if [ -L "${p_link}" ] || [ -d "${p_link}" ]; then
+            rm -rf "${p_link}"
+            echo "🗑️ 已移除插件软链接: $(basename "${p_link}")"
+        fi
+    done
+fi
+
+# 5. 清理内存运行时临时目录
 if [ -d "${RUN_DIR}" ]; then
     rm -rf "${RUN_DIR}"
     echo "🧹 已清理运行目录: ${RUN_DIR}"

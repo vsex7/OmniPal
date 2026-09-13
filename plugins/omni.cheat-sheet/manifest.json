@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "omni.cheat-sheet",
+  "name": "OmniPal Cheat Sheet",
+  "version": "0.4.0",
+  "author": "OmniPal",
+  "license": "MIT",
+  "description": "当前模式的快捷键 HUD 悬浮窗。数据全部来自 omni-profile 与 Engine 状态广播，QML 内不保存任何键位副本。",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "CheatSheet.qml"
+  }
+}

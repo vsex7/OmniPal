@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "omni.mode-indicator",
+  "name": "OmniPal 模式指示器",
+  "version": "0.4.0",
+  "author": "OmniPal",
+  "description": "显示当前肌肉记忆快捷键模式，支持点击循环切换",
+  "kinds": [
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OmniPal 模式指示器",
+    "description": "显示并切换 Windows / macOS / Omarchy 快捷键模式",
+    "category": "Compositor",
+    "allowMultiple": false
+  }
+}

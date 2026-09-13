@@ -27,7 +27,19 @@ ln -sf "${PROJECT_ROOT}/bin/omni-profile" "${BIN_TARGET}"
 chmod +x "${PROJECT_ROOT}/bin/omni-profile"
 echo "✅ CLI 链接已创建: ${BIN_TARGET}"
 
-# 4. 创建可选的 systemd 用户守护进程（用于在会话退出时自动触发 restore）
+# 4. 安装 Quickshell 插件（符号链接至 ~/.config/omarchy/plugins/）
+OMARCHY_PLUGINS_DIR="${HOME}/.config/omarchy/plugins"
+mkdir -p "${OMARCHY_PLUGINS_DIR}"
+echo "🧩 部署 OmniPal Quickshell 插件..."
+for p_path in "${PROJECT_ROOT}/plugins"/omni.*; do
+    if [ -d "${p_path}" ]; then
+        p_name="$(basename "${p_path}")"
+        ln -sfn "${p_path}" "${OMARCHY_PLUGINS_DIR}/${p_name}"
+        echo "  ✅ 已挂载插件: ${p_name} -> ${OMARCHY_PLUGINS_DIR}/${p_name}"
+    fi
+done
+
+# 5. 创建可选的 systemd 用户守护进程（用于在会话退出时自动触发 restore）
 mkdir -p "${SYSTEMD_USER_DIR}"
 cat > "${SERVICE_FILE}" <<EOF
 [Unit]

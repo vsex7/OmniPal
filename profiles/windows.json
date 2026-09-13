@@ -58,6 +58,16 @@
       "action": "emoji_picker",
       "mod": "SUPER",
       "key": "period"
+    },
+    {
+      "action": "omni_settings",
+      "mod": "SUPER",
+      "key": "I"
+    },
+    {
+      "action": "cheat_sheet",
+      "mod": "SUPER",
+      "key": "slash"
     }
   ]
 }

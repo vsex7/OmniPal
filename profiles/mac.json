@@ -48,6 +48,21 @@
       "action": "workspace_next",
       "mod": "SUPER CTRL",
       "key": "Right"
+    },
+    {
+      "action": "toggle_dock",
+      "mod": "SUPER ALT",
+      "key": "D"
+    },
+    {
+      "action": "omni_settings",
+      "mod": "SUPER",
+      "key": "comma"
+    },
+    {
+      "action": "cheat_sheet",
+      "mod": "SUPER",
+      "key": "slash"
     }
   ]
 }

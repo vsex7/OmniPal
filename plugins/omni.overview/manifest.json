@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "omni.overview",
+  "name": "OmniPal Overview",
+  "version": "0.4.0",
+  "author": "OmniPal",
+  "license": "MIT",
+  "description": "多任务视图与窗口概览。纯元数据驱动（基于 hyprctl clients），零截图开销，支持窗口快速切换与搜索过滤。",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Overview.qml"
+  }
+}

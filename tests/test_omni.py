@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
 OmniPal Automated Unit Tests
-Tests schema consistency, state management, and profile parsing.
+Tests schema consistency, state management, profile parsing, and plugin compliance.
 """
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -19,31 +20,67 @@ class TestOmniPal(unittest.TestCase):
         self.engine = OmniPalEngine(PROJECT_ROOT)
 
     def test_schema_and_profile_consistency(self):
-        """Validates that all profiles strictly adhere to schema/actions.json"""
+        """Validates that all profiles and plugins strictly adhere to specs."""
         self.assertTrue(check_consistency(PROJECT_ROOT))
 
     def test_format_combo(self):
-        """Verifies modifier string formatting into standard Hyprland combos"""
+        """Verifies modifier string formatting into standard Hyprland combos."""
         self.assertEqual(format_combo("ALT", "F4"), "ALT + F4")
         self.assertEqual(format_combo("SUPER", "Left"), "SUPER + LEFT")
         self.assertEqual(format_combo("SUPER SHIFT", "s"), "SUPER + SHIFT + S")
         self.assertEqual(format_combo("SUPER CTRL", "q"), "SUPER + CTRL + Q")
+        self.assertEqual(format_combo("SUPER ALT", "d"), "SUPER + ALT + D")
 
     def test_profiles_loaded(self):
-        """Ensures all default profiles are registered"""
+        """Ensures all default profiles are registered."""
         self.assertIn("omarchy", self.engine.profiles)
         self.assertIn("windows", self.engine.profiles)
         self.assertIn("mac", self.engine.profiles)
 
     def test_cheatsheet_generation(self):
-        """Checks cheatsheet data extraction from single source of truth"""
+        """Checks cheatsheet data extraction from single source of truth."""
         win_sheet = self.engine.cheatsheet("windows")
         self.assertGreater(len(win_sheet), 0)
         self.assertTrue(any("F4" in item["key"] for item in win_sheet))
+        self.assertTrue(any("I" in item["key"] for item in win_sheet))
 
         mac_sheet = self.engine.cheatsheet("mac")
         self.assertGreater(len(mac_sheet), 0)
         self.assertTrue(any("Q" in item["key"] for item in mac_sheet))
+        self.assertTrue(any("D" in item["key"] for item in mac_sheet))
+
+    def test_all_six_plugins_exist(self):
+        """Validates that all 6 required Quickshell plugins exist with entry points."""
+        expected_plugins = [
+            "omni.mode-indicator",
+            "omni.cheat-sheet",
+            "omni.settings",
+            "omni.snap-feedback",
+            "omni.overview",
+            "omni.mac-dock"
+        ]
+        plugins_dir = PROJECT_ROOT / "plugins"
+        for p_name in expected_plugins:
+            p_path = plugins_dir / p_name
+            self.assertTrue(p_path.exists(), f"Missing plugin directory: {p_name}")
+            manifest = p_path / "manifest.json"
+            self.assertTrue(manifest.exists(), f"Missing manifest.json for: {p_name}")
+            with open(manifest, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertEqual(data.get("schemaVersion"), 1)
+            self.assertEqual(data.get("id"), p_name)
+            for ep_type, ep_file in data.get("entryPoints", {}).items():
+                self.assertTrue((p_path / ep_file).exists(), f"Entry point {ep_file} not found in {p_name}")
+
+    def test_hard_stop_compliance(self):
+        """Ensures that engine runtime state files are strictly confined to tmpfs (/run/user/)."""
+        from engine.engine import STATE_FILE, OVERLAY_FILE, RUN_DIR
+        self.assertTrue(str(RUN_DIR).startswith("/run/user/"))
+        self.assertTrue(str(STATE_FILE).startswith("/run/user/"))
+        self.assertTrue(str(OVERLAY_FILE).startswith("/run/user/"))
+        # Ensure no configuration directories are referenced as write targets
+        self.assertNotIn(".config/hypr", str(STATE_FILE))
+        self.assertNotIn("shell.json", str(STATE_FILE))
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "omni.mac-dock",
+  "name": "OmniPal Mac Dock",
+  "version": "0.4.0",
+  "author": "OmniPal",
+  "license": "MIT",
+  "description": "macOS 风格的底部悬浮应用 Dock 栏。动态展示运行中的应用实例与常用启动快捷项，支持一键切换聚焦与启动。",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "MacDock.qml"
+  }
+}

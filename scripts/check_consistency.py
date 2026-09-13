@@ -71,10 +71,53 @@ def check_consistency(project_root: Path) -> bool:
                 all_passed = False
             seen_keys.add(key_combo)
 
+    # Validate Quickshell plugins
+    plugins_dir = project_root / "plugins"
+    if plugins_dir.exists():
+        plugin_dirs = [p for p in plugins_dir.iterdir() if p.is_dir()]
+        print(f"\n🧩 Validating {len(plugin_dirs)} Quickshell plugins in {plugins_dir.name}...")
+        for p_dir in sorted(plugin_dirs):
+            manifest_file = p_dir / "manifest.json"
+            if not manifest_file.exists():
+                print(f"  ❌ [{p_dir.name}] Missing manifest.json", file=sys.stderr)
+                all_passed = False
+                continue
+
+            try:
+                with open(manifest_file, "r", encoding="utf-8") as f:
+                    m = json.load(f)
+            except Exception as e:
+                print(f"  ❌ [{p_dir.name}] Invalid manifest.json JSON: {e}", file=sys.stderr)
+                all_passed = False
+                continue
+
+            if m.get("schemaVersion") != 1:
+                print(f"  ❌ [{p_dir.name}] schemaVersion must be 1, got {m.get('schemaVersion')}", file=sys.stderr)
+                all_passed = False
+
+            required_fields = ["id", "name", "version", "kinds", "entryPoints"]
+            for rf in required_fields:
+                if rf not in m:
+                    print(f"  ❌ [{p_dir.name}] Missing required manifest field: '{rf}'", file=sys.stderr)
+                    all_passed = False
+
+            entry_points = m.get("entryPoints", {})
+            if not isinstance(entry_points, dict) or not entry_points:
+                print(f"  ❌ [{p_dir.name}] entryPoints must be a non-empty object", file=sys.stderr)
+                all_passed = False
+            else:
+                for ep_kind, ep_rel in entry_points.items():
+                    target_qml = p_dir / ep_rel
+                    if not target_qml.exists():
+                        print(f"  ❌ [{p_dir.name}] Entry point '{ep_kind}': file not found: {ep_rel}", file=sys.stderr)
+                        all_passed = False
+                    else:
+                        print(f"  ✅ [{p_dir.name}] ({m.get('id')}) -> {ep_kind}: {ep_rel}")
+
     if all_passed:
-        print("🎉 All consistency checks passed cleanly!")
+        print("\n🎉 All consistency and plugin validation checks passed cleanly!")
     else:
-        print("💥 Consistency check failed.", file=sys.stderr)
+        print("\n💥 Consistency check failed.", file=sys.stderr)
     return all_passed
 
 if __name__ == "__main__":

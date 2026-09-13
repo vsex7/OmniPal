@@ -113,7 +113,7 @@
       "category": "navigation",
       "description": "打开多工作区与窗口概览界面",
       "dispatcher": "exec",
-      "default_arg": "omarchy-menu keybindings"
+      "default_arg": "omarchy-shell shell toggle omni.overview"
     },
     {
       "id": "workspace_next",
@@ -130,6 +130,30 @@
       "description": "切换到左侧/上一个工作区",
       "dispatcher": "workspace",
       "default_arg": "m-1"
+    },
+    {
+      "id": "cheat_sheet",
+      "name": "快捷键速查表",
+      "category": "tools",
+      "description": "呼出当前快捷键模式速查表 HUD",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-shell shell toggle omni.cheat-sheet"
+    },
+    {
+      "id": "toggle_dock",
+      "name": "切换底部 Dock",
+      "category": "navigation",
+      "description": "呼出或隐藏 macOS 风格底部应用 Dock",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-shell shell toggle omni.mac-dock"
+    },
+    {
+      "id": "omni_settings",
+      "name": "OmniPal 控制中心",
+      "category": "tools",
+      "description": "呼出 OmniPal 设置与模式控制面板",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-shell shell toggle omni.settings"
     }
   ]
 }
