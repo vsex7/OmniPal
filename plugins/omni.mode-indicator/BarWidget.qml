@@ -112,7 +112,7 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: root.engineRunning
-      ? (root.modeIcons[root.currentMode] || "⊡") + " " + (root.modeLabels[root.currentMode] || root.currentMode.toUpperCase())
+      ? (root.modeIcons[root.currentMode] || "◇") + " " + (root.modeLabels[root.currentMode] || (root.currentMode.length > 3 ? root.currentMode.substring(0, 3).toUpperCase() : root.currentMode.toUpperCase()))
       : "⊘ OFF"
     fontFamily: Style.font.family
     horizontalMargin: 8

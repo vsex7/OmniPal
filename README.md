@@ -1,7 +1,7 @@
 # OmniPal
 
 > **肌肉记忆无缝漫游，零配置污染的跨系统快捷键适配框架**  
-> 专为 **Omarchy / Hyprland** 深度定制 · 正式版本 **v1.0.0**
+> 专为 **Omarchy / Hyprland** 深度定制 · 正式版本 **v1.1.0**
 
 OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯的用户，在 Omarchy (Arch Linux + Hyprland + Quickshell) 上提供瞬时、无感、零污染的肌肉记忆还原方案。
 
@@ -11,20 +11,24 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
 
 - **纯内存热加载（Zero Config Pollution）**：
   - 基于 Omarchy Hyprland Lua 引擎（`hyprctl eval`）进行底层按键绑定与解绑。
-  - 极速切换延迟 **< 2ms**，无屏幕闪烁，无需 reload 配置。
+  - 极速切换延迟 **< 5ms**，无屏幕闪烁，无需 reload 配置。
   - **绝不写入任何文件** 至 `~/.config/hypr/`，退出或还原时 100% 恢复基线状态（Hard Stop H-1/H-8 保证）。
-- **三大习惯模式**：
+- **三大内置习惯模式 + 自定义配置支持**：
   - **Windows 11 习惯模式 (`windows`)**：Alt+F4 关闭窗口、Win+方向键智能吸附、Win+E 文件管理器、Win+Tab 任务视图、Win+V 剪贴板、Win+I 设置中心等。
   - **macOS 习惯模式 (`mac`)**：Super+Q 退出程序、Super+空格启动器、Super+Shift+3/4 截图、Super+Up 调度中心、Super+Opt+D 呼出 Dock、Super+, 偏好设置等。
   - **Omarchy 原生模式 (`omarchy`)**：零拦截、零覆盖，纯粹的 Hyprland 原生平铺体验。
+  - **用户自定义与覆盖模式**：支持 `~/.config/omnipal/profiles/*.json`，可任意添加专属模式（如 KDE Plasma、Vim 风格）或按 `id` 覆盖内置预设，支持自动无缝轮转。
+- **丰富窗口吸附布局（Rich Snap Layouts）**：
+  - 提供 `left`、`right`、`up`、`down`、`center`（60%x70% 居中展示）、`third-left` / `third-right`（1/3 屏幕分屏）、`two-thirds-left` / `two-thirds-right`（2/3 屏幕分屏）。
+  - 基于 Compositor 级 Lua 几何运算，自动扣除 Omarchy 顶栏 `reserved` 区域，执行延迟低于 1ms。
 - **内存级状态广播（tmpfs）**：
   - 运行时状态存储于 `/run/user/$UID/omnipal/state.json`。
   - Quickshell 插件通过 `Quickshell.Io.FileView` 响应更新，无需后台密集轮询。
-- **全套 Quickshell 专属插件（Phase 1 & 2）**：
-  1. `omni.mode-indicator`：Omarchy Top Bar 状态栏指示器，展示当前模式，左键循环切换、右键速查表、中键设置。
+- **全套 Quickshell 专属插件**：
+  1. `omni.mode-indicator`：Omarchy Top Bar 状态栏指示器，展示当前模式，左键循环切换、右键速查表、中键设置，支持自定义模式优雅缩写与图标降级。
   2. `omni.cheat-sheet`：快捷键 HUD 速查层，根据单一事实源动态渲染当前有效键位，支持按分类检索与按键说明。
   3. `omni.settings`：图形化控制中心，可视化切换模式，预览按键覆盖并提供快捷动作。
-  4. `omni.snap-feedback`：分屏动效反馈 HUD，触发窗口吸附时在屏幕边缘渲染类 Windows 11 的高亮平滑过渡。
+  4. `omni.snap-feedback`：分屏动效反馈 HUD，触发窗口吸附时在屏幕边缘渲染平滑高亮过渡动画。
   5. `omni.overview`：多任务视图与窗口概览。纯元数据驱动（基于 `hyprctl clients -j`），**严守 Hard Stop H-2，零像素截图**，支持键盘选择与实时搜索。
   6. `omni.mac-dock`：macOS 风格底部浮动 Dock 栏，实时展示运行中应用图标、运行指示圆点与平滑悬停动效。
 
@@ -49,6 +53,9 @@ bash scripts/install.sh
 ### 2. 命令行使用
 
 ```bash
+# 列出所有可用模式（内置与用户自定义）
+omni-profile list
+
 # 查看当前生效模式与按键数量
 omni-profile status
 
@@ -58,11 +65,14 @@ omni-profile switch windows
 # 切换至 macOS 习惯模式
 omni-profile switch mac
 
-# 轮转切换模式 (Omarchy -> Windows -> macOS -> Omarchy)
+# 轮转切换模式 (Omarchy -> Windows -> macOS -> 用户自定义 -> Omarchy)
 omni-profile cycle
 
 # 查看当前模式的快捷键速查表（终端高亮输出）
 omni-profile cheatsheet
+
+# 窗口智能吸附（支持 left/right/up/down/center/third-left/third-right/two-thirds-left/two-thirds-right）
+omni-profile snap center
 
 # 执行系统健康诊断与一致性校验
 omni-profile doctor

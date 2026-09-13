@@ -52,6 +52,46 @@
       "default_arg": "omni-profile snap right"
     },
     {
+      "id": "snap_center",
+      "name": "窗口居中展示",
+      "category": "snap",
+      "description": "将当前窗口切换为居中浮动布局",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap center"
+    },
+    {
+      "id": "snap_third_left",
+      "name": "窗口吸附左侧 1/3",
+      "category": "snap",
+      "description": "将当前窗口吸附并缩放至屏幕左侧三分之一区域",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap third-left"
+    },
+    {
+      "id": "snap_third_right",
+      "name": "窗口吸附右侧 1/3",
+      "category": "snap",
+      "description": "将当前窗口吸附并缩放至屏幕右侧三分之一区域",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap third-right"
+    },
+    {
+      "id": "snap_two_thirds_left",
+      "name": "窗口吸附左侧 2/3",
+      "category": "snap",
+      "description": "将当前窗口吸附并缩放至屏幕左侧三分之二区域",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap two-thirds-left"
+    },
+    {
+      "id": "snap_two_thirds_right",
+      "name": "窗口吸附右侧 2/3",
+      "category": "snap",
+      "description": "将当前窗口吸附并缩放至屏幕右侧三分之二区域",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap two-thirds-right"
+    },
+    {
       "id": "app_launcher",
       "name": "应用启动器/全局搜索",
       "category": "launcher",

@@ -102,6 +102,12 @@ Item {
           case "top-right":
           case "bottom-right":
             return panel.width / 2 + gap / 2
+          case "third-right":
+            return panel.width * (2.0 / 3.0) + gap / 2
+          case "two-thirds-right":
+            return panel.width / 3.0 + gap / 2
+          case "center":
+            return panel.width * 0.2
           default:
             return gap
         }
@@ -112,6 +118,8 @@ Item {
           case "bottom-left":
           case "bottom-right":
             return panel.height / 2 + gap / 2
+          case "center":
+            return panel.height * 0.15
           default:
             return gap
         }
@@ -122,6 +130,14 @@ Item {
           case "top":
           case "maximize":
             return panel.width - gap * 2
+          case "third-left":
+          case "third-right":
+            return panel.width / 3.0 - gap * 1.5
+          case "two-thirds-left":
+          case "two-thirds-right":
+            return panel.width * (2.0 / 3.0) - gap * 1.5
+          case "center":
+            return panel.width * 0.6
           default:
             return panel.width / 2 - gap * 1.5
         }
@@ -134,6 +150,8 @@ Item {
           case "bottom-left":
           case "bottom-right":
             return panel.height / 2 - gap * 1.5
+          case "center":
+            return panel.height * 0.7
           default:
             return panel.height - gap * 2
         }

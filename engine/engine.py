@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 OmniPal Core Runtime Engine
-Version: 1.0.0 (Production Release)
+Version: 1.1.0 (Production Release with User Profiles & Extended Snap)
 
 Strictly adheres to AGENTS.md rules:
 1. Pure in-memory overlay via Omarchy Hyprland Lua engine (`hyprctl eval`)
@@ -9,6 +9,7 @@ Strictly adheres to AGENTS.md rules:
 3. Safe signal handling: automatic restore on SIGTERM/SIGINT/SIGHUP
 4. State broadcast via /run/user/$UID/omnipal/state.json (tmpfs)
 5. Instant rollback on injection failure
+6. User custom profiles support via ~/.config/omnipal/profiles/
 """
 
 import atexit
@@ -54,6 +55,16 @@ def format_combo(mod: str, key: str) -> str:
     parts.append(norm_key)
     return " + ".join(parts)
 
+def resolve_user_profiles_dir() -> Path:
+    """Resolves the user custom profiles directory, honoring OMNIPAL_USER_PROFILES_DIR and XDG."""
+    env_dir = os.environ.get("OMNIPAL_USER_PROFILES_DIR")
+    if env_dir:
+        return Path(env_dir)
+    xdg_config = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config:
+        return Path(xdg_config) / "omnipal" / "profiles"
+    return Path.home() / ".config" / "omnipal" / "profiles"
+
 def find_socket2_path() -> Optional[Path]:
     """Dynamically resolves Hyprland socket2 path without assuming fixed instance signature."""
     xdg_runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -72,8 +83,9 @@ def find_socket2_path() -> Optional[Path]:
     return None
 
 class OmniPalEngine:
-    def __init__(self, root_dir: Optional[Path] = None):
+    def __init__(self, root_dir: Optional[Path] = None, user_profiles_dir: Optional[Path] = None):
         self.root_dir = root_dir or Path(__file__).resolve().parent.parent
+        self.user_profiles_dir = Path(user_profiles_dir) if user_profiles_dir else resolve_user_profiles_dir()
         self.schema_file = self.root_dir / "schema" / "actions.json"
         self.profiles_dir = self.root_dir / "profiles"
         self.actions_catalog: Dict[str, Dict[str, Any]] = {}
@@ -96,14 +108,51 @@ class OmniPalEngine:
             data = json.load(f)
             self.actions_catalog = {a["id"]: a for a in data.get("actions", [])}
 
+        self.profiles = {}
+
+        # 1. Project built-in profiles (sorted)
         if self.profiles_dir.exists():
-            for p_file in self.profiles_dir.glob("*.json"):
+            for p_file in sorted(self.profiles_dir.glob("*.json")):
                 try:
                     with open(p_file, "r", encoding="utf-8") as pf:
                         p_data = json.load(pf)
+                        p_data["_source"] = "project"
+                        p_data["_file"] = str(p_file)
+                        p_data["_override"] = False
                         self.profiles[p_data["id"]] = p_data
                 except Exception as e:
                     print(f"Warning: Failed to load profile {p_file.name}: {e}", file=sys.stderr)
+
+        # 2. User custom profiles (merge and override by id)
+        if self.user_profiles_dir.exists():
+            for p_file in sorted(self.user_profiles_dir.glob("*.json")):
+                try:
+                    with open(p_file, "r", encoding="utf-8") as pf:
+                        p_data = json.load(pf)
+                        p_id = p_data.get("id")
+                        if not p_id:
+                            continue
+                        p_data["_source"] = "user"
+                        p_data["_file"] = str(p_file)
+                        p_data["_override"] = p_id in self.profiles
+                        self.profiles[p_id] = p_data
+                except Exception as e:
+                    print(f"Warning: Failed to load user profile {p_file.name}: {e}", file=sys.stderr)
+
+    def list_profiles(self) -> List[Dict[str, Any]]:
+        """Returns structured metadata for all available profiles (built-in and user)."""
+        res = []
+        for p_id, p_data in self.profiles.items():
+            res.append({
+                "id": p_id,
+                "name": p_data.get("name", p_id),
+                "description": p_data.get("description", ""),
+                "bindings_count": len(p_data.get("bindings", [])),
+                "source": p_data.get("_source", "project"),
+                "override": p_data.get("_override", False),
+                "file": p_data.get("_file", "")
+            })
+        return res
 
     def _eval_lua(self, lua_code: str) -> bool:
         """Executes Lua expressions in Omarchy Hyprland compositor with strict error checking."""
@@ -130,7 +179,7 @@ class OmniPalEngine:
 
     def get_state(self) -> Dict[str, Any]:
         default_state = {
-            "version": "1.0.0",
+            "version": "1.1.0",
             "mode": "omarchy",
             "name": "Omarchy 原生模式",
             "active_bindings_count": 0,
@@ -155,7 +204,7 @@ class OmniPalEngine:
                 pass
 
         state_data = {
-            "version": "1.0.0",
+            "version": "1.1.0",
             "mode": mode,
             "name": profile_name,
             "active_bindings_count": count,
@@ -273,14 +322,19 @@ class OmniPalEngine:
         return success
 
     def cycle_mode(self) -> str:
-        """Cycles to the next mode in sequence: omarchy -> windows -> mac -> omarchy."""
-        modes = ["omarchy", "windows", "mac"]
+        """Cycles to the next mode in sequence: omarchy -> windows -> mac -> user profiles -> omarchy."""
+        curated = ["omarchy", "windows", "mac"]
+        user_modes = sorted([m for m in self.profiles if m not in curated])
+        modes = [m for m in curated if m in self.profiles] + user_modes
+        if not modes:
+            modes = ["omarchy"]
+
         current = self.get_state().get("mode", "omarchy")
         try:
             idx = modes.index(current)
             next_mode = modes[(idx + 1) % len(modes)]
         except ValueError:
-            next_mode = "windows"
+            next_mode = "windows" if "windows" in self.profiles else modes[0]
 
         self.switch_mode(next_mode)
         return next_mode
@@ -344,6 +398,41 @@ class OmniPalEngine:
             lua_dsp = "hl.dsp.window.fullscreen({ mode = 'maximized' })"
         elif zone in ("restore", "down"):
             lua_dsp = "hl.dsp.window.fullscreen({ mode = 'maximized' })"
+        elif zone == "center":
+            lua_dsp = """local w = hl.get_active_window()
+if w then
+  local m = hl.get_active_monitor()
+  if not w.floating then hl.dsp.window.float({ action = 'toggle' }) end
+  local rx = m.x + (m.reserved and m.reserved.left or 0)
+  local ry = m.y + (m.reserved and m.reserved.top or 0)
+  local rw = m.width - (m.reserved and (m.reserved.left + m.reserved.right) or 0)
+  local rh = m.height - (m.reserved and (m.reserved.top + m.reserved.bottom) or 0)
+  local tw = math.floor(rw * 0.6)
+  local th = math.floor(rh * 0.7)
+  local tx = rx + math.floor((rw - tw) / 2)
+  local ty = ry + math.floor((rh - th) / 2)
+  hl.dsp.window.resize({ x = tw, y = th })
+  hl.dsp.window.move({ x = tx, y = ty })
+end"""
+        elif zone in ("third-left", "third-right", "two-thirds-left", "two-thirds-right"):
+            ratio_val = "0.667" if "two-thirds" in zone else "0.333"
+            align_right = "true" if "-right" in zone else "false"
+            lua_dsp = f"""local w = hl.get_active_window()
+if w then
+  local m = hl.get_active_monitor()
+  if not w.floating then hl.dsp.window.float({{ action = 'toggle' }}) end
+  local rx = m.x + (m.reserved and m.reserved.left or 0)
+  local ry = m.y + (m.reserved and m.reserved.top or 0)
+  local rw = m.width - (m.reserved and (m.reserved.left + m.reserved.right) or 0)
+  local rh = m.height - (m.reserved and (m.reserved.top + m.reserved.bottom) or 0)
+  local tw = math.floor(rw * {ratio_val})
+  local th = rh
+  local is_right = {align_right}
+  local tx = is_right and (rx + rw - tw) or rx
+  local ty = ry
+  hl.dsp.window.resize({{ x = tw, y = th }})
+  hl.dsp.window.move({{ x = tx, y = ty }})
+end"""
 
         if lua_dsp:
             return self._eval_lua(lua_dsp)
@@ -384,7 +473,7 @@ class OmniPalEngine:
         """Runs comprehensive diagnostics on daemon, sockets, live binds, and state consistency."""
         report: Dict[str, Any] = {
             "healthy": True,
-            "version": "1.0.0",
+            "version": "1.1.0",
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "daemon": {"running": False, "pid": None},
             "socket2": {"connected": False, "path": None},
@@ -444,7 +533,7 @@ class OmniPalEngine:
 
         # 4. Consistency check
         from scripts.check_consistency import check_consistency
-        report["consistency"] = check_consistency(self.root_dir)
+        report["consistency"] = check_consistency(self.root_dir, user_profiles_dir=self.user_profiles_dir)
         if not report["consistency"]:
             report["issues"].append("Schema or profile consistency validation failed")
 

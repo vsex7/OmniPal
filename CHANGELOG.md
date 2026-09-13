@@ -4,6 +4,28 @@
 
 ---
 
+## [v1.1.0] - 2026-09-14
+
+### 👤 用户自定义与模式覆盖 (User Custom Profiles)
+- **用户配置目录支持**：支持从 `~/.config/omnipal/profiles/*.json`（支持 `OMNIPAL_USER_PROFILES_DIR` 环境变量覆盖）自动加载自定义配置模式。
+- **配置覆盖与新模式扩展**：同名 `id` 自动优先覆盖系统内置预设，新 `id` 自动注册为可切换与可循环模式。
+- **配置文件编目查看**：新增 `omni-profile list [--json]` 命令，输出所有模式元数据、来源渠道（project/user）及覆盖标记。
+- **动态模式轮转**：`cycle_mode` 与顶栏指示器动态感知所有用户模式，顺序为 `omarchy -> windows -> mac -> [自定义模式按字典序] -> omarchy`。
+- **顶栏指示器适配**：`omni.mode-indicator` 针对未知自定义模式提供优雅图标降级（`◇`）与前缀大写缩写。
+- **校验工具增强**：`scripts/check_consistency.py` 与自动化单元测试全面覆盖用户配置文件的合法性验证与错误阻断。
+
+### 🪟 丰富窗口吸附布局 (Rich Snap Layouts)
+- **五种全新窗口吸附动作**：
+  - `snap_center` (`omni-profile snap center`)：窗口居中展示（屏幕有效区域 60% 宽、70% 高度浮动展示）。
+  - `snap_third_left` (`omni-profile snap third-left`)：窗口吸附并缩放至左侧 1/3。
+  - `snap_third_right` (`omni-profile snap third-right`)：窗口吸附并缩放至右侧 1/3。
+  - `snap_two_thirds_left` (`omni-profile snap two-thirds-left`)：窗口吸附并缩放至左侧 2/3。
+  - `snap_two_thirds_right` (`omni-profile snap two-thirds-right`)：窗口吸附并缩放至右侧 2/3。
+- **纯 Compositor 级 Lua 几何计算**：基于 Hyprland Lua 原生 `hl.dsp.window.resize` 与 `hl.dsp.window.move`，实时感知显示器 `reserved` 保留区域（避开 Omarchy 26px 顶栏），零延迟执行，坚守 Hard Stop H-1（零文件写入）。
+- **HUD 吸附视觉反馈同步**：`omni.snap-feedback` 新增对居中、1/3 与 2/3 区域的高亮动效几何演算，平滑半透明过渡。
+
+---
+
 ## [v1.0.0] - 2026-09-14
 
 ### 🚀 核心架构与运行时 (Phase 0)

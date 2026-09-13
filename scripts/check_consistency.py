@@ -6,10 +6,48 @@ and ensures no duplicate keybindings exist within any profile.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
+from typing import Optional
 
-def check_consistency(project_root: Path) -> bool:
+def _validate_profile_file(p_file: Path, valid_action_ids: dict) -> bool:
+    try:
+        with open(p_file, "r", encoding="utf-8") as f:
+            p_data = json.load(f)
+    except Exception as e:
+        print(f"❌ Error in {p_file.name}: JSON parse failure: {e}", file=sys.stderr)
+        return False
+
+    p_id = p_data.get("id")
+    p_name = p_data.get("name", p_id)
+    bindings = p_data.get("bindings", [])
+    print(f"🔍 Validating profile: {p_name} ({p_file.name}) [{len(bindings)} bindings]...")
+
+    seen_keys = set()
+    file_passed = True
+    for i, b in enumerate(bindings):
+        action = b.get("action")
+        mod = b.get("mod", "").strip()
+        key = b.get("key", "").strip()
+
+        if not action or action not in valid_action_ids:
+            print(f"  ❌ [{p_file.name} #binding {i+1}] Invalid action ID: '{action}'", file=sys.stderr)
+            file_passed = False
+
+        if not key:
+            print(f"  ❌ [{p_file.name} #binding {i+1}] Missing key definition", file=sys.stderr)
+            file_passed = False
+
+        key_combo = f"{mod.upper()} + {key.upper()}" if mod else key.upper()
+        if key_combo in seen_keys:
+            print(f"  ❌ [{p_file.name} #binding {i+1}] Duplicate key combination: '{key_combo}'", file=sys.stderr)
+            file_passed = False
+        seen_keys.add(key_combo)
+
+    return file_passed
+
+def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = None) -> bool:
     schema_file = project_root / "schema" / "actions.json"
     profiles_dir = project_root / "profiles"
 
@@ -38,38 +76,20 @@ def check_consistency(project_root: Path) -> bool:
         return False
 
     for p_file in profile_files:
-        try:
-            with open(p_file, "r", encoding="utf-8") as f:
-                p_data = json.load(f)
-        except Exception as e:
-            print(f"❌ Error in {p_file.name}: JSON parse failure: {e}", file=sys.stderr)
+        if not _validate_profile_file(p_file, valid_action_ids):
             all_passed = False
-            continue
 
-        p_id = p_data.get("id")
-        p_name = p_data.get("name", p_id)
-        bindings = p_data.get("bindings", [])
-        print(f"🔍 Validating profile: {p_name} ({p_file.name}) [{len(bindings)} bindings]...")
+    target_user_dir = user_profiles_dir
+    if target_user_dir is None and "OMNIPAL_USER_PROFILES_DIR" in os.environ:
+        target_user_dir = Path(os.environ["OMNIPAL_USER_PROFILES_DIR"])
 
-        seen_keys = set()
-        for i, b in enumerate(bindings):
-            action = b.get("action")
-            mod = b.get("mod", "").strip()
-            key = b.get("key", "").strip()
-
-            if not action or action not in valid_action_ids:
-                print(f"  ❌ [{p_file.name} #binding {i+1}] Invalid action ID: '{action}'", file=sys.stderr)
-                all_passed = False
-
-            if not key:
-                print(f"  ❌ [{p_file.name} #binding {i+1}] Missing key definition", file=sys.stderr)
-                all_passed = False
-
-            key_combo = f"{mod.upper()} + {key.upper()}" if mod else key.upper()
-            if key_combo in seen_keys:
-                print(f"  ❌ [{p_file.name} #binding {i+1}] Duplicate key combination: '{key_combo}'", file=sys.stderr)
-                all_passed = False
-            seen_keys.add(key_combo)
+    if target_user_dir and target_user_dir.exists() and target_user_dir.is_dir():
+        user_profile_files = list(target_user_dir.glob("*.json"))
+        if user_profile_files:
+            print(f"\n👤 Validating {len(user_profile_files)} user custom profiles in {target_user_dir}...")
+            for u_file in user_profile_files:
+                if not _validate_profile_file(u_file, valid_action_ids):
+                    all_passed = False
 
     # Validate Quickshell plugins
     plugins_dir = project_root / "plugins"

@@ -146,10 +146,25 @@ def cmd_doctor(engine: OmniPalEngine, args):
     else:
         print("\n🎉 系统运行良好，无冲突与异常。")
 
+def cmd_list(engine: OmniPalEngine, args):
+    profiles = engine.list_profiles()
+    if args.json:
+        print(json.dumps(profiles, ensure_ascii=False))
+        return
+    print(f"{'模式 ID'.ljust(12)}{'模式名称'.ljust(22)}{'快捷键数'.ljust(10)}{'来源'.ljust(12)}{'说明'}")
+    print("-" * 75)
+    for p in profiles:
+        src = "用户目录" if p["source"] == "user" else "项目内置"
+        if p.get("override"):
+            src += " (覆盖)"
+        print(f"{p['id'].ljust(12)}{p['name'].ljust(22)}{str(p['bindings_count']).ljust(10)}{src.ljust(12)}{p['description']}")
+
 def main():
+    engine = OmniPalEngine(PROJECT_ROOT)
+
     parser = argparse.ArgumentParser(
         prog="omni-profile",
-        description="OmniPal 运行时内存热切换控制工具 (v1.0.0)"
+        description="OmniPal 运行时内存热切换控制工具 (v1.1.0)"
     )
     subparsers = parser.add_subparsers(dest="command", help="子命令")
 
@@ -158,9 +173,14 @@ def main():
     p_status.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_status.set_defaults(func=cmd_status)
 
+    # list
+    p_list = subparsers.add_parser("list", help="列出所有可用快捷键模式（内置与用户自定义）")
+    p_list.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_list.set_defaults(func=cmd_list)
+
     # switch
     p_switch = subparsers.add_parser("switch", help="切换至指定快捷键模式")
-    p_switch.add_argument("mode", choices=["windows", "mac", "omarchy"], help="目标模式")
+    p_switch.add_argument("mode", help="目标模式 (如 windows, mac, omarchy 或用户自定义模式)")
     p_switch.set_defaults(func=cmd_switch)
 
     # cycle
@@ -173,13 +193,17 @@ def main():
 
     # cheatsheet
     p_cheat = subparsers.add_parser("cheatsheet", help="查看当前模式快捷键速查表")
-    p_cheat.add_argument("mode", nargs="?", default=None, choices=["windows", "mac", "omarchy"], help="指定模式（默认当前）")
+    p_cheat.add_argument("mode", nargs="?", default=None, help="指定模式（默认当前）")
     p_cheat.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_cheat.set_defaults(func=cmd_cheatsheet)
 
     # snap
     p_snap = subparsers.add_parser("snap", help="触发窗口吸附分屏并广播视觉反馈")
-    p_snap.add_argument("zone", choices=["left", "right", "maximize", "restore", "top", "down", "top-left", "top-right", "bottom-left", "bottom-right"], help="目标吸附区域")
+    p_snap.add_argument("zone", choices=[
+        "left", "right", "maximize", "restore", "top", "down",
+        "top-left", "top-right", "bottom-left", "bottom-right",
+        "center", "third-left", "third-right", "two-thirds-left", "two-thirds-right"
+    ], help="目标吸附区域")
     p_snap.set_defaults(func=cmd_snap)
 
     # benchmark
@@ -194,14 +218,13 @@ def main():
 
     # daemon
     p_daemon = subparsers.add_parser("daemon", help="前台运行守护进程（带自动退出恢复）")
-    p_daemon.set_defaults(func=lambda engine, args: run_daemon())
+    p_daemon.set_defaults(func=lambda eng, args: run_daemon())
 
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
         sys.exit(0)
 
-    engine = OmniPalEngine(PROJECT_ROOT)
     args.func(engine, args)
 
 if __name__ == "__main__":
