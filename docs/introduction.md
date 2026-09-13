@@ -119,31 +119,32 @@ A：建议先 `restore`，再决定是否使用 OmniPal。冲突时优先保留�
 
 ---
 
-### 5. 安装与卸载说明（草案）
+### 5. 安装与卸载说明
 
-#### 安装（预期）
+#### 安装
 
 ```bash
-git clone <仓库地址> OmniPal
+git clone https://github.com/vsex7/OmniPal.git
 cd OmniPal
 ./scripts/install.sh
 ```
 
-安装内容包括：
-- Engine 与 CLI（`~/.local/bin/omni-profile`）
-- 可选 systemd 用户服务
-- 核心插件同步到 Omarchy 插件目录
+安装程序会自动执行：
+- 校验 JSON Schema、按键定义与所有 Quickshell 插件完整性
+- 创建 CLI 软链接至 `~/.local/bin/omni-profile`
+- 挂载全套 6 个 Quickshell 插件至 `~/.config/omarchy/plugins/`
+- 配置可选的 systemd 用户常驻单元 `omnipal.service`
 
 #### 卸载
 
 ```bash
 omni-profile restore          # 先恢复绑定
 omni-profile uninstall        # 清理自身文件
-# 或
+# 或直接运行
 ./scripts/uninstall.sh
 ```
 
-卸载后系统应回到安装前状态，无残留绑定和文件。
+卸载后系统 100% 回到初始基线状态，无残留绑定和文件。
 
 ---
 
@@ -161,7 +162,7 @@ omni-profile uninstall        # 清理自身文件
 | Super + V | 剪贴板历史 |
 | Super + Shift + S | 区域截图 |
 
-（完整列表以实际 Profile 为准，由单一事实源自动生成）
+（完整列表以实际 Profile 为准，由单一事实源 `schema/actions.json` 自动生成）
 
 ---
 
@@ -172,35 +173,23 @@ omni-profile uninstall        # 清理自身文件
 2. 所有键位数据必须来自中央 Profile，禁止硬编码。
 3. 默认路径下不得写入用户 Hyprland 配置文件。
 
-**推荐开发顺序**：
-1. 先实现可工作的内存热切换 + 自动恢复（Phase 0）
-2. 再做状态栏指示器与 HUD（Phase 1）
-3. 最后补齐 Dock、Overview 等增强界面
+**开发阶段与架构分工**：
+1. 纯内存热切换 + 自动恢复（Phase 0）
+2. 状态栏指示器、快捷键 HUD、设置面板（Phase 1）
+3. 窗口吸附视觉反馈、Overview 任务视图、Mac-Dock（Phase 2）
+4. 用户自定义 Profile 与更丰富吸附布局（v1.1）
 
 ---
 
-### 8. 文档目录建议
+### 8. 项目文档索引
 
 ```
 docs/
-├── introduction.md          # 功能介绍（本文档第1部分）
-├── features.md              # 功能清单
-├── user-guide.md            # 用户使用指南
-├── comparison.md            # 与其他项目对比
-├── install.md               # 安装与卸载
-├── keybindings.md           # 各模式快捷键说明
-├── architecture.md          # 架构说明（开发用）
-└── development.md           # 完整开发文档（主文档）
+├── introduction.md          # 项目整体功能介绍与设计规范（本文档）
+├── features.md              # 完整功能清单与交付阶段标记
+├── allm.md                  # 用户使用指南与综合参考手册
+├── BENCHMARK.md             # 微秒级热切换性能基准实测报告
+├── KNOWN_ISSUES.md          # 运行环境、依赖边界与已知限制说明
+├── ACCEPTANCE_REPORT.md     # 真机全项验收报告与清单
+└── ROADMAP_TO_V1.md         # 交付准出规范与路线图
 ```
-
----
-
-需要我继续补充以下哪部分？
-
-- 更详细的用户手册（含截图占位说明）
-- 完整的 Windows / macOS 快捷键对照表
-- 开发者 API / IPC 接口文档
-- 测试用例大纲
-- 或直接生成可复制的 Markdown 文件内容
-
-告诉我优先顺序即可。

@@ -30,15 +30,17 @@ Item {
   property string engineStatus: "native"
   property bool engineRunning: false
 
-  // 模式元数据
-  readonly property var modeItems: [
+  // 模式元数据（默认预置，开窗自动从 omni-profile list --json 动态刷新）
+  property var modeItems: [
     {
       id: "windows",
       icon: "⊞",
       name: "Windows 11 习惯模式",
       desc: "Alt+F4 关闭窗口 · Win+方向键智能吸附 · Win+E 文件管理器 · Ctrl+Shift+Esc 任务管理器",
       count: 13,
-      color: "#0078d4"
+      color: "#0078d4",
+      source: "project",
+      override: false
     },
     {
       id: "mac",
@@ -46,7 +48,9 @@ Item {
       name: "macOS 习惯模式",
       desc: "Super+Q 退出程序 · Super+Space 聚焦搜索 · Super+Shift+3/4 截图 · Super+H 最小化",
       count: 12,
-      color: "#a2aaad"
+      color: "#a2aaad",
+      source: "project",
+      override: false
     },
     {
       id: "omarchy",
@@ -54,7 +58,9 @@ Item {
       name: "Omarchy 原生模式",
       desc: "纯粹的 Hyprland 原生平铺体验 · 无任何按键拦截与覆盖 · 极简高效",
       count: 0,
-      color: "#a3be8c"
+      color: "#a3be8c",
+      source: "project",
+      override: false
     }
   ]
 
@@ -75,6 +81,7 @@ Item {
   function open(payloadJson) {
     root.opened = true
     stateFile.reload()
+    listProc.running = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -146,7 +153,46 @@ Item {
     id: switchProc
     command: ["omni-profile", "switch", "omarchy"]
     running: false
-    onExited: stateFile.reload()
+    onExited: {
+      stateFile.reload()
+      listProc.running = true
+    }
+  }
+
+  Process {
+    id: listProc
+    command: ["omni-profile", "list", "--json"]
+    running: false
+    stdout: SplitParser {
+      onRead: function(data) {
+        try {
+          var parsed = JSON.parse(data)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            var iconMap = { "windows": "⊞", "mac": "◆", "omarchy": "⊡" }
+            var colorMap = { "windows": "#0078d4", "mac": "#a2aaad", "omarchy": "#a3be8c" }
+            var customColors = ["#b48ead", "#ebcb8b", "#88c0d0", "#d08770", "#81a1c1"]
+            var items = []
+            for (var i = 0; i < parsed.length; i++) {
+              var p = parsed[i]
+              var icon = iconMap[p.id] || "◇"
+              var color = colorMap[p.id] || customColors[i % customColors.length]
+              var desc = p.description || (p.source === "user" ? "用户自定义配置模式" : "")
+              items.push({
+                id: p.id,
+                icon: icon,
+                name: p.name || p.id,
+                desc: desc,
+                count: p.bindings_count || 0,
+                color: color,
+                source: p.source || "project",
+                override: p.override || false
+              })
+            }
+            root.modeItems = items
+          }
+        } catch(e) {}
+      }
+    }
   }
 
   PanelWindow {
@@ -191,11 +237,14 @@ Item {
 
         Keys.onEscapePressed: root.dismiss()
         Keys.onPressed: function(event) {
-          if (event.key === Qt.Key_1) root.switchMode("windows")
-          else if (event.key === Qt.Key_2) root.switchMode("mac")
-          else if (event.key === Qt.Key_3) root.switchMode("omarchy")
-          else if (event.key === Qt.Key_R) root.restoreNative()
-          else if (event.key === Qt.Key_S) root.openCheatSheet()
+          var num = event.key - Qt.Key_1
+          if (num >= 0 && num < root.modeItems.length) {
+            root.switchMode(root.modeItems[num].id)
+          } else if (event.key === Qt.Key_R) {
+            root.restoreNative()
+          } else if (event.key === Qt.Key_S) {
+            root.openCheatSheet()
+          }
         }
 
         Column {
@@ -256,140 +305,169 @@ Item {
 
           // 模式卡片列表
           Text {
-            text: "选择习惯按键模式（或按键盘数字键 1 / 2 / 3）："
+            text: "选择习惯按键模式（或按键盘数字键 1 ~ " + root.modeItems.length + "）："
             font.pixelSize: Style.font.caption
             color: Util.alpha(root.foreground, 0.7)
           }
 
-          Column {
+          Flickable {
             width: parent.width
-            spacing: Style.space(10)
+            height: Math.min(modeCol.implicitHeight, Style.space(260))
+            contentWidth: width
+            contentHeight: modeCol.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
 
-            Repeater {
-              model: root.modeItems
+            Column {
+              id: modeCol
+              width: parent.width
+              spacing: Style.space(10)
 
-              delegate: Rectangle {
-                id: modeRow
-                required property var modelData
-                required property int index
+              Repeater {
+                model: root.modeItems
 
-                readonly property bool isActive: root.currentMode === modelData.id
-                width: parent.width
-                height: Style.space(76)
-                radius: Style.cornerRadius
-                color: isActive
-                  ? Util.alpha(modelData.color, 0.16)
-                  : modeCardHover.containsMouse
-                    ? Util.alpha(root.foreground, 0.08)
-                    : Util.alpha(root.foreground, 0.03)
+                delegate: Rectangle {
+                  id: modeRow
+                  required property var modelData
+                  required property int index
 
-                border.width: isActive ? 2 : 1
-                border.color: isActive ? modelData.color : Util.alpha(root.foreground, 0.12)
+                  readonly property bool isActive: root.currentMode === modelData.id
+                  width: parent.width
+                  height: Style.space(76)
+                  radius: Style.cornerRadius
+                  color: isActive
+                    ? Util.alpha(modelData.color, 0.16)
+                    : modeCardHover.containsMouse
+                      ? Util.alpha(root.foreground, 0.08)
+                      : Util.alpha(root.foreground, 0.03)
 
-                Row {
-                  anchors.fill: parent
-                  anchors.margins: Style.space(12)
-                  spacing: Style.space(14)
+                  border.width: isActive ? 2 : 1
+                  border.color: isActive ? modelData.color : Util.alpha(root.foreground, 0.12)
 
-                  // 图标徽章
-                  Rectangle {
-                    width: Style.space(48)
-                    height: Style.space(48)
-                    radius: Style.cornerRadius
-                    color: Util.alpha(modelData.color, 0.25)
-                    anchors.verticalCenter: parent.verticalCenter
+                  Row {
+                    anchors.fill: parent
+                    anchors.margins: Style.space(12)
+                    spacing: Style.space(14)
 
-                    Text {
-                      text: modelData.icon
-                      font.pixelSize: 22
-                      font.bold: true
-                      color: modelData.color
-                      anchors.centerIn: parent
-                    }
-                  }
+                    // 图标徽章
+                    Rectangle {
+                      width: Style.space(48)
+                      height: Style.space(48)
+                      radius: Style.cornerRadius
+                      color: Util.alpha(modelData.color, 0.25)
+                      anchors.verticalCenter: parent.verticalCenter
 
-                  // 文本与描述
-                  Column {
-                    width: parent.width - Style.space(170)
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: Style.space(4)
-
-                    Row {
-                      spacing: Style.space(8)
                       Text {
-                        text: (index + 1) + ". " + modelData.name
-                        font.pixelSize: Style.font.body
+                        text: modelData.icon
+                        font.pixelSize: 22
                         font.bold: true
-                        color: root.foreground
-                      }
-                      Rectangle {
-                        visible: modeRow.isActive
-                        width: activeTagText.implicitWidth + 10
-                        height: activeTagText.implicitHeight + 4
-                        radius: 3
                         color: modelData.color
-                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.centerIn: parent
+                      }
+                    }
 
+                    // 文本与描述
+                    Column {
+                      width: parent.width - Style.space(170)
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.space(4)
+
+                      Row {
+                        spacing: Style.space(8)
                         Text {
-                          id: activeTagText
-                          text: "当前生效"
-                          font.pixelSize: 10
+                          text: (index + 1) + ". " + modelData.name
+                          font.pixelSize: Style.font.body
                           font.bold: true
-                          color: "#ffffff"
-                          anchors.centerIn: parent
+                          color: root.foreground
+                        }
+                        Rectangle {
+                          visible: modeRow.isActive
+                          width: activeTagText.implicitWidth + 10
+                          height: activeTagText.implicitHeight + 4
+                          radius: 3
+                          color: modelData.color
+                          anchors.verticalCenter: parent.verticalCenter
+
+                          Text {
+                            id: activeTagText
+                            text: "当前生效"
+                            font.pixelSize: 10
+                            font.bold: true
+                            color: "#ffffff"
+                            anchors.centerIn: parent
+                          }
+                        }
+                        Rectangle {
+                          visible: modelData.source === "user"
+                          width: userBadgeText.implicitWidth + 8
+                          height: userBadgeText.implicitHeight + 4
+                          radius: 3
+                          color: Util.alpha(modelData.color, 0.2)
+                          border.width: 1
+                          border.color: modelData.color
+                          anchors.verticalCenter: parent.verticalCenter
+
+                          Text {
+                            id: userBadgeText
+                            text: modelData.override ? "用户覆盖" : "用户定制"
+                            font.pixelSize: 9
+                            font.bold: true
+                            color: modelData.color
+                            anchors.centerIn: parent
+                          }
                         }
                       }
+
+                      Text {
+                        text: modelData.desc
+                        font.pixelSize: Style.font.caption
+                        color: Util.alpha(root.foreground, 0.75)
+                        elide: Text.ElideRight
+                        width: parent.width
+                      }
                     }
 
-                    Text {
-                      text: modelData.desc
-                      font.pixelSize: Style.font.caption
-                      color: Util.alpha(root.foreground, 0.75)
-                      elide: Text.ElideRight
-                      width: parent.width
-                    }
-                  }
-
-                  // 右侧动作按钮
-                  Rectangle {
-                    width: Style.space(80)
-                    height: Style.space(32)
-                    radius: Style.cornerRadius
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: modeRow.isActive
-                      ? "transparent"
-                      : applyHover.containsMouse
-                        ? modelData.color
-                        : Util.alpha(modelData.color, 0.2)
-                    border.width: modeRow.isActive ? 0 : 1
-                    border.color: modelData.color
-
-                    Text {
-                      text: modeRow.isActive ? "已激活" : "应用"
-                      font.pixelSize: Style.font.caption
-                      font.bold: true
+                    // 右侧动作按钮
+                    Rectangle {
+                      width: Style.space(80)
+                      height: Style.space(32)
+                      radius: Style.cornerRadius
+                      anchors.verticalCenter: parent.verticalCenter
                       color: modeRow.isActive
-                        ? modelData.color
-                        : applyHover.containsMouse ? "#ffffff" : modelData.color
-                      anchors.centerIn: parent
-                    }
+                        ? "transparent"
+                        : applyHover.containsMouse
+                          ? modelData.color
+                          : Util.alpha(modelData.color, 0.2)
+                      border.width: modeRow.isActive ? 0 : 1
+                      border.color: modelData.color
 
-                    MouseArea {
-                      id: applyHover
-                      anchors.fill: parent
-                      hoverEnabled: true
-                      cursorShape: Qt.PointingHandCursor
-                      onClicked: root.switchMode(modelData.id)
+                      Text {
+                        text: modeRow.isActive ? "已激活" : "应用"
+                        font.pixelSize: Style.font.caption
+                        font.bold: true
+                        color: modeRow.isActive
+                          ? modelData.color
+                          : applyHover.containsMouse ? "#ffffff" : modelData.color
+                        anchors.centerIn: parent
+                      }
+
+                      MouseArea {
+                        id: applyHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.switchMode(modelData.id)
+                      }
                     }
                   }
-                }
 
-                MouseArea {
-                  id: modeCardHover
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: root.switchMode(modelData.id)
+                  MouseArea {
+                    id: modeCardHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.switchMode(modelData.id)
+                  }
                 }
               }
             }

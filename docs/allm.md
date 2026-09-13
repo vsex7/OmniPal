@@ -1,10 +1,9 @@
-```markdown
 # OmniPal 完整用户与参考文档
 
 **项目名称**：OmniPal  
-**文档版本**：v0.4  
-**最后更新**：2026-09-13  
-**对应开发文档**：OmniPal 完整开发文档（架构修正版 v0.4）
+**文档版本**：v1.1.0  
+**最后更新**：2026-09-14  
+**对应开发文档**：OmniPal 完整开发文档
 
 本文档合并了功能介绍、用户指南、安装说明、快捷键说明、项目对比与架构概览，方便用户与开发者一次性查阅。
 
@@ -24,12 +23,14 @@ OmniPal 是专为从 Windows 或 macOS 迁移到 Omarchy 的用户设计的肌�
 - **零污染**：默认不修改任何系统或用户配置文件，用完可完全恢复。
 - **完整界面**：保留状态栏模式指示、快捷键 HUD、设置面板等实用界面。
 - **安全可靠**：退出或崩溃时自动恢复原始快捷键，支持一键干净卸载。
+- **自定义与丰富布局**：支持自定义 Profile 目录与多样化窗口吸附布局。
 
 ### 支持的模式
 
 - **Windows 模式**：还原 Windows 11 常用快捷键（Alt+F4 关闭、Super+方向键吸附、Super+E 文件管理器等）
 - **macOS 模式**：还原 macOS 常用操作习惯（Super+Q 关闭、Super+空格启动器等）
 - **Omarchy 原生模式**：完全使用系统默认快捷键，方便对比和学习
+- **用户自定义模式**：在 `~/.config/omnipal/profiles/` 中自由扩展专属模式
 
 ---
 
@@ -42,6 +43,7 @@ OmniPal 是专为从 Windows 或 macOS 迁移到 Omarchy 的用户设计的肌�
    - 或运行命令：
      ```bash
      omni-profile status
+     omni-profile list
      ```
 
 2. **切换模式**
@@ -89,10 +91,10 @@ A：确认插件已启用，并且 Engine 正在运行。若 Engine 未启动，
 
 ## 3. 安装与卸载
 
-### 3.1 安装（预期流程）
+### 3.1 安装
 
 ```bash
-git clone <仓库地址> OmniPal
+git clone https://github.com/vsex7/OmniPal.git
 cd OmniPal
 ./scripts/install.sh
 ```
@@ -227,16 +229,16 @@ omni-profile uninstall        # 清理自身文件与服务
 - 简单设置面板
 - 优雅降级
 
-**Phase 2（体验增强）**
-- 基础窗口吸附 + 视觉反馈
-- mac-dock
-- 任务视图
+**Phase 2（体验增强 · 已交付）**
+- 基础窗口吸附 + 视觉反馈 (omni.snap-feedback)
+- mac-dock (omni.mac-dock)
+- 任务视图 (omni.overview)
 - 多显示器支持
 
-**Phase 3（可选）**
-- 自定义 Profile
-- 可选配置持久化
-- 其他进阶功能
+**v1.1（功能扩展 · 已交付）**
+- 自定义 Profile 目录支持 (~/.config/omnipal/profiles/)
+- 丰富窗口吸附布局 (居中浮动、1/3 与 2/3 分屏)
+- omni-profile list 编目查询
 
 详细功能列表请参阅 [features.md](features.md)。
 
@@ -255,13 +257,8 @@ omni-profile uninstall        # 清理自身文件与服务
 ## 9. 获取帮助
 
 - 查看当前状态：`omni-profile status`
+- 查看模式列表：`omni-profile list`
 - 恢复原始绑定：`omni-profile restore`
 - 项目问题反馈：请到代码仓库提交 Issue
-- 开发相关文档：请参阅主开发文档与 `docs/` 目录下的其他文件
+- 开发相关文档：请参阅 `docs/` 目录下的其他文件
 
----
-
-**文档结束**
-
-如需单独拆分某个章节，或补充截图说明、完整快捷键对照表、开发者 IPC 接口等内容，请继续告知。
-```

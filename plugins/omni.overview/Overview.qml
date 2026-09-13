@@ -107,6 +107,18 @@ Item {
     if (root.selectedIndex >= out.length) {
       root.selectedIndex = Math.max(0, out.length - 1)
     }
+  function resolveAppGlyph(cls) {
+    if (!cls) return "🗔"
+    var c = cls.toLowerCase()
+    if (c.indexOf("kitty") !== -1 || c.indexOf("alacritty") !== -1 || c.indexOf("term") !== -1 || c.indexOf("foot") !== -1 || c.indexOf("ghostty") !== -1) return ""
+    if (c.indexOf("chrome") !== -1 || c.indexOf("firefox") !== -1 || c.indexOf("chromium") !== -1 || c.indexOf("zen") !== -1 || c.indexOf("edge") !== -1 || c.indexOf("brave") !== -1) return "🌐"
+    if (c.indexOf("thunar") !== -1 || c.indexOf("nautilus") !== -1 || c.indexOf("dolphin") !== -1 || c.indexOf("file") !== -1) return "📁"
+    if (c.indexOf("code") !== -1 || c.indexOf("cursor") !== -1 || c.indexOf("vscodium") !== -1 || c.indexOf("sublime") !== -1 || c.indexOf("neovim") !== -1 || c.indexOf("nvim") !== -1) return ""
+    if (c.indexOf("settings") !== -1 || c.indexOf("control") !== -1 || c.indexOf("pavucontrol") !== -1) return "⚙"
+    if (c.indexOf("spotify") !== -1 || c.indexOf("music") !== -1 || c.indexOf("sound") !== -1) return "🎵"
+    if (c.indexOf("discord") !== -1 || c.indexOf("telegram") !== -1 || c.indexOf("wechat") !== -1 || c.indexOf("slack") !== -1 || c.indexOf("qq") !== -1) return "💬"
+    if (c.indexOf("image") !== -1 || c.indexOf("gimp") !== -1 || c.indexOf("photo") !== -1) return "🖼"
+    return cls.charAt(0).toUpperCase()
   }
 
   Process {
@@ -213,7 +225,7 @@ Item {
               selectByMouse: true
               activeFocusOnTab: true
 
-              // 占位符提示
+              // 搜索输入引导提示
               Text {
                 text: "搜索窗口标题或应用名称... (Esc 退出，↑↓←→ 选择，Enter 聚焦，Del 关闭)"
                 visible: searchInput.text === ""
@@ -410,7 +422,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
 
                     Text {
-                      text: (modelData.class && modelData.class.length > 0) ? modelData.class.charAt(0).toUpperCase() : "🗔"
+                      text: root.resolveAppGlyph(modelData.class)
                       font.pixelSize: 13
                       font.bold: true
                       color: Color.accent
