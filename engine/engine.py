@@ -15,8 +15,10 @@ import datetime
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -24,14 +26,11 @@ from typing import Any, Dict, List, Optional
 RUN_DIR = Path(f"/run/user/{os.getuid()}/omnipal")
 STATE_FILE = RUN_DIR / "state.json"
 OVERLAY_FILE = RUN_DIR / "active_overlay.json"
+SNAP_FILE = RUN_DIR / "snap.json"
 
 LUA_DISPATCHERS = {
     "close_window": "hl.dsp.window.close()",
-    "maximize_window": "hl.dsp.window.fullscreen({ mode = 'fullscreen' })",
-    "restore_window": "hl.dsp.window.fullscreen({ mode = 'fullscreen' })",
     "toggle_floating": "hl.dsp.window.float({ action = 'toggle' })",
-    "snap_left": "hl.dsp.window.move({ direction = 'l' })",
-    "snap_right": "hl.dsp.window.move({ direction = 'r' })",
     "workspace_next": "hl.dsp.focus({ workspace = 'e+1' })",
     "workspace_prev": "hl.dsp.focus({ workspace = 'e-1' })",
 }
@@ -267,13 +266,130 @@ class OmniPalEngine:
             })
         return sheet
 
+    def snap(self, zone: str) -> bool:
+        """Triggers visual snap feedback and dispatches the corresponding window management action."""
+        zone = zone.lower().strip()
+        self._ensure_run_dir()
+
+        # 1. Write snap.json for instantaneous QML FileView perception
+        snap_data = {
+            "zone": zone,
+            "timestamp": time.time()
+        }
+        tmp_snap = SNAP_FILE.with_suffix(".tmp")
+        try:
+            with open(tmp_snap, "w", encoding="utf-8") as f:
+                json.dump(snap_data, f, ensure_ascii=False)
+            tmp_snap.replace(SNAP_FILE)
+        except Exception:
+            pass
+
+        # 2. Also summon via omarchy-shell asynchronously in case daemon is not yet watching
+        try:
+            self._last_summon_proc = subprocess.Popen(
+                ["omarchy-shell", "shell", "summon", "omni.snap-feedback", json.dumps({"zone": zone})],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+        except Exception:
+            pass
+
+        # 3. Dispatch window movement in Hyprland Lua
+        lua_dsp = ""
+        if zone == "left":
+            lua_dsp = "hl.dsp.window.move({ direction = 'l' })"
+        elif zone == "right":
+            lua_dsp = "hl.dsp.window.move({ direction = 'r' })"
+        elif zone in ("maximize", "top"):
+            lua_dsp = "hl.dsp.window.fullscreen({ mode = 'maximized' })"
+        elif zone in ("restore", "down"):
+            lua_dsp = "hl.dsp.window.fullscreen({ mode = 'maximized' })"
+
+        if lua_dsp:
+            return self._eval_lua(lua_dsp)
+        return True
+
+    def benchmark(self) -> Dict[str, Any]:
+        """Measures microsecond latency for schema loading, profile switching, and restore."""
+        results = {}
+
+        # 1. Schema & profile parse time
+        t0 = time.perf_counter()
+        self._load_catalog()
+        results["parse_ms"] = round((time.perf_counter() - t0) * 1000, 3)
+
+        # 2. Windows profile switch latency
+        t0 = time.perf_counter()
+        self.switch_mode("windows")
+        results["switch_windows_ms"] = round((time.perf_counter() - t0) * 1000, 3)
+
+        # 3. macOS profile switch latency
+        t0 = time.perf_counter()
+        self.switch_mode("mac")
+        results["switch_mac_ms"] = round((time.perf_counter() - t0) * 1000, 3)
+
+        # 4. Restore latency
+        t0 = time.perf_counter()
+        self.restore()
+        results["restore_ms"] = round((time.perf_counter() - t0) * 1000, 3)
+
+        # 5. State write latency
+        t0 = time.perf_counter()
+        self._write_state("omarchy", 0)
+        results["state_write_ms"] = round((time.perf_counter() - t0) * 1000, 3)
+
+        return results
+
+def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
+    """Watches Hyprland socket2 for config reload events to automatically re-apply active profile."""
+    xdg_runtime = os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    his = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+    socket_path = Path(xdg_runtime) / "hypr" / his / ".socket2.sock"
+
+    while not stop_event.is_set():
+        if not socket_path.exists():
+            time.sleep(2)
+            continue
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(str(socket_path))
+            s.settimeout(2.0)
+            buffer = ""
+            while not stop_event.is_set():
+                try:
+                    data = s.recv(4096)
+                    if not data:
+                        break
+                    buffer += data.decode("utf-8", errors="ignore")
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        line = line.strip()
+                        if line == "configreloaded>>":
+                            curr_mode = engine.get_state().get("mode", "omarchy")
+                            if curr_mode != "omarchy":
+                                print(f"🔄 Hyprland config reload detected. Re-applying {curr_mode} overlay...", flush=True)
+                                engine.switch_mode(curr_mode)
+                except socket.timeout:
+                    continue
+                except Exception:
+                    break
+            s.close()
+        except Exception:
+            time.sleep(2)
+
 def run_daemon():
-    """Runs OmniPal Engine as a foreground daemon with signal traps."""
+    """Runs OmniPal Engine as a foreground daemon with socket2 listener and signal traps."""
     engine = OmniPalEngine()
-    print("🚀 OmniPal Engine daemon started. Watching for signals...", flush=True)
+    print("🚀 OmniPal Engine daemon started. Watching for signals & Hyprland events...", flush=True)
+
+    stop_event = threading.Event()
+    worker = threading.Thread(target=_watch_hyprland_socket2, args=(engine, stop_event), daemon=True)
+    worker.start()
 
     def sig_handler(signum, frame):
         print(f"\n🛑 Received signal {signum}. Restoring Hyprland keybindings...", flush=True)
+        stop_event.set()
         engine.restore()
         print("✅ Restored successfully. Exiting cleanly.", flush=True)
         sys.exit(0)
@@ -284,8 +400,8 @@ def run_daemon():
     atexit.register(engine.restore)
 
     try:
-        while True:
-            time.sleep(3600)
+        while not stop_event.is_set():
+            time.sleep(1)
     except KeyboardInterrupt:
         sig_handler(signal.SIGINT, None)
 

@@ -61,7 +61,7 @@ Item {
 
   function activateOrLaunch(item) {
     if (item.runningAddress) {
-      dispatchProc.command = ["hyprctl", "dispatch", "focuswindow", "address:" + item.runningAddress]
+      dispatchProc.command = ["hyprctl", "dispatch", "hl.dsp.focus({ window = \"address:" + item.runningAddress + "\" })"]
       dispatchProc.running = true
     } else if (item.exec) {
       if (item.exec.indexOf("omarchy-shell") === 0) {

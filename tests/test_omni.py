@@ -82,5 +82,29 @@ class TestOmniPal(unittest.TestCase):
         self.assertNotIn(".config/hypr", str(STATE_FILE))
         self.assertNotIn("shell.json", str(STATE_FILE))
 
+    def test_snap_execution(self):
+        """Validates that snap method writes to snap.json in tmpfs and dispatches correctly."""
+        from engine.engine import SNAP_FILE
+        success = self.engine.snap("left")
+        self.assertTrue(success)
+        self.assertTrue(SNAP_FILE.exists())
+        with open(SNAP_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data.get("zone"), "left")
+        if hasattr(self.engine, "_last_summon_proc") and self.engine._last_summon_proc:
+            try:
+                self.engine._last_summon_proc.wait(timeout=0.5)
+            except Exception:
+                pass
+
+    def test_benchmark_metrics(self):
+        """Verifies benchmark latency execution and reporting structure."""
+        metrics = self.engine.benchmark()
+        self.assertIn("parse_ms", metrics)
+        self.assertIn("switch_windows_ms", metrics)
+        self.assertIn("switch_mac_ms", metrics)
+        self.assertIn("restore_ms", metrics)
+        self.assertIn("state_write_ms", metrics)
+
 if __name__ == "__main__":
     unittest.main()

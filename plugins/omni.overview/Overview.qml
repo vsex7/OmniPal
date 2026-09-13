@@ -10,8 +10,8 @@ import qs.Ui
 // 架构与约束铁律（Hard Stop H-2）：
 // 1. 绝对不抓取像素截图（Zero Pixel Screenshots），完全基于 hyprctl clients -j 元数据构建。
 // 2. 毫秒级展示所有打开的窗口卡片、所属工作区、应用类别与窗口标题。
-// 3. 点击卡片或回车即执行 `hyprctl dispatch focuswindow address:...` 聚焦窗口。
-// 4. 支持实时搜索过滤窗口，支持卡片右上角快捷关闭。
+// 3. 点击卡片或回车即执行 `hyprctl dispatch hl.dsp.focus({ window = "address:..." })` 聚焦窗口。
+// 4. 支持工作区分类药丸筛选、实时搜索过滤与 Del 键快捷关闭。
 Item {
   id: root
 
@@ -26,6 +26,8 @@ Item {
   property var filteredWindows: []
   property int selectedIndex: 0
   property string filterText: ""
+  property int activeWorkspaceFilter: -1 // -1 为全部
+  property var workspaceList: []
 
   // 样式令牌（对齐 Omarchy 菜单与表面）
   property color background: Color.menu.background
@@ -39,6 +41,7 @@ Item {
   function open(payloadJson) {
     root.opened = true
     root.filterText = ""
+    root.activeWorkspaceFilter = -1
     root.selectedIndex = 0
     fetchClients()
     Qt.callLater(function() { searchInput.forceActiveFocus() })
@@ -65,13 +68,13 @@ Item {
   function activateWindow(addr) {
     if (!addr) return
     root.dismiss()
-    dispatchProc.command = ["hyprctl", "dispatch", "focuswindow", "address:" + addr]
+    dispatchProc.command = ["hyprctl", "dispatch", "hl.dsp.focus({ window = \"address:" + addr + "\" })"]
     dispatchProc.running = true
   }
 
   function closeWindow(addr) {
     if (!addr) return
-    dispatchProc.command = ["hyprctl", "dispatch", "closewindow", "address:" + addr]
+    dispatchProc.command = ["hyprctl", "dispatch", "hl.dsp.window.close({ window = \"address:" + addr + "\" })"]
     dispatchProc.running = true
     // 延迟稍许刷新列表
     refreshTimer.restart()
@@ -90,6 +93,9 @@ Item {
     for (var i = 0; i < root.rawWindows.length; i++) {
       var w = root.rawWindows[i]
       if (!w || !w.mapped) continue
+      if (root.activeWorkspaceFilter !== -1 && w.workspace && w.workspace.id !== root.activeWorkspaceFilter) {
+        continue
+      }
       var title = String(w.title || "").toLowerCase()
       var cls = String(w.class || "").toLowerCase()
       var initCls = String(w.initialClass || "").toLowerCase()
@@ -120,6 +126,17 @@ Item {
               return (a.focusHistoryID || 0) - (b.focusHistoryID || 0)
             })
             root.rawWindows = valid
+
+            var wsSet = {}
+            for (var k = 0; k < valid.length; k++) {
+              if (valid[k].workspace && valid[k].workspace.id !== undefined) {
+                wsSet[valid[k].workspace.id] = true
+              }
+            }
+            var wsArr = Object.keys(wsSet).map(function(id) { return parseInt(id, 10) })
+            wsArr.sort(function(a, b) { return a - b })
+            root.workspaceList = wsArr
+
             root.updateFiltered()
           }
         } catch (e) {}
@@ -198,7 +215,7 @@ Item {
 
               // 占位符提示
               Text {
-                text: "搜索窗口标题或应用名称... (Esc 退出，↑↓←→ 选择，Enter 切换)"
+                text: "搜索窗口标题或应用名称... (Esc 退出，↑↓←→ 选择，Enter 聚焦，Del 关闭)"
                 visible: searchInput.text === ""
                 font.pixelSize: Style.font.body
                 font.family: Style.font.family
@@ -218,6 +235,10 @@ Item {
                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                   if (root.filteredWindows.length > 0 && root.selectedIndex < root.filteredWindows.length) {
                     root.activateWindow(root.filteredWindows[root.selectedIndex].address)
+                  }
+                } else if (event.key === Qt.Key_Delete) {
+                  if (root.filteredWindows.length > 0 && root.selectedIndex < root.filteredWindows.length) {
+                    root.closeWindow(root.filteredWindows[root.selectedIndex].address)
                   }
                 } else if (event.key === Qt.Key_Left) {
                   root.selectedIndex = Math.max(0, root.selectedIndex - 1)
@@ -256,11 +277,80 @@ Item {
         }
       }
 
+      // 工作区筛选药丸栏
+      Row {
+        id: wsRow
+        anchors.top: searchBar.bottom
+        anchors.topMargin: Style.space(12)
+        anchors.horizontalCenter: parent.horizontalCenter
+        spacing: Style.space(8)
+
+        Rectangle {
+          height: Style.space(26)
+          width: allWsText.implicitWidth + Style.space(20)
+          radius: height / 2
+          color: root.activeWorkspaceFilter === -1 ? Color.accent : Util.alpha(root.foreground, 0.08)
+          border.width: 1
+          border.color: root.activeWorkspaceFilter === -1 ? Color.accent : Util.alpha(root.foreground, 0.15)
+
+          Text {
+            id: allWsText
+            text: "全部 (" + root.rawWindows.length + ")"
+            font.pixelSize: Style.font.caption
+            font.bold: root.activeWorkspaceFilter === -1
+            color: root.activeWorkspaceFilter === -1 ? "#ffffff" : root.foreground
+            anchors.centerIn: parent
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              root.activeWorkspaceFilter = -1
+              root.updateFiltered()
+            }
+          }
+        }
+
+        Repeater {
+          model: root.workspaceList
+
+          delegate: Rectangle {
+            required property int modelData
+            height: Style.space(26)
+            width: wsNumText.implicitWidth + Style.space(20)
+            radius: height / 2
+            color: root.activeWorkspaceFilter === modelData ? Color.accent : Util.alpha(root.foreground, 0.08)
+            border.width: 1
+            border.color: root.activeWorkspaceFilter === modelData ? Color.accent : Util.alpha(root.foreground, 0.15)
+
+            Text {
+              id: wsNumText
+              text: "工作区 " + modelData
+              font.pixelSize: Style.font.caption
+              font.bold: root.activeWorkspaceFilter === modelData
+              color: root.activeWorkspaceFilter === modelData ? "#ffffff" : root.foreground
+              anchors.centerIn: parent
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: {
+                root.activeWorkspaceFilter = modelData
+                root.updateFiltered()
+              }
+            }
+          }
+        }
+      }
+
       // 窗口网格卡片展示区
       Item {
-        anchors.top: searchBar.bottom
-        anchors.topMargin: Style.space(24)
-        anchors.bottom: parent.bottom
+        anchors.top: wsRow.bottom
+        anchors.topMargin: Style.space(16)
+        anchors.bottom: bottomBar.top
+        anchors.bottomMargin: Style.space(12)
         anchors.left: parent.left
         anchors.right: parent.right
 
@@ -421,6 +511,31 @@ Item {
               }
             }
           }
+        }
+      }
+
+      // 底部快捷键提示栏
+      Row {
+        id: bottomBar
+        anchors.bottom: parent.bottom
+        anchors.horizontalCenter: parent.horizontalCenter
+        height: Style.space(28)
+        spacing: Style.space(24)
+
+        Text {
+          text: "↵ 回车 / 单击: 聚焦窗口"
+          font.pixelSize: Style.font.caption
+          color: Util.alpha(root.foreground, 0.6)
+        }
+        Text {
+          text: "Del: 关闭选中窗口"
+          font.pixelSize: Style.font.caption
+          color: Util.alpha(root.foreground, 0.6)
+        }
+        Text {
+          text: "Esc: 退出概览"
+          font.pixelSize: Style.font.caption
+          color: Util.alpha(root.foreground, 0.6)
         }
       }
     }

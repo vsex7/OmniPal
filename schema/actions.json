@@ -16,16 +16,16 @@
       "name": "最大化/全屏窗口",
       "category": "window",
       "description": "将当前活动窗口最大化或切换至全屏",
-      "dispatcher": "fullscreen",
-      "default_arg": "1"
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap maximize"
     },
     {
       "id": "restore_window",
       "name": "还原/退出全屏",
       "category": "window",
       "description": "还原最大化窗口或切换窗口浮动状态",
-      "dispatcher": "fullscreen",
-      "default_arg": "0"
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap restore"
     },
     {
       "id": "toggle_floating",
@@ -40,16 +40,16 @@
       "name": "窗口向左吸附/平铺",
       "category": "snap",
       "description": "将当前窗口移至左侧分割或左工作区",
-      "dispatcher": "movewindow",
-      "default_arg": "l"
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap left"
     },
     {
       "id": "snap_right",
       "name": "窗口向右吸附/平铺",
       "category": "snap",
       "description": "将当前窗口移至右侧分割或右工作区",
-      "dispatcher": "movewindow",
-      "default_arg": "r"
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap right"
     },
     {
       "id": "app_launcher",

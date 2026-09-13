@@ -35,8 +35,23 @@ Item {
   property bool loading: false
   property string errorKind: ""
   property string errorMessage: ""
-  // 记录真正失败的命令，避免提示指向错误的步骤。
-  property string errorCommand: ""
+  property var rawRows: []
+  property string filterText: ""
+
+  function applyFilter() {
+    var query = root.filterText.trim().toLowerCase()
+    var filtered = root.rawRows
+    if (query !== "") {
+      filtered = root.rawRows.filter(function(item) {
+        var k = String(item.key || "").toLowerCase()
+        var n = String(item.name || "").toLowerCase()
+        var d = String(item.description || "").toLowerCase()
+        return k.indexOf(query) !== -1 || n.indexOf(query) !== -1 || d.indexOf(query) !== -1
+      })
+    }
+    root.groups = SheetData.groupByCategory(filtered)
+    root.bindingCount = filtered.length
+  }
 
   readonly property string pluginId: (root.manifest && root.manifest.id) || "omni.cheat-sheet"
   readonly property string statusMark: "<<<OMNI_STATUS>>>"
@@ -109,6 +124,8 @@ Item {
     var mode = typeof payload.mode === "string" ? payload.mode.trim().toLowerCase() : ""
     root.requestedMode = /^[a-z0-9][a-z0-9_-]*$/.test(mode) ? mode : ""
 
+    root.filterText = ""
+    if (searchInput) searchInput.text = ""
     root.opened = true
     root.refresh()
     root.focusContent()
@@ -230,8 +247,8 @@ Item {
       return
     }
 
-    root.groups = SheetData.groupByCategory(rows)
-    root.bindingCount = rows.length
+    root.rawRows = rows
+    root.applyFilter()
     root.errorKind = ""
     root.errorCommand = ""
     root.errorMessage = ""
@@ -391,15 +408,66 @@ Item {
           }
         }
 
-        Text {
-          textFormat: Text.PlainText
+        Row {
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          visible: root.requestedMode !== ""
-          text: "预览模式"
-          color: root.accent
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          spacing: Style.space(10)
+
+          Text {
+            textFormat: Text.PlainText
+            visible: root.requestedMode !== ""
+            text: "预览模式"
+            color: root.accent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+          }
+
+          BorderSurface {
+            id: searchBox
+            width: Style.space(160)
+            height: Style.space(26)
+            radius: height / 2
+            color: Util.alpha(root.foreground, 0.06)
+            borderSpec: root.borderSpec
+            padding: Style.space(4)
+
+            Row {
+              anchors.fill: parent
+              spacing: Style.space(6)
+
+              Text {
+                text: "🔍"
+                font.pixelSize: 10
+                color: Util.alpha(root.foreground, 0.5)
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              TextInput {
+                id: searchInput
+                width: parent.width - Style.space(24)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                color: root.foreground
+                anchors.verticalCenter: parent.verticalCenter
+                selectByMouse: true
+
+                Text {
+                  text: "搜索..."
+                  visible: searchInput.text === ""
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  color: Util.alpha(root.foreground, 0.4)
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+
+                onTextChanged: {
+                  root.filterText = text
+                  root.applyFilter()
+                }
+              }
+            }
+          }
         }
       }
 
