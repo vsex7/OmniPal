@@ -160,7 +160,7 @@ Item {
     id: panel
     visible: root.opened
     anchors { bottom: true; left: true; right: true }
-    height: Style.space(90)
+    implicitHeight: Style.space(90)
     color: "transparent"
     WlrLayershell.namespace: "omni-mac-dock"
     WlrLayershell.layer: WlrLayer.Overlay

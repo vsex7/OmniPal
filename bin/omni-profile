@@ -88,9 +88,21 @@ def cmd_cheatsheet(engine: OmniPalEngine, args):
         print(f"{key_str}{name_str}{desc_str}")
 
 def cmd_snap(engine: OmniPalEngine, args):
-    success = engine.snap(args.zone)
+    success = engine.snap(args.zone, no_hud=getattr(args, "no_hud", False))
     if not success:
         sys.exit(1)
+
+def cmd_snap_layouts(engine: OmniPalEngine, args):
+    data = {
+        "templates": engine.get_snap_layouts(),
+        "zones": engine.get_snap_zones()
+    }
+    if args.json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+        return
+    print("📐 OmniPal 规范窗口吸附布局与区域:")
+    for tpl in engine.get_snap_layouts():
+        print(f"  • [{tpl['key']}] {tpl['title']} ({tpl['hint']}): {len(tpl['slots'])} 个分区")
 
 def cmd_benchmark(engine: OmniPalEngine, args):
     res = engine.benchmark()
@@ -200,13 +212,15 @@ def main():
     p_cheat.set_defaults(func=cmd_cheatsheet)
 
     # snap
-    p_snap = subparsers.add_parser("snap", help="触发窗口吸附分屏并广播视觉反馈")
-    p_snap.add_argument("zone", choices=[
-        "left", "right", "maximize", "restore", "top", "down",
-        "top-left", "top-right", "bottom-left", "bottom-right",
-        "center", "third-left", "third-right", "two-thirds-left", "two-thirds-right"
-    ], help="目标吸附区域")
+    p_snap = subparsers.add_parser("snap", help="触发窗口吸附分屏或呼出吸附布局菜单")
+    p_snap.add_argument("zone", help="目标吸附区域 (如 left, right, top-left, center, third-center) 或 layouts (呼出选择器)")
+    p_snap.add_argument("--no-hud", action="store_true", help="静默吸附，不弹出视觉 HUD 反馈")
     p_snap.set_defaults(func=cmd_snap)
+
+    # snap-layouts
+    p_snap_layouts = subparsers.add_parser("snap-layouts", help="获取规范窗口吸附布局与区域配置")
+    p_snap_layouts.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_snap_layouts.set_defaults(func=cmd_snap_layouts)
 
     # benchmark
     p_bench = subparsers.add_parser("benchmark", help="执行性能基准测试与耗时统计")

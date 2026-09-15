@@ -1,7 +1,7 @@
 # OmniPal
 
 > **肌肉记忆无缝漫游，零配置污染的跨系统快捷键适配框架**  
-> 专为 **Omarchy / Hyprland** 深度定制 · 正式版本 **v1.2.0**
+> 专为 **Omarchy / Hyprland** 深度定制 · 正式版本 **v1.3.0**
 
 OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯的用户，在 Omarchy (Arch Linux + Hyprland + Quickshell) 上提供瞬时、无感、零污染的肌肉记忆还原方案。
 
@@ -21,6 +21,9 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
 - **丰富窗口吸附布局（Rich Snap Layouts）**：
   - 提供 `left`、`right`、`up`、`down`、`center`（60%x70% 居中展示）、`third-left` / `third-right`（1/3 屏幕分屏）、`two-thirds-left` / `two-thirds-right`（2/3 屏幕分屏）。
   - 基于 Compositor 级 Lua 几何运算，自动扣除 Omarchy 顶栏 `reserved` 区域，执行延迟低于 1ms。
+- **可视化吸附布局选择器（Snap Layouts Picker）**：
+  - **Windows 11 Snap Layouts 风格两级交互**：`Win+Z`（Windows 模式）/ `Super+Alt+Z`（macOS 模式）呼出布局菜单，数字键 `1-6` 选模板、方向键聚焦分区、回车吸附、`Esc` 取消。
+  - 单一事实源 `schema/snap_layouts.json`：30 个规范分区 + 6 套布局模板，经 tmpfs 缓存由插件响应式渲染，QML 零硬编码。
 - **内存级状态广播（tmpfs）**：
   - 运行时状态存储于 `/run/user/$UID/omnipal/state.json`。
   - Quickshell 插件通过 `Quickshell.Io.FileView` 响应更新，无需后台密集轮询。
@@ -29,7 +32,7 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
   2. `omni.cheat-sheet`：快捷键 HUD 速查层，根据单一事实源动态渲染当前有效键位，支持按分类检索与按键说明。
   3. `omni.settings`：图形化控制中心，可视化切换模式，预览按键覆盖并提供快捷动作。
   4. `omni.snap-feedback`：分屏动效反馈 HUD，触发窗口吸附时在屏幕边缘渲染平滑高亮过渡动画。
-  5. `omni.overview`：多任务视图与窗口概览。纯元数据驱动（基于 `hyprctl clients -j`），**严守 Hard Stop H-2，零像素截图**，支持键盘选择与实时搜索。
+  5. `omni.overview`：空间多工作区任务视图。工作区按 16:9 画布卡片自动平铺，窗口依 Compositor 矢量元数据（`hyprctl --batch`）映射真实相对位置，**严守 Hard Stop H-5，零像素截图**，支持 `1-9` 直达桌面、`Shift+1-9` 跨桌面瞬移与实时搜索。
   6. `omni.mac-dock`：macOS 风格底部浮动 Dock 栏，实时展示运行中应用图标、运行指示圆点与平滑悬停动效。
 
 ---
@@ -74,6 +77,9 @@ omni-profile cheatsheet
 # 窗口智能吸附（支持 left/right/up/down/center/third-left/third-right/two-thirds-left/two-thirds-right）
 omni-profile snap center
 
+# 列出规范吸附布局编目（6 模板 × 30 分区，--json 机器可读输出）
+omni-profile snap-layouts
+
 # 执行系统健康诊断与一致性校验
 omni-profile doctor
 
@@ -101,6 +107,9 @@ omarchy-shell shell toggle omni.mac-dock
 
 # 测试分屏高亮反馈
 omarchy-shell shell summon omni.snap-feedback '{"zone":"left"}'
+
+# 呼出可视化吸附布局选择器（等同 Win+Z / Super+Alt+Z 快捷键）
+omarchy-shell shell summon omni.snap-feedback '{"zone":"layouts"}'
 ```
 
 ---
@@ -110,11 +119,12 @@ omarchy-shell shell summon omni.snap-feedback '{"zone":"left"}'
 ```
 OmniPal/
 ├── schema/
-│   └── actions.json          # 动作编目（单一事实源，定义 action_id、调度命令与默认参数）
+│   ├── actions.json          # 动作编目（单一事实源，定义 action_id、调度命令与默认参数）
+│   └── snap_layouts.json     # 吸附分区与布局模板编目（布局几何单一事实源）
 ├── profiles/
 │   ├── omarchy.json          # 原生模式（0 覆盖）
-│   ├── windows.json          # Windows 11 习惯模式（13 覆盖）
-│   └── mac.json              # macOS 习惯模式（12 覆盖）
+│   ├── windows.json          # Windows 11 习惯模式（14 覆盖）
+│   └── mac.json              # macOS 习惯模式（19 覆盖）
 ├── engine/
 │   └── engine.py             # 核心运行时引擎（Lua 批量求值、信号捕获与 tmpfs 广播）
 ├── bin/
@@ -141,7 +151,7 @@ OmniPal/
 
 根据 Omarchy 架构规范与 Hard Stop 铁律：
 1. **[H-1] 零配置篡改**：运行态绝不向 `~/.config/hypr/` 写入任何配置文件。
-2. **[H-2] 零像素截图**：`omni.overview` 与所有插件均通过 `hyprctl clients -j` 元数据渲染，避免截屏权限与 GPU 显存浪费。
+2. **[H-5] 零像素截图**：`omni.overview` 与所有插件均通过 `hyprctl` 元数据渲染，避免截屏权限与 GPU 显存浪费。
 3. **[H-3] 单一事实源**：键位逻辑全部收敛于 `schema/actions.json`，QML 插件内绝无按键硬编码。
 4. **[H-7] Shell 配置文件隔离**：绝不篡改 `~/.config/omarchy/shell.json`，插件仅以标准符号链接安装在 `~/.config/omarchy/plugins/` 供 shell 动态挂载。
 5. **[H-8] 100% 信号安全恢复**：引擎接收 `SIGINT`、`SIGTERM`、`SIGHUP` 信号或会话终止时，自动清空注入覆盖，无缝回退。

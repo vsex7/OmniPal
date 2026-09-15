@@ -252,22 +252,18 @@ Item {
           spacing: Style.space(16)
 
           // 标题栏
-          Row {
+          Item {
             width: parent.width
             height: Style.space(32)
 
             Text {
               text: "OmniPal 控制中心"
-              font.family: root.background ? Style.font.headingFamily : "sans-serif"
+              font.family: Style.font.family
               font.pixelSize: Style.font.heading
               font.bold: true
               color: root.foreground
+              anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Rectangle {
-              width: 1; height: 1
-              Layout.fillWidth: true
             }
 
             // 右侧关闭按钮

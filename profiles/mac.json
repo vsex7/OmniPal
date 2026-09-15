@@ -68,6 +68,41 @@
       "action": "cheat_sheet",
       "mod": "SUPER",
       "key": "slash"
+    },
+    {
+      "action": "snap_left",
+      "mod": "SUPER ALT",
+      "key": "Left"
+    },
+    {
+      "action": "snap_right",
+      "mod": "SUPER ALT",
+      "key": "Right"
+    },
+    {
+      "action": "snap_top",
+      "mod": "SUPER ALT",
+      "key": "Up"
+    },
+    {
+      "action": "snap_bottom",
+      "mod": "SUPER ALT",
+      "key": "Down"
+    },
+    {
+      "action": "maximize_window",
+      "mod": "SUPER ALT",
+      "key": "Return"
+    },
+    {
+      "action": "snap_center",
+      "mod": "SUPER ALT",
+      "key": "C"
+    },
+    {
+      "action": "snap_layouts",
+      "mod": "SUPER ALT",
+      "key": "Z"
     }
   ]
 }

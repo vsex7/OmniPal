@@ -65,6 +65,146 @@ def _validate_profile_file(p_file: Path, valid_action_ids: dict) -> bool:
 
     return file_passed
 
+def _is_ratio(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+def _check_rect(entry: dict) -> Optional[str]:
+    """Validates fractional screen geometry fields of a zone/slot. Returns an error message or None."""
+    for field in ("xr", "yr", "wr", "hr"):
+        v = entry.get(field)
+        if not _is_ratio(v) or not (0.0 <= v <= 1.0):
+            return f"'{field}' must be a number within [0.0, 1.0], got {v!r}"
+    if entry["xr"] + entry["wr"] > 1.01:
+        return f"xr+wr = {entry['xr'] + entry['wr']:.3f} exceeds 1.01"
+    if entry["yr"] + entry["hr"] > 1.01:
+        return f"yr+hr = {entry['yr'] + entry['hr']:.3f} exceeds 1.01"
+    return None
+
+def _validate_snap_layouts(project_root: Path) -> bool:
+    snap_file = project_root / "schema" / "snap_layouts.json"
+    print(f"\n📐 Validating snap layouts catalog: {snap_file.name}...")
+
+    if not snap_file.exists():
+        print(f"  ❌ Error: Snap layouts schema not found: {snap_file}", file=sys.stderr)
+        return False
+
+    try:
+        with open(snap_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"  ❌ Error in {snap_file.name}: JSON parse failure: {e}", file=sys.stderr)
+        return False
+
+    if not isinstance(data, dict):
+        print(f"  ❌ [{snap_file.name}] Root must be a JSON object", file=sys.stderr)
+        return False
+
+    file_passed = True
+
+    # --- zones: fractional geometry + non-empty icon/label ---
+    zones = data.get("zones")
+    if not isinstance(zones, dict) or not zones:
+        print("  ❌ 'zones' must be a non-empty object", file=sys.stderr)
+        file_passed = False
+        zones = {}
+
+    for zid, zone in zones.items():
+        ctx = f"zone '{zid}'"
+        if not isinstance(zone, dict):
+            print(f"  ❌ [{ctx}] must be an object", file=sys.stderr)
+            file_passed = False
+            continue
+        rect_err = _check_rect(zone)
+        if rect_err:
+            print(f"  ❌ [{ctx}] {rect_err}", file=sys.stderr)
+            file_passed = False
+        for field in ("icon", "label"):
+            v = zone.get(field)
+            if not isinstance(v, str) or not v.strip():
+                print(f"  ❌ [{ctx}] '{field}' must be a non-empty string", file=sys.stderr)
+                file_passed = False
+
+    # --- templates: unique id/key, metadata, nested slot geometry ---
+    templates = data.get("templates")
+    if not isinstance(templates, list) or not templates:
+        print("  ❌ 'templates' must be a non-empty array", file=sys.stderr)
+        file_passed = False
+        templates = []
+
+    seen_tpl_ids = set()
+    seen_tpl_keys = set()
+    slot_count = 0
+    for i, tpl in enumerate(templates):
+        ctx = f"template #{i+1}"
+        if not isinstance(tpl, dict):
+            print(f"  ❌ [{ctx}] must be an object", file=sys.stderr)
+            file_passed = False
+            continue
+
+        tid = tpl.get("id")
+        if tid is None or (isinstance(tid, str) and not tid.strip()):
+            print(f"  ❌ [{ctx}] Missing or empty 'id'", file=sys.stderr)
+            file_passed = False
+        elif tid in seen_tpl_ids:
+            print(f"  ❌ [{ctx}] Duplicate template id: {tid!r}", file=sys.stderr)
+            file_passed = False
+        else:
+            seen_tpl_ids.add(tid)
+
+        tkey = tpl.get("key")
+        if not isinstance(tkey, str) or not tkey.strip():
+            print(f"  ❌ [{ctx}] 'key' must be a non-empty string", file=sys.stderr)
+            file_passed = False
+        elif tkey in seen_tpl_keys:
+            print(f"  ❌ [{ctx}] Duplicate template key: {tkey!r}", file=sys.stderr)
+            file_passed = False
+        else:
+            seen_tpl_keys.add(tkey)
+
+        for field in ("title", "hint"):
+            v = tpl.get(field)
+            if not isinstance(v, str) or not v.strip():
+                print(f"  ❌ [{ctx}] '{field}' must be a non-empty string", file=sys.stderr)
+                file_passed = False
+
+        slots = tpl.get("slots")
+        if not isinstance(slots, list) or not slots:
+            print(f"  ❌ [{ctx}] 'slots' must be a non-empty array", file=sys.stderr)
+            file_passed = False
+            continue
+
+        seen_slot_ids = set()
+        for j, slot in enumerate(slots):
+            sctx = f"{ctx} slot #{j+1}"
+            slot_count += 1
+            if not isinstance(slot, dict):
+                print(f"  ❌ [{sctx}] must be an object", file=sys.stderr)
+                file_passed = False
+                continue
+            sid = slot.get("id")
+            if not isinstance(sid, str) or not sid.strip():
+                print(f"  ❌ [{sctx}] 'id' must be a non-empty string", file=sys.stderr)
+                file_passed = False
+            elif sid in seen_slot_ids:
+                print(f"  ❌ [{sctx}] Duplicate slot id within template: {sid!r}", file=sys.stderr)
+                file_passed = False
+            else:
+                seen_slot_ids.add(sid)
+            slabel = slot.get("label")
+            if not isinstance(slabel, str) or not slabel.strip():
+                print(f"  ❌ [{sctx}] 'label' must be a non-empty string", file=sys.stderr)
+                file_passed = False
+            rect_err = _check_rect(slot)
+            if rect_err:
+                print(f"  ❌ [{sctx}] {rect_err}", file=sys.stderr)
+                file_passed = False
+
+    if file_passed:
+        print(f"  ✅ {len(zones)} zones, {len(templates)} templates ({slot_count} slots) validated cleanly")
+    else:
+        print(f"  💥 Snap layouts validation failed for {snap_file.name}", file=sys.stderr)
+    return file_passed
+
 def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = None) -> bool:
     schema_file = project_root / "schema" / "actions.json"
     profiles_dir = project_root / "profiles"
@@ -108,6 +248,10 @@ def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = No
             for u_file in user_profile_files:
                 if not _validate_profile_file(u_file, valid_action_ids):
                     all_passed = False
+
+    # Validate snap layouts catalog (single source of truth for zones/templates)
+    if not _validate_snap_layouts(project_root):
+        all_passed = False
 
     # Validate Quickshell plugins
     plugins_dir = project_root / "plugins"

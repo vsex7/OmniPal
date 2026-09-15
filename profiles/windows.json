@@ -73,6 +73,11 @@
       "action": "cheat_sheet",
       "mod": "SUPER",
       "key": "slash"
+    },
+    {
+      "action": "snap_layouts",
+      "mod": "SUPER",
+      "key": "Z"
     }
   ]
 }

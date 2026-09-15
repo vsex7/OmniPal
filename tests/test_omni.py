@@ -19,6 +19,13 @@ class TestOmniPal(unittest.TestCase):
     def setUp(self):
         self.engine = OmniPalEngine(PROJECT_ROOT)
 
+    def tearDown(self):
+        if hasattr(self.engine, "_last_summon_proc") and self.engine._last_summon_proc:
+            try:
+                self.engine._last_summon_proc.wait(timeout=0.2)
+            except Exception:
+                pass
+
     def test_schema_and_profile_consistency(self):
         """Validates that all profiles and plugins strictly adhere to specs."""
         self.assertTrue(check_consistency(PROJECT_ROOT))
@@ -48,6 +55,9 @@ class TestOmniPal(unittest.TestCase):
         self.assertGreater(len(mac_sheet), 0)
         self.assertTrue(any("Q" in item["key"] for item in mac_sheet))
         self.assertTrue(any("D" in item["key"] for item in mac_sheet))
+        self.assertTrue(any("snap" == item["category"] for item in mac_sheet))
+        self.assertTrue(any("ALT + LEFT" in item["key"] for item in mac_sheet))
+        self.assertTrue(any("ALT + Z" in item["key"] for item in mac_sheet))
 
     def test_all_six_plugins_exist(self):
         """Validates that all 6 required Quickshell plugins exist with entry points."""
@@ -124,7 +134,7 @@ class TestOmniPal(unittest.TestCase):
             self.assertTrue(self.engine.switch_mode("windows"))
             state = self.engine.get_state()
             self.assertEqual(state["mode"], "windows")
-            self.assertEqual(state["active_bindings_count"], 13)
+            self.assertEqual(state["active_bindings_count"], len(self.engine.profiles["windows"]["bindings"]))
 
         for _ in range(2):
             self.assertTrue(self.engine.restore())
@@ -166,6 +176,22 @@ class TestOmniPal(unittest.TestCase):
             self.assertTrue(any("0.667" in code for code in eval_codes))
         finally:
             self.engine._eval_lua = original_eval
+
+    def test_snap_layouts_flyout(self):
+        """Validates that snap('layouts') triggers the interactive flyout and records state."""
+        from engine.engine import SNAP_FILE
+        success = self.engine.snap("layouts")
+        if hasattr(self.engine, "_last_summon_proc") and self.engine._last_summon_proc:
+            try:
+                self.engine._last_summon_proc.wait(timeout=0.5)
+            except Exception:
+                pass
+        self.assertTrue(success)
+        self.assertTrue(SNAP_FILE.exists())
+        with open(SNAP_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data.get("zone"), "layouts")
+        self.assertTrue(data.get("interactive"))
 
     def test_user_custom_profiles(self):
         """Validates user custom profile loading, overriding, cycling order, and validation."""
@@ -270,5 +296,79 @@ class TestOmniPal(unittest.TestCase):
         finally:
             self.engine._eval_lua = original_eval
 
+    def test_snap_model_and_dimensions(self):
+        """Validates that SnapFeedback Model and QML define two-stage navigation and dimension calculations."""
+        model_file = PROJECT_ROOT / "plugins" / "omni.snap-feedback" / "Model.js"
+        self.assertTrue(model_file.exists())
+        content = model_file.read_text(encoding="utf-8")
+        self.assertIn("calculateBox", content)
+        self.assertIn("dim:", content)
+        self.assertIn("loadSchemaJson", content)
+
+        qml_file = PROJECT_ROOT / "plugins" / "omni.snap-feedback" / "SnapFeedback.qml"
+        self.assertTrue(qml_file.exists())
+        qml_content = qml_file.read_text(encoding="utf-8")
+        self.assertIn("focusedTemplateIndex", qml_content)
+        self.assertIn("focusedSlotIndex", qml_content)
+        self.assertIn("infoPill", qml_content)
+        self.assertIn("Key_1", qml_content)
+        self.assertIn("Key_Left", qml_content)
+        self.assertIn("effectiveTemplates", qml_content)
+        self.assertIn("currentReserved", qml_content)
+
+    def test_snap_layouts_single_source_of_truth(self):
+        """Validates that schema/snap_layouts.json is the single source of truth for zones and templates."""
+        from engine.engine import SNAP_LAYOUTS_FILE
+        schema_file = PROJECT_ROOT / "schema" / "snap_layouts.json"
+        self.assertTrue(schema_file.exists())
+        with open(schema_file, "r", encoding="utf-8") as f:
+            schema_data = json.load(f)
+        
+        self.assertIn("zones", schema_data)
+        self.assertIn("templates", schema_data)
+        self.assertGreaterEqual(len(schema_data["zones"]), 15)
+        self.assertEqual(len(schema_data["templates"]), 6)
+
+        # Verify engine loaded from schema and wrote to tmpfs
+        zones = self.engine.get_snap_zones()
+        layouts = self.engine.get_snap_layouts()
+        self.assertEqual(len(zones), len(schema_data["zones"]))
+        self.assertEqual(len(layouts), len(schema_data["templates"]))
+        self.assertTrue(SNAP_LAYOUTS_FILE.exists())
+
+    def test_snap_unfloat_restore(self):
+        """Validates that snap('restore') safely un-floats window back into tiling tree instead of forcing coordinates."""
+        eval_codes = []
+        original_eval = self.engine._eval_lua
+        try:
+            self.engine._eval_lua = lambda code: (eval_codes.append(code) or True)
+            self.engine.snap("restore")
+            self.assertEqual(len(eval_codes), 1)
+            code = eval_codes[0]
+            # Must check if window is floating and toggle float back to tiling
+            self.assertIn("w.floating", code)
+            self.assertIn("hl.dsp.window.float", code)
+            self.assertIn("toggle", code)
+        finally:
+            self.engine._eval_lua = original_eval
+
+    def test_snap_no_hud_flag(self):
+        """Validates that snap with no_hud=True does not spawn shell summon process."""
+        self.engine._last_summon_proc = None
+        success = self.engine.snap("right", no_hud=True)
+        self.assertTrue(success)
+        self.assertIsNone(self.engine._last_summon_proc)
+
+    def test_overview_zero_fork_architecture(self):
+        """Validates that Overview.qml uses direct hyprctl --batch without process forking or python helper scripts."""
+        overview_qml = PROJECT_ROOT / "plugins" / "omni.overview" / "Overview.qml"
+        self.assertTrue(overview_qml.exists())
+        content = overview_qml.read_text(encoding="utf-8")
+        self.assertNotIn("python3", content)
+        self.assertNotIn("sh -c", content)
+        self.assertIn("--batch", content)
+        self.assertIn("workspaces ; clients ; monitors ; activewindow", content)
+
 if __name__ == "__main__":
     unittest.main()
+

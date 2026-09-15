@@ -29,6 +29,7 @@ RUN_DIR = Path(f"/run/user/{os.getuid()}/omnipal")
 STATE_FILE = RUN_DIR / "state.json"
 OVERLAY_FILE = RUN_DIR / "active_overlay.json"
 SNAP_FILE = RUN_DIR / "snap.json"
+SNAP_LAYOUTS_FILE = RUN_DIR / "snap_layouts.json"
 PID_FILE = RUN_DIR / "daemon.pid"
 
 LUA_DISPATCHERS = {
@@ -87,12 +88,17 @@ class OmniPalEngine:
         self.root_dir = root_dir or Path(__file__).resolve().parent.parent
         self.user_profiles_dir = Path(user_profiles_dir) if user_profiles_dir else resolve_user_profiles_dir()
         self.schema_file = self.root_dir / "schema" / "actions.json"
+        self.snap_schema_file = self.root_dir / "schema" / "snap_layouts.json"
         self.profiles_dir = self.root_dir / "profiles"
         self.actions_catalog: Dict[str, Dict[str, Any]] = {}
         self.profiles: Dict[str, Dict[str, Any]] = {}
+        self.snap_zones: Dict[str, Dict[str, Any]] = {}
+        self.snap_layouts: List[Dict[str, Any]] = []
         self._last_summon_proc = None
         self._load_catalog()
+        self._load_snap_schema()
         self._ensure_run_dir()
+        self._write_snap_layouts_cache()
 
     def _ensure_run_dir(self):
         try:
@@ -100,6 +106,45 @@ class OmniPalEngine:
             RUN_DIR.chmod(0o700)
         except Exception:
             pass
+
+    def _load_snap_schema(self):
+        if self.snap_schema_file.exists():
+            try:
+                with open(self.snap_schema_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.snap_zones = data.get("zones", {})
+                    self.snap_layouts = data.get("templates", [])
+            except Exception as e:
+                print(f"Warning: Failed to load snap schema {self.snap_schema_file.name}: {e}", file=sys.stderr)
+
+    def _write_snap_layouts_cache(self):
+        self._ensure_run_dir()
+        data = {
+            "zones": self.snap_zones,
+            "templates": self.snap_layouts
+        }
+        tmp = SNAP_LAYOUTS_FILE.with_suffix(".tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            tmp.replace(SNAP_LAYOUTS_FILE)
+        except Exception:
+            pass
+
+    def get_snap_layouts(self) -> List[Dict[str, Any]]:
+        return self.snap_layouts
+
+    def get_snap_zones(self) -> Dict[str, Dict[str, Any]]:
+        return self.snap_zones
+
+    def _get_hypr_gap(self) -> int:
+        try:
+            res = subprocess.run(["hyprctl", "getoption", "general:gaps_out", "-j"], capture_output=True, text=True, timeout=0.3)
+            data = json.loads(res.stdout)
+            css = data.get("css", "10").split()
+            return int(css[0]) if css else 10
+        except Exception:
+            return 10
 
     def _load_catalog(self):
         if not self.schema_file.exists():
@@ -364,14 +409,45 @@ class OmniPalEngine:
             })
         return sheet
 
-    def snap(self, zone: str) -> bool:
+    def snap(self, zone: str, no_hud: bool = False) -> bool:
         """Triggers visual snap feedback and dispatches the corresponding window management action."""
         zone = zone.lower().strip()
         self._ensure_run_dir()
+        gap = self._get_hypr_gap()
 
-        # 1. Write snap.json for instantaneous QML FileView perception
+        # 1. Check for interactive layout picker request (Win+Z Snap Layouts flyout)
+        if zone in ("layouts", "picker", "menu"):
+            snap_data = {
+                "zone": "layouts",
+                "interactive": True,
+                "gap": gap,
+                "timestamp": time.time()
+            }
+            tmp_snap = SNAP_FILE.with_suffix(".tmp")
+            try:
+                with open(tmp_snap, "w", encoding="utf-8") as f:
+                    json.dump(snap_data, f, ensure_ascii=False)
+                tmp_snap.replace(SNAP_FILE)
+            except Exception:
+                pass
+
+            if not no_hud:
+                try:
+                    self._last_summon_proc = subprocess.Popen(
+                        ["omarchy-shell", "shell", "summon", "omni.snap-feedback", json.dumps({"interactive": True})],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True
+                    )
+                except Exception:
+                    pass
+            return True
+
+        # 2. Write snap.json for state/event observation
         snap_data = {
             "zone": zone,
+            "interactive": False,
+            "gap": gap,
             "timestamp": time.time()
         }
         tmp_snap = SNAP_FILE.with_suffix(".tmp")
@@ -382,64 +458,63 @@ class OmniPalEngine:
         except Exception:
             pass
 
-        # 2. Summon via omarchy-shell asynchronously
-        try:
-            self._last_summon_proc = subprocess.Popen(
-                ["omarchy-shell", "shell", "summon", "omni.snap-feedback", json.dumps({"zone": zone})],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True
-            )
-        except Exception:
-            pass
+        # 3. Summon via omarchy-shell asynchronously if not suppressed
+        if not no_hud:
+            try:
+                self._last_summon_proc = subprocess.Popen(
+                    ["omarchy-shell", "shell", "summon", "omni.snap-feedback", json.dumps({"zone": zone, "interactive": False})],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+            except Exception:
+                pass
 
-        # 3. Dispatch window movement in Hyprland Lua
-        lua_dsp = ""
-        if zone == "left":
-            lua_dsp = "hl.dsp.window.move({ direction = 'l' })"
-        elif zone == "right":
-            lua_dsp = "hl.dsp.window.move({ direction = 'r' })"
-        elif zone in ("maximize", "top"):
-            lua_dsp = "hl.dsp.window.fullscreen({ mode = 'maximized' })"
-        elif zone in ("restore", "down"):
-            lua_dsp = "hl.dsp.window.fullscreen({ mode = 'maximized' })"
-        elif zone == "center":
-            lua_dsp = """local w = hl.get_active_window()
+        # 4. Fullscreen / maximize dispatch
+        if zone in ("maximize", "max"):
+            return self._eval_lua("hl.dsp.window.fullscreen({ mode = 'maximized' })")
+
+        # 5. Smart restore: unmaximize if fullscreen, unfloat to tiling if floating
+        if zone in ("restore", "unmax"):
+            lua_restore = """local w = hl.get_active_window()
 if w then
-  local m = hl.get_active_monitor()
-  if not w.floating then hl.dsp.window.float({ action = 'toggle' }) end
-  local rx = m.x + (m.reserved and m.reserved.left or 0)
-  local ry = m.y + (m.reserved and m.reserved.top or 0)
-  local rw = m.width - (m.reserved and (m.reserved.left + m.reserved.right) or 0)
-  local rh = m.height - (m.reserved and (m.reserved.top + m.reserved.bottom) or 0)
-  local tw = math.floor(rw * 0.6)
-  local th = math.floor(rh * 0.7)
-  local tx = rx + math.floor((rw - tw) / 2)
-  local ty = ry + math.floor((rh - th) / 2)
-  hl.dsp.window.resize({ x = tw, y = th })
-  hl.dsp.window.move({ x = tx, y = ty })
+  if w.fullscreen then
+    hl.dsp.window.fullscreen({ mode = 'maximized' })
+  elseif w.floating then
+    hl.dsp.window.float({ action = 'toggle' })
+  end
 end"""
-        elif zone in ("third-left", "third-right", "two-thirds-left", "two-thirds-right"):
-            ratio_val = "0.667" if "two-thirds" in zone else "0.333"
-            align_right = "true" if "-right" in zone else "false"
+            return self._eval_lua(lua_restore)
+
+        # 6. Apply geometric move & resize using dynamic schema zones
+        if zone in self.snap_zones:
+            z_meta = self.snap_zones[zone]
+            xr = float(z_meta.get("xr", 0.0))
+            yr = float(z_meta.get("yr", 0.0))
+            wr = float(z_meta.get("wr", 0.5))
+            hr = float(z_meta.get("hr", 1.0))
+
             lua_dsp = f"""local w = hl.get_active_window()
 if w then
   local m = hl.get_active_monitor()
+  if w.fullscreen then hl.dsp.window.fullscreen({{ mode = 'maximized' }}) end
   if not w.floating then hl.dsp.window.float({{ action = 'toggle' }}) end
-  local rx = m.x + (m.reserved and m.reserved.left or 0)
-  local ry = m.y + (m.reserved and m.reserved.top or 0)
-  local rw = m.width - (m.reserved and (m.reserved.left + m.reserved.right) or 0)
-  local rh = m.height - (m.reserved and (m.reserved.top + m.reserved.bottom) or 0)
-  local tw = math.floor(rw * {ratio_val})
-  local th = rh
-  local is_right = {align_right}
-  local tx = is_right and (rx + rw - tw) or rx
-  local ty = ry
-  hl.dsp.window.resize({{ x = tw, y = th }})
-  hl.dsp.window.move({{ x = tx, y = ty }})
+  local gap = {gap}
+  local rx = m.x + (m.reserved and m.reserved.left or 0) + gap
+  local ry = m.y + (m.reserved and m.reserved.top or 0) + gap
+  local rw = m.width - (m.reserved and (m.reserved.left + m.reserved.right) or 0) - gap * 2
+  local rh = m.height - (m.reserved and (m.reserved.top + m.reserved.bottom) or 0) - gap * 2
+  local is_left_edge = {1 if xr == 0.0 else 0}
+  local is_right_edge = {1 if (xr + wr) >= 0.99 else 0}
+  local is_top_edge = {1 if yr == 0.0 else 0}
+  local is_bottom_edge = {1 if (yr + hr) >= 0.99 else 0}
+  local tw = math.floor(rw * {round(wr, 3)}) - math.floor(gap * (1 - is_right_edge * is_left_edge) / 2)
+  local th = math.floor(rh * {round(hr, 3)}) - math.floor(gap * (1 - is_top_edge * is_bottom_edge) / 2)
+  local tx = rx + math.floor(rw * {round(xr, 3)}) + math.floor(gap * (1 - is_left_edge) / 2)
+  local ty = ry + math.floor(rh * {round(yr, 3)}) + math.floor(gap * (1 - is_top_edge) / 2)
+  hl.dsp.window.resize({{ x = math.floor(tw), y = math.floor(th) }})
+  hl.dsp.window.move({{ x = math.floor(tx), y = math.floor(ty) }})
 end"""
-
-        if lua_dsp:
             return self._eval_lua(lua_dsp)
         return True
 

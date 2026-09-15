@@ -4,6 +4,30 @@
 
 ---
 
+## [v1.3.0] - 2026-09-15
+
+### 📐 可视化窗口吸附布局与选择器 (Snap Layouts Picker)
+- **Windows 11 Snap Layouts 风格两级交互**：`omni.snap-feedback` 升级为可视化吸附布局选择器——第一级横向并列展示布局模板，第二级在选中模板内高亮聚焦分区。数字键 `1-6` 直选模板、方向键切换模板/分区、回车执行吸附、`Esc` 取消，全程纯键盘流。
+- **单一事实源布局编目 (`schema/snap_layouts.json`)**：收录 30 个规范吸附分区（半屏、四象限、1/3 与 2/3 分屏、居中浮窗、最大化/还原等）与 6 套布局模板（左右对半、主从分屏、三列均分、居中聚焦、四象限、反向主从），QML 零硬编码副本，符合 AGENTS.md 单一事实源铁律。
+- **tmpfs 布局缓存分发**：引擎启动时把 zones/templates 写入 `/run/user/$UID/omnipal/snap_layouts.json`，插件经 `Quickshell.Io.FileView` 响应式加载，热切换零轮询。
+- **CLI 编目查看**：新增 `omni-profile snap-layouts [--json]`，终端可枚举全部模板与分区几何。
+- **吸附动作注册与还原安全**：`snap_layouts` 动作在 `windows` / `mac` 模式注册为运行时快捷键，Restore 路径完整清理，0 残留。
+
+### 🌌 空间多工作区任务视图 (Spatial Workspace Overview)
+- **`omni.overview` 空间化重构**：工作区以 16:9 画布卡片自动多行多列平铺（`Model.js calculateGrid`），窗口按显示器有效分辨率等比映射真实相对位置（`scaleWindowGeometry`），直观还原物理桌面空间排布。
+- **矢量元数据渲染**：严守 Hard Stop H-5，零像素截图，基于 `hyprctl --batch` 一次批量取数（workspaces / clients / monitors / activewindow），零进程分叉、极轻量。
+- **跨桌面键盘调度**：`Tab`/方向键轮转窗口、`1-9` 直达桌面、`Shift+1-9` 跨桌面瞬移、`Enter` 聚焦、`Del` 关闭、`Esc` 退出。
+
+### ⌨️ 快捷键编目扩充
+- 动作编目扩展至 32 项：新增 `snap_layouts`（布局选择器）、`snap_top` / `snap_bottom` 上下半屏、`snap_third_center` 中列三分屏、四象限 `snap_top_left` / `snap_top_right` / `snap_bottom_left` / `snap_bottom_right` 等。
+- `windows` 模式：`Win+Z` 呼出吸附布局选择器；`mac` 模式：`Super+Alt+Z` 呼出选择器，`Super+Alt+↑ / ↓` 直达 `snap_top` / `snap_bottom`。
+
+### 🛡️ 一致性校验器全面覆盖 snap_layouts.json
+- `scripts/check_consistency.py` 新增布局编目深度校验：文件存在性与 JSON 合法性；每个 zone 的 `xr/yr/wr/hr` 必须落于 `[0.0, 1.0]` 且 `xr+wr <= 1.01`、`yr+hr <= 1.01`，`icon` / `label` 非空；每个 template 的 `id` 与 `key` 全局唯一、`title` / `hint` 非空、`slots` 数组非空；每个 slot 的 `id`、`label` 与坐标比例逐项合法。
+- 任一异常即输出精确定位信息（zone/模板/槽位序号 + 字段）并以非零退出码阻断，发布门禁 Gate 1 与单元测试同步拦截。
+
+---
+
 ## [v1.2.0] - 2026-09-15
 
 ### 🎛️ 托盘指示器与右键快捷面板 (System Tray & Context Menu Panel)

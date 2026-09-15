@@ -35,6 +35,7 @@ Item {
   property bool loading: false
   property string errorKind: ""
   property string errorMessage: ""
+  property string errorCommand: ""
   property var rawRows: []
   property string filterText: ""
 

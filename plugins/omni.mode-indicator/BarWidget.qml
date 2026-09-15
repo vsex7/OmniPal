@@ -177,7 +177,7 @@ BarWidget {
       : "⊘ OFF"
     fontFamily: Style.font.family
     horizontalMargin: 8
-    foreground: root.engineRunning ? root.currentColor : Color.dimmed
+    foreground: root.engineRunning ? root.currentColor : Color.muted
     tooltipText: root.engineRunning
       ? ("OmniPal: " + root.currentName + "\n生效快捷键: " + root.activeBindingsCount + "\n左键: 轮转模式 | 右键: 快捷菜单 | 中键: 设置")
       : "OmniPal Engine 未运行\n左键: 启动/切换 | 右键: 快捷菜单"
@@ -220,7 +220,7 @@ BarWidget {
           id: heroIcon
           text: root.engineRunning ? root.currentIcon : "⊘"
           font.pixelSize: Style.font.title + Style.space(4)
-          color: root.engineRunning ? root.currentColor : Color.dimmed
+          color: root.engineRunning ? root.currentColor : Color.muted
           anchors.left: parent.left
           anchors.leftMargin: Style.space(4)
           anchors.verticalCenter: parent.verticalCenter
@@ -254,7 +254,7 @@ BarWidget {
               radius: Style.space(3)
               color: root.engineRunning
                 ? (root.engineStatus === "active" ? "#a3be8c" : "#88c0d0")
-                : Color.dimmed
+                : Color.muted
               anchors.verticalCenter: parent.verticalCenter
             }
 

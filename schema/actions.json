@@ -52,6 +52,22 @@
       "default_arg": "omni-profile snap right"
     },
     {
+      "id": "snap_top",
+      "name": "窗口向上吸附/上半屏",
+      "category": "snap",
+      "description": "将当前窗口移至上半屏分割",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap top"
+    },
+    {
+      "id": "snap_bottom",
+      "name": "窗口向下吸附/下半屏",
+      "category": "snap",
+      "description": "将当前窗口移至下半屏分割",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap bottom"
+    },
+    {
       "id": "snap_center",
       "name": "窗口居中展示",
       "category": "snap",
@@ -90,6 +106,54 @@
       "description": "将当前窗口吸附并缩放至屏幕右侧三分之二区域",
       "dispatcher": "exec",
       "default_arg": "omni-profile snap two-thirds-right"
+    },
+    {
+      "id": "snap_third_center",
+      "name": "窗口吸附中间 1/3",
+      "category": "snap",
+      "description": "将当前窗口吸附并缩放至屏幕居中三分之一区域",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap third-center"
+    },
+    {
+      "id": "snap_top_left",
+      "name": "窗口吸附左上 1/4",
+      "category": "snap",
+      "description": "将当前窗口吸附至屏幕左上角四分之一区域",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap top-left"
+    },
+    {
+      "id": "snap_top_right",
+      "name": "窗口吸附右上 1/4",
+      "category": "snap",
+      "description": "将当前窗口吸附至屏幕右上角四分之一区域",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap top-right"
+    },
+    {
+      "id": "snap_bottom_left",
+      "name": "窗口吸附左下 1/4",
+      "category": "snap",
+      "description": "将当前窗口吸附至屏幕左下角四分之一区域",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap bottom-left"
+    },
+    {
+      "id": "snap_bottom_right",
+      "name": "窗口吸附右下 1/4",
+      "category": "snap",
+      "description": "将当前窗口吸附至屏幕右下角四分之一区域",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap bottom-right"
+    },
+    {
+      "id": "snap_layouts",
+      "name": "窗口吸附布局选择器",
+      "category": "snap",
+      "description": "打开类似 Windows 11 的可视化多窗口吸附排布菜单",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile snap layouts"
     },
     {
       "id": "app_launcher",
