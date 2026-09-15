@@ -4,6 +4,26 @@
 
 ---
 
+## [v1.2.0] - 2026-09-15
+
+### 🎛️ 托盘指示器与右键快捷面板 (System Tray & Context Menu Panel)
+- **全面升级 `omni.mode-indicator`**：
+  - 托盘常驻图标：集成字形图标与缩写标签，左键轮转模式、右键展开快捷面板、中键打开设置。
+  - 右键快捷控制面板：基于 Omarchy `PopupCard` 容器规范深度定制，支持点击外部区域自动收起（`HyprlandFocusGrab`），与状态栏弹窗互斥协调（`bar.requestPopout`）。
+  - 四大功能区块：
+    - **Hero 概览区**：当前活动模式专属图标、全名、状态健康指示灯及生效快捷键计数。
+    - **模式快速切换区 (PROFILES)**：基于单一事实源 `omni-profile list --json` 动态枚举所有内置与自定义模式，当前活动项带对勾高亮，支持一键热切换。
+    - **快捷功能入口 (ACTIONS)**：快速呼出速查表 (`omni.cheat-sheet`)、控制中心 (`omni.settings`)、任务视图 (`omni.overview`) 及窗口吸附反馈 (`omni.snap-feedback`)。
+    - **系统与控制 (SYSTEM)**：支持正反向模式轮转、系统原生按键还原（0 残留）、健康诊断 (`omni-profile doctor`)。
+- **配置显示元数据标准 (SSOT Display Metadata)**：
+  - `profiles/*.json` 引入可选 `"display": {"icon": "...", "brief": "...", "color": "..."}`，彻底消除前端硬编码。
+  - `engine.py` 与 `scripts/check_consistency.py` 全面支持与校验 `display` 元数据。
+  - `Model.js` 纯函数模块提供基于 ID 哈希的优雅图标、缩写与主色调降级演算。
+- **反向模式轮转 (`omni-profile cycle --reverse`)**：
+  - 引擎与 CLI 工具扩展 `--reverse` 参数，支持逆向模式快速切换。
+
+---
+
 ## [v1.1.0] - 2026-09-14
 
 ### 👤 用户自定义与模式覆盖 (User Custom Profiles)

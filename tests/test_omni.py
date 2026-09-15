@@ -230,6 +230,31 @@ class TestOmniPal(unittest.TestCase):
                 }, f)
             self.assertFalse(check_consistency(PROJECT_ROOT, user_profiles_dir=user_dir))
 
+    def test_display_metadata_and_reverse_cycle(self):
+        """Validates display metadata presence and reverse mode cycling."""
+        profiles = {p["id"]: p for p in self.engine.list_profiles()}
+        self.assertIn("windows", profiles)
+        self.assertIn("display", profiles["windows"])
+        self.assertEqual(profiles["windows"]["display"].get("icon"), "⊞")
+        self.assertEqual(profiles["windows"]["display"].get("brief"), "WIN")
+        self.assertEqual(profiles["windows"]["display"].get("color"), "#3892d6")
+
+        self.assertIn("mac", profiles)
+        self.assertEqual(profiles["mac"]["display"].get("icon"), "◆")
+
+        self.assertIn("omarchy", profiles)
+        self.assertEqual(profiles["omarchy"]["display"].get("icon"), "⊡")
+
+        # Test state includes display
+        self.engine.switch_mode("windows")
+        state = self.engine.get_state()
+        self.assertEqual(state.get("display", {}).get("icon"), "⊞")
+
+        # Test reverse cycle: windows -> omarchy -> mac -> windows
+        self.assertEqual(self.engine.cycle_mode(reverse=True), "omarchy")
+        self.assertEqual(self.engine.cycle_mode(reverse=True), "mac")
+        self.assertEqual(self.engine.cycle_mode(reverse=True), "windows")
+
     def test_rollback_on_eval_failure(self):
         """Verifies that engine rolls back to clean state when Hyprland eval fails."""
         original_eval = self.engine._eval_lua

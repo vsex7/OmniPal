@@ -3,6 +3,11 @@
   "name": "Windows 11 习惯模式",
   "description": "还原 Windows 常用快捷键习惯（Alt+F4 关闭、Super+方向键吸附、Super+E 文件管理器等）",
   "version": "1.0.0",
+  "display": {
+    "icon": "⊞",
+    "brief": "WIN",
+    "color": "#3892d6"
+  },
   "bindings": [
     {
       "action": "close_window",

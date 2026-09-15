@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "omni.mode-indicator",
-  "name": "OmniPal 模式指示器",
-  "version": "0.4.0",
+  "name": "OmniPal 模式指示器与快捷面板",
+  "version": "1.2.0",
   "author": "OmniPal",
-  "description": "显示当前肌肉记忆快捷键模式，支持点击循环切换",
+  "description": "显示当前肌肉记忆快捷键模式，支持托盘展示与右键快捷控制面板",
   "kinds": [
     "bar-widget"
   ],

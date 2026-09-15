@@ -43,7 +43,8 @@ def cmd_switch(engine: OmniPalEngine, args):
 
 def cmd_cycle(engine: OmniPalEngine, args):
     try:
-        next_mode = engine.cycle_mode()
+        reverse = getattr(args, "reverse", False)
+        next_mode = engine.cycle_mode(reverse=reverse)
         state = engine.get_state()
         print(f"🔄 已轮转至: {state.get('name')} ({next_mode})")
     except Exception as e:
@@ -164,7 +165,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="omni-profile",
-        description="OmniPal 运行时内存热切换控制工具 (v1.1.0)"
+        description="OmniPal 运行时内存热切换控制工具 (v1.2.0)"
     )
     subparsers = parser.add_subparsers(dest="command", help="子命令")
 
@@ -185,6 +186,7 @@ def main():
 
     # cycle
     p_cycle = subparsers.add_parser("cycle", help="在可用模式间轮转切换")
+    p_cycle.add_argument("--reverse", action="store_true", help="反向轮转切换")
     p_cycle.set_defaults(func=cmd_cycle)
 
     # restore

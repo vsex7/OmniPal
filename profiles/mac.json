@@ -3,6 +3,11 @@
   "name": "macOS 习惯模式",
   "description": "还原 macOS 常用操作快捷键（Super+Q 关闭、Super+空格启动器、Super+Shift+4 区域截图等）",
   "version": "1.0.0",
+  "display": {
+    "icon": "◆",
+    "brief": "MAC",
+    "color": "#d8dee9"
+  },
   "bindings": [
     {
       "action": "close_window",

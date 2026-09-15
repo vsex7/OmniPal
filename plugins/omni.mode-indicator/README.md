@@ -1,56 +1,53 @@
 # omni.mode-indicator
 
-OmniPal 状态栏模式指示器插件。
+OmniPal 状态栏托盘模式指示器与右键快捷控制面板。
 
-## 功能
+## 功能特性
 
-- 显示当前激活的快捷键模式（`windows` / `mac` / `omarchy`）
-- 实时反映 Engine 运行状态
-- 左键点击：轮转切换模式（omarchy → windows → mac → omarchy）
-- 右键点击：触发 `omni-profile cheatsheet` 查看当前模式快捷键速查表
-- 悬浮提示：显示模式名称、生效快捷键数量、操作说明
+- **托盘常驻指示器 (BarWidget)**：
+  - 实时显示当前激活的快捷键模式（`Windows` / `macOS` / `Omarchy` 及用户自定义模式）
+  - 显示模式对应专属字形图标（`⊞` / `◆` / `⊡` / `◇`）与颜色标识
+  - 毫秒级监听 `/run/user/$UID/omnipal/state.json`，零轮询开销
+- **多功能鼠标交互**：
+  - **左键单击**：快速轮转切换模式（`omni-profile cycle`）
+  - **右键单击**：呼出/收起全新设计的 **右键快捷控制面板**（基于 Omarchy `PopupCard` 规范）
+  - **中键单击**：直接打开 OmniPal 设置中心（`omarchy-shell shell toggle omni.settings`）
+  - **悬浮提示 (Tooltip)**：显示当前模式详情、生效快捷键数量与按键提示
+- **右键快捷控制面板 (Context Menu / Panel)**：
+  1. **Hero 概览区**：当前模式大字形图标、模式全名、状态健康圆点及生效绑定计数，带关闭按钮
+  2. **模式快速切换 (PROFILES)**：动态列出所有可用预设与自定义模式，当前活动模式带有 `✓` 标识，点击即切
+  3. **快捷功能入口 (ACTIONS)**：
+     - 📖 快捷键速查表 (Cheat Sheet)
+     - ⚙️ OmniPal 控制中心 (Settings)
+     - 🗂️ 任务视图 (Task View)
+     - 🪟 触发布局吸附 (Snap Layout)
+  4. **系统与控制 (SYSTEM)**：
+     - ↻ 轮转切换下一模式
+     - ↺ 还原原生快捷键（零残留热恢复）
+     - 🩺 运行系统健康诊断 (Doctor)
+- **优雅降级**：
+  - Engine 未运行时显示 `⊘ OFF`，颜色置灰
+  - 右键面板支持点击外部区域通过 `HyprlandFocusGrab` 自动平滑关闭
+  - 与 Omarchy 状态栏弹窗管理机制（`bar.requestPopout`）深度集成，互斥协调
 
-## 状态来源
+## 架构与数据源
 
-优先读取 Engine 广播的状态文件（快速路径）：
-```
-/run/user/$UID/omnipal/state.json
-```
+- **单一事实源 (SSOT)**：
+  - 模式列表 100% 来源于 `omni-profile list --json`
+  - 模式外观（`display.icon`, `display.brief`, `display.color`）由 Profile 声明定义
+- **IPC 调用接口 (`omni.mode-indicator`)**：
+  ```bash
+  omarchy-shell omni.mode-indicator cycle         # 正向轮转
+  omarchy-shell omni.mode-indicator cycleReverse  # 反向轮转
+  omarchy-shell omni.mode-indicator togglePanel   # 呼出/收起右键面板
+  omarchy-shell omni.mode-indicator openPanel     # 打开右键面板
+  omarchy-shell omni.mode-indicator closePanel    # 关闭右键面板
+  omarchy-shell omni.mode-indicator getMode       # 获取当前模式标识
+  omarchy-shell omni.mode-indicator switchMode mac # 切换至指定模式
+  ```
 
-若状态文件不可用，回退到 CLI 命令：
-```
-omni-profile status --json
-```
+## 铁律遵守 (Hard Stops)
 
-## 优雅降级
-
-当 Engine 未运行时：
-- 图标显示为 `⊘`（禁用符号），颜色为红色
-- 标签显示 `OFF`
-- 悬浮提示显示 "Engine 未运行" 及启动命令
-- 不会抛出异常，不会导致 Shell 崩溃
-
-## 视觉设计
-
-| 模式 | 图标 | 主色调 | 标签 |
-|------|------|--------|------|
-| Windows | ⊞ | #0078d4 | WINDOWS |
-| macOS | ◆ | #a2aaad | MAC |
-| Omarchy | ⊡ | #a3be8c | OMARCHY |
-| 禁用 | ⊘ | #bf616a | OFF |
-
-## 安装
-
-将 `plugins/omni.mode-indicator/` 目录复制到 Quickshell 插件加载路径，或在 bar 配置中引用 `ModeIndicator.qml`。
-
-## 依赖
-
-- `omni-profile` CLI（位于 PATH 中）
-- OmniPal Engine（可选，未运行时优雅降级）
-- Quickshell Io 模块（`Process`, `SplitParser`）
-
-## 铁律遵守
-
-- 不直接调用 `hyprctl`，不写入 `~/.config/hypr/`
-- 仅通过 CLI 与 Engine 交互
-- 不维护自己的键位副本
+- 严守 H-1：不写入 `~/.config/hypr/`，所有操作经由 `omni-profile` CLI 或内存 IPC
+- 严守 H-2：零像素截屏，纯几何与矢状绘制
+- 严守 SSOT：不维护第二份模式或键位数据

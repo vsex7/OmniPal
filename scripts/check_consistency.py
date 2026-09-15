@@ -45,6 +45,24 @@ def _validate_profile_file(p_file: Path, valid_action_ids: dict) -> bool:
             file_passed = False
         seen_keys.add(key_combo)
 
+    display = p_data.get("display")
+    if display is not None:
+        if not isinstance(display, dict):
+            print(f"  ❌ [{p_file.name}] 'display' must be an object", file=sys.stderr)
+            file_passed = False
+        else:
+            if "icon" in display and not isinstance(display["icon"], str):
+                print(f"  ❌ [{p_file.name}] 'display.icon' must be a string", file=sys.stderr)
+                file_passed = False
+            if "brief" in display and (not isinstance(display["brief"], str) or len(display["brief"]) > 8):
+                print(f"  ❌ [{p_file.name}] 'display.brief' must be a string (<= 8 chars)", file=sys.stderr)
+                file_passed = False
+            if "color" in display:
+                color = display["color"]
+                if not isinstance(color, str) or not color.startswith("#") or len(color) not in (4, 7, 9):
+                    print(f"  ❌ [{p_file.name}] 'display.color' must be a valid hex color string", file=sys.stderr)
+                    file_passed = False
+
     return file_passed
 
 def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = None) -> bool:

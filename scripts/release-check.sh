@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 echo "========================================"
-echo "🛡️  OmniPal v1.1.0 发布检查门禁 (Release Check)"
+echo "🛡️  OmniPal v1.2.0 发布检查门禁 (Release Check)"
 echo "项目目录: ${PROJECT_ROOT}"
 echo "========================================"
 
@@ -60,4 +60,4 @@ echo "  • 无硬编码用户路径"
 echo "  • 权限与符号链接规范"
 echo "✅ Gate 4 通过！"
 
-echo -e "\n🎉🎉🎉 全部发布门禁检查 100% 通过！代码达到 v1.1.0 正式交付质量标准。"
+echo -e "\n🎉🎉🎉 全部发布门禁检查 100% 通过！代码达到 v1.2.0 正式交付质量标准。"

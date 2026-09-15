@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 OmniPal Core Runtime Engine
-Version: 1.1.0 (Production Release with User Profiles & Extended Snap)
+Version: 1.2.0 (Production Release with Tray and Context Menu)
 
 Strictly adheres to AGENTS.md rules:
 1. Pure in-memory overlay via Omarchy Hyprland Lua engine (`hyprctl eval`)
@@ -148,6 +148,7 @@ class OmniPalEngine:
                 "name": p_data.get("name", p_id),
                 "description": p_data.get("description", ""),
                 "bindings_count": len(p_data.get("bindings", [])),
+                "display": p_data.get("display", {}),
                 "source": p_data.get("_source", "project"),
                 "override": p_data.get("_override", False),
                 "file": p_data.get("_file", "")
@@ -179,7 +180,7 @@ class OmniPalEngine:
 
     def get_state(self) -> Dict[str, Any]:
         default_state = {
-            "version": "1.1.0",
+            "version": "1.2.0",
             "mode": "omarchy",
             "name": "Omarchy 原生模式",
             "active_bindings_count": 0,
@@ -195,7 +196,9 @@ class OmniPalEngine:
 
     def _write_state(self, mode: str, count: int):
         self._ensure_run_dir()
-        profile_name = self.profiles.get(mode, {}).get("name", mode)
+        profile_data = self.profiles.get(mode, {})
+        profile_name = profile_data.get("name", mode)
+        display_meta = profile_data.get("display", {})
         daemon_pid = None
         if PID_FILE.exists():
             try:
@@ -204,9 +207,10 @@ class OmniPalEngine:
                 pass
 
         state_data = {
-            "version": "1.1.0",
+            "version": "1.2.0",
             "mode": mode,
             "name": profile_name,
+            "display": display_meta,
             "active_bindings_count": count,
             "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "pid": os.getpid(),
@@ -321,7 +325,7 @@ class OmniPalEngine:
 
         return success
 
-    def cycle_mode(self) -> str:
+    def cycle_mode(self, reverse: bool = False) -> str:
         """Cycles to the next mode in sequence: omarchy -> windows -> mac -> user profiles -> omarchy."""
         curated = ["omarchy", "windows", "mac"]
         user_modes = sorted([m for m in self.profiles if m not in curated])
@@ -330,9 +334,10 @@ class OmniPalEngine:
             modes = ["omarchy"]
 
         current = self.get_state().get("mode", "omarchy")
+        step = -1 if reverse else 1
         try:
             idx = modes.index(current)
-            next_mode = modes[(idx + 1) % len(modes)]
+            next_mode = modes[(idx + step) % len(modes)]
         except ValueError:
             next_mode = "windows" if "windows" in self.profiles else modes[0]
 
@@ -473,7 +478,7 @@ end"""
         """Runs comprehensive diagnostics on daemon, sockets, live binds, and state consistency."""
         report: Dict[str, Any] = {
             "healthy": True,
-            "version": "1.1.0",
+            "version": "1.2.0",
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "daemon": {"running": False, "pid": None},
             "socket2": {"connected": False, "path": None},
