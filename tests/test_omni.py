@@ -460,6 +460,104 @@ class TestPersistenceManager(unittest.TestCase):
         # Original directory state is untouched and visible again
         self.assertEqual(self.engine.get_persisted_profile(), "windows")
 
+class TestUsageStatistics(unittest.TestCase):
+    """Validates fully local usage statistics: isolation, increments, reset, and zero-impact fault tolerance."""
+
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._saved_env = os.environ.get("OMNIPAL_CONFIG_DIR")
+        os.environ["OMNIPAL_CONFIG_DIR"] = self._tmp_dir.name
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.stats_path = Path(self._tmp_dir.name) / "stats.json"
+        # Neutralize live Hyprland eval side effects for statistics flows.
+        self._orig_eval = self.engine._eval_lua
+        self.engine._eval_lua = lambda code: True
+
+    def tearDown(self):
+        self.engine._eval_lua = self._orig_eval
+        if self._saved_env is None:
+            os.environ.pop("OMNIPAL_CONFIG_DIR", None)
+        else:
+            os.environ["OMNIPAL_CONFIG_DIR"] = self._saved_env
+        self._tmp_dir.cleanup()
+
+    def test_initial_state_is_empty(self):
+        """Fresh environment reports the canonical empty structure without creating any file."""
+        stats = self.engine.get_stats()
+        self.assertEqual(stats["switches"], {})
+        self.assertEqual(stats["snaps"], {})
+        self.assertEqual(stats["actions"], {})
+        self.assertIsNone(stats["last_updated"])
+        self.assertIsNone(stats["last_reset"])
+        self.assertFalse(self.stats_path.exists())
+
+    def test_switch_and_snap_increment_counters(self):
+        """switch_mode and snap calls must aggregate per-mode / per-zone counts."""
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertTrue(self.engine.switch_mode("mac"))
+        self.assertTrue(self.engine.switch_mode("windows"))
+        stats = self.engine.get_stats()
+        self.assertEqual(stats["switches"], {"windows": 2, "mac": 1})
+        self.assertIsNotNone(stats["last_updated"])
+
+        self.assertTrue(self.engine.snap("left", no_hud=True))
+        self.assertTrue(self.engine.snap("left", no_hud=True))
+        self.assertTrue(self.engine.snap("layouts", no_hud=True))
+        stats = self.engine.get_stats()
+        self.assertEqual(stats["snaps"]["left"], 2)
+        self.assertEqual(stats["snaps"]["layouts"], 1)
+        self.assertTrue(self.stats_path.exists())
+
+    def test_record_action(self):
+        """record_action increments per-action trigger counters."""
+        self.engine.record_action("close_window")
+        self.engine.record_action("close_window")
+        self.engine.record_action("toggle_floating")
+        self.assertEqual(
+            self.engine.get_stats()["actions"],
+            {"close_window": 2, "toggle_floating": 1}
+        )
+
+    def test_reset_stats(self):
+        """reset_stats clears every bucket and stamps last_reset."""
+        self.engine.record_switch("mac")
+        self.engine.record_snap("right")
+        self.assertTrue(self.engine.reset_stats())
+        stats = self.engine.get_stats()
+        self.assertEqual(stats["switches"], {})
+        self.assertEqual(stats["snaps"], {})
+        self.assertEqual(stats["actions"], {})
+        self.assertIsNone(stats["last_updated"])
+        self.assertIsNotNone(stats["last_reset"])
+
+    def test_stats_failure_never_breaks_switch_or_snap(self):
+        """Zero-impact guarantee: unwritable stats target must not affect live switching or snapping."""
+        import engine.engine as engine_module
+        self.assertTrue(self.engine.switch_mode("windows"))
+        original = engine_module.stats_file_path
+        try:
+            engine_module.stats_file_path = lambda: Path("/proc/omnipal-invalid/stats.json")
+            self.assertTrue(self.engine.switch_mode("mac"))
+            self.assertTrue(self.engine.snap("right", no_hud=True))
+            self.assertEqual(self.engine.get_state()["mode"], "mac")
+        finally:
+            engine_module.stats_file_path = original
+
+    def test_env_config_dir_isolation(self):
+        """OMNIPAL_CONFIG_DIR must fully isolate every statistics read/write."""
+        self.engine.record_switch("windows")
+        with tempfile.TemporaryDirectory() as other_dir:
+            os.environ["OMNIPAL_CONFIG_DIR"] = other_dir
+            self.assertEqual(self.engine.get_stats()["switches"], {}, "环境变量重定向后必须读写隔离")
+            self.engine.record_snap("center")
+            self.assertEqual(self.engine.get_stats()["snaps"], {"center": 1})
+            self.assertFalse(self.stats_path.read_text(encoding="utf-8").count("center"),
+                             "隔离目录中的记录不得回流原目录")
+        os.environ["OMNIPAL_CONFIG_DIR"] = self._tmp_dir.name
+        stats = self.engine.get_stats()
+        self.assertEqual(stats["switches"], {"windows": 1})
+        self.assertEqual(stats["snaps"], {})
+
 if __name__ == "__main__":
     unittest.main()
 

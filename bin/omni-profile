@@ -13,7 +13,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from engine.engine import OmniPalEngine, run_daemon
+from engine.engine import OmniPalEngine, run_daemon, stats_file_path
 
 def cmd_status(engine: OmniPalEngine, args):
     state = engine.get_state()
@@ -208,12 +208,43 @@ def cmd_persist(engine: OmniPalEngine, args):
     print("用法: omni-profile persist <status|enable|disable>", file=sys.stderr)
     sys.exit(1)
 
+def _print_stat_rank(title: str, counts: dict, top: int = 10):
+    print(f"\n{title}")
+    if not counts:
+        print("  （暂无记录）")
+        return
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], str(kv[0])))[:top]
+    for i, (name, cnt) in enumerate(ranked, 1):
+        print(f"  {i}. {str(name).ljust(22)}{cnt} 次")
+
+def cmd_stats(engine: OmniPalEngine, args):
+    if args.reset:
+        if not engine.reset_stats():
+            print("❌ 重置本地使用统计失败", file=sys.stderr)
+            sys.exit(1)
+        print("✅ 已重置本地使用统计（stats.json 计数已全部清空）")
+
+    stats = engine.get_stats()
+    if args.json:
+        print(json.dumps(stats, indent=2, ensure_ascii=False))
+        return
+
+    total = sum(stats["switches"].values()) + sum(stats["snaps"].values()) + sum(stats["actions"].values())
+    print("📊 OmniPal 本地使用统计（纯本地聚合计数，零按键内容记录，零网络上传）")
+    print(f"  • 统计文件: {stats_file_path()}")
+    print(f"  • 累计事件: {total}")
+    print(f"  • 最近更新: {stats.get('last_updated') or '无'}")
+    print(f"  • 上次重置: {stats.get('last_reset') or '从未'}")
+    _print_stat_rank("🔁 模式切换频次排行:", stats["switches"])
+    _print_stat_rank("🧲 吸附区域使用 Top 榜:", stats["snaps"])
+    _print_stat_rank("⚡ 动作触发统计排行:", stats["actions"])
+
 def main():
     engine = OmniPalEngine(PROJECT_ROOT)
 
     parser = argparse.ArgumentParser(
         prog="omni-profile",
-        description="OmniPal 运行时内存热切换控制工具 (v1.4.0)"
+        description="OmniPal 运行时内存热切换控制工具 (v1.5.0)"
     )
     subparsers = parser.add_subparsers(dest="command", help="子命令")
 
@@ -283,6 +314,12 @@ def main():
     p_p_enable.set_defaults(func=cmd_persist)
     p_p_disable = persist_sub.add_parser("disable", help="关闭持久化并清理 persistence.json")
     p_p_disable.set_defaults(func=cmd_persist)
+
+    # stats
+    p_stats = subparsers.add_parser("stats", help="查看本地使用统计（切换/吸附/动作排行，完全本地零上传；--reset 清空）")
+    p_stats.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_stats.add_argument("--reset", action="store_true", help="清空并重置全部本地统计")
+    p_stats.set_defaults(func=cmd_stats)
 
     args = parser.parse_args()
     if not args.command:

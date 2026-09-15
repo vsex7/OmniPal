@@ -11,6 +11,7 @@ Strictly adheres to AGENTS.md rules:
 5. Instant rollback on injection failure
 6. User custom profiles support via ~/.config/omnipal/profiles/
 7. Opt-in profile persistence ONLY to ~/.config/omnipal/persistence.json (default disabled, zero writes)
+8. Fully local usage statistics in ~/.config/omnipal/stats.json (aggregate counters only, no keylogging, no network I/O)
 """
 
 import atexit
@@ -80,6 +81,10 @@ def resolve_config_dir() -> Path:
 def persistence_file_path() -> Path:
     """The single explicit opt-in persistence file. Never touched unless the user enables it."""
     return resolve_config_dir() / "persistence.json"
+
+def stats_file_path() -> Path:
+    """The fully local usage statistics file: aggregate counters only, never leaves the machine."""
+    return resolve_config_dir() / "stats.json"
 
 def find_socket2_path() -> Optional[Path]:
     """Dynamically resolves Hyprland socket2 path without assuming fixed instance signature."""
@@ -287,6 +292,86 @@ class OmniPalEngine:
             return False
         return True
 
+    # --- Fully local usage statistics (zero-overhead, silently fault-tolerant) ---
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Returns the canonical local usage stats structure; empty buckets when file is missing or corrupt."""
+        path = stats_file_path()
+        stats: Dict[str, Any] = {"switches": {}, "snaps": {}, "actions": {}, "last_updated": None, "last_reset": None}
+        if not path.exists():
+            return stats
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return stats
+        if isinstance(data, dict):
+            for bucket in ("switches", "snaps", "actions"):
+                raw = data.get(bucket)
+                if isinstance(raw, dict):
+                    stats[bucket] = {
+                        str(k): int(v)
+                        for k, v in raw.items()
+                        if isinstance(v, (int, float)) and not isinstance(v, bool)
+                    }
+            stats["last_updated"] = data.get("last_updated")
+            stats["last_reset"] = data.get("last_reset")
+        return stats
+
+    def reset_stats(self) -> bool:
+        """Clears all local usage statistics and stamps the reset time."""
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        ok = self._write_stats({
+            "switches": {},
+            "snaps": {},
+            "actions": {},
+            "last_updated": None,
+            "last_reset": now
+        })
+        if not ok:
+            print(f"Warning: Failed to reset stats file {stats_file_path()}", file=sys.stderr)
+        return ok
+
+    def record_switch(self, mode_id: str) -> None:
+        """Counts a successful mode switch. Any stats failure stays silent: never affects live switching."""
+        self._record_stat("switches", mode_id)
+
+    def record_snap(self, zone: str) -> None:
+        """Counts a snap invocation (left, right, layouts, center, ...). Silent on any failure."""
+        self._record_stat("snaps", zone)
+
+    def record_action(self, action_id: str) -> None:
+        """Counts an action trigger. Silent on any failure."""
+        self._record_stat("actions", action_id)
+
+    def _record_stat(self, bucket: str, key: str) -> None:
+        try:
+            key = (key or "").strip().lower()
+            if not key:
+                return
+            stats = self.get_stats()
+            stats[bucket][key] = stats[bucket].get(key, 0) + 1
+            stats["last_updated"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            self._write_stats(stats)
+        except Exception:
+            pass
+
+    def _write_stats(self, data: Dict[str, Any]) -> bool:
+        path = stats_file_path()
+        tmp_file = path.parent / (path.name + ".tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            tmp_file.replace(path)
+            return True
+        except Exception:
+            try:
+                tmp_file.unlink()
+            except Exception:
+                pass
+            return False
+
     def _eval_lua(self, lua_code: str) -> bool:
         """Executes Lua expressions in Omarchy Hyprland compositor with strict error checking."""
         if not lua_code.strip():
@@ -451,6 +536,7 @@ class OmniPalEngine:
         if success:
             self._write_active_overlay(new_overlay_records)
             self._write_state(target_mode, len(new_overlay_records))
+            self.record_switch(target_mode)
             # Opt-in persistence: mirror the successful switch only when the user explicitly enabled it.
             if self.get_persistence_status()["enabled"]:
                 self.set_persistence(True, target_mode)
@@ -502,6 +588,7 @@ class OmniPalEngine:
     def snap(self, zone: str, no_hud: bool = False) -> bool:
         """Triggers visual snap feedback and dispatches the corresponding window management action."""
         zone = zone.lower().strip()
+        self.record_snap(zone)
         self._ensure_run_dir()
         gap = self._get_hypr_gap()
 

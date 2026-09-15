@@ -49,12 +49,14 @@ if [ -d "${RUN_DIR}" ]; then
     echo "🧹 已清理运行目录: ${RUN_DIR}"
 fi
 
-# 6. 清理可选持久化配置（仅在用户显式开启过持久化时存在）
+# 6. 清理可选持久化与本地使用统计（仅存在于用户配置目录，绝不涉及 ~/.config/hypr）
 OMNIPAL_CONFIG_DIR_PATH="${OMNIPAL_CONFIG_DIR:-${HOME}/.config/omnipal}"
-if [ -f "${OMNIPAL_CONFIG_DIR_PATH}/persistence.json" ]; then
-    rm -f "${OMNIPAL_CONFIG_DIR_PATH}/persistence.json"
-    echo "🗑️ 已移除持久化配置: ${OMNIPAL_CONFIG_DIR_PATH}/persistence.json"
-fi
+for user_file in persistence.json stats.json; do
+    if [ -f "${OMNIPAL_CONFIG_DIR_PATH}/${user_file}" ]; then
+        rm -f "${OMNIPAL_CONFIG_DIR_PATH}/${user_file}"
+        echo "🗑️ 已移除: ${OMNIPAL_CONFIG_DIR_PATH}/${user_file}"
+    fi
+done
 # 配置目录为空时安全移除（含用户自定义 profiles 时保留）
 if [ -d "${OMNIPAL_CONFIG_DIR_PATH}" ] && [ -z "$(ls -A "${OMNIPAL_CONFIG_DIR_PATH}" 2>/dev/null)" ]; then
     rmdir "${OMNIPAL_CONFIG_DIR_PATH}" && echo "🧹 已移除空配置目录: ${OMNIPAL_CONFIG_DIR_PATH}"

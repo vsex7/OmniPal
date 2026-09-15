@@ -4,6 +4,22 @@
 
 ---
 
+## [v1.5.0] - 2026-09-15
+
+### 📊 本地使用统计 (Local Usage Statistics) — Milestone 3
+- **隐私优先、纯本地**：使用数据仅写入 `~/.config/omnipal/stats.json`（支持 `OMNIPAL_CONFIG_DIR` 隔离），只记录模式/吸附区域/动作的聚合计数，**零按键内容记录、零网络上传**；绝不触碰 `~/.config/hypr/`（Hard Stop H-1）。
+- **零开销容错**：`record_switch` / `record_snap` / `record_action` 全部异常静默吞掉，统计读写失败绝不阻塞或影响 `switch_mode` 与 `snap`；真机基准 Windows 切换 5.7ms / macOS 切换 4.8ms，持续满足 < 10ms 门禁。
+- **引擎层统计 API**：
+  - `stats_file_path()` 统一统计路径解析，遵循 `OMNIPAL_CONFIG_DIR` → `XDG_CONFIG_HOME` → `~/.config/omnipal` 优先级；
+  - `get_stats()` 返回规范结构 `{switches, snaps, actions, last_updated, last_reset}`，文件缺失或损坏时安全回退全空结构；
+  - `reset_stats()` 原子重置全部计数并记录 `last_reset`；
+  - `switch_mode` 成功后自动累计对应模式计数；`snap` 每次触发按区域（`left` / `right` / `layouts` / `center` 等）自增。
+- **CLI 统计命令**：`omni-profile stats [--json]` 输出模式切换频次排行、常用吸附区域 Top 榜与动作触发排行；`omni-profile stats --reset` 一键清空。
+- **干净卸载承诺**：`scripts/uninstall.sh` 清理步骤扩展覆盖 `stats.json`（支持 `OMNIPAL_CONFIG_DIR` 重定向），配置目录为空时一并安全移除。
+- **测试覆盖**：新增 `TestUsageStatistics`（6 项）：初始空结构零文件创建、switch/snap 自增、动作计数、reset、`OMNIPAL_CONFIG_DIR` 读写隔离，以及“统计目标不可写时 switch/snap 完全不受影响”的零影响保证；全套 31 项测试 100% 通过。
+
+---
+
 ## [v1.4.0] - 2026-09-15
 
 ### 💾 可选配置持久化 (Opt-in Profile Persistence) — Milestone 2
