@@ -1,7 +1,7 @@
 # OmniPal
 
 > **肌肉记忆无缝漫游，零配置污染的跨系统快捷键适配框架**  
-> 专为 **Omarchy / Hyprland** 深度定制 · 正式版本 **v1.3.0**
+> 专为 **Omarchy / Hyprland** 深度定制 · 正式版本 **v1.4.0**
 
 OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯的用户，在 Omarchy (Arch Linux + Hyprland + Quickshell) 上提供瞬时、无感、零污染的肌肉记忆还原方案。
 
@@ -27,6 +27,9 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
 - **内存级状态广播（tmpfs）**：
   - 运行时状态存储于 `/run/user/$UID/omnipal/state.json`。
   - Quickshell 插件通过 `Quickshell.Io.FileView` 响应更新，无需后台密集轮询。
+- **可选配置持久化（Opt-in Persistence，默认关闭）**：
+  - 仅在用户显式执行 `omni-profile persist enable` 后，才将目标模式写入唯一文件 `~/.config/omnipal/persistence.json`（支持 `OMNIPAL_CONFIG_DIR` 重定向）；默认仍是纯内存零文件写入模式。
+  - `switch` / `cycle` 成功后自动同步持久化模式；`persist disable` 或卸载脚本即可彻底清理，零残留。
 - **全套 Quickshell 专属插件**：
   1. `omni.mode-indicator`：Omarchy Top Bar 托盘模式指示器与右键快捷控制面板。左键循环轮转模式、右键弹出精致快捷面板（模式一键切换、快捷入口、系统诊断与控制）、中键设置，深度集成 `PopupCard` 与焦点自动收起。
   2. `omni.cheat-sheet`：快捷键 HUD 速查层，根据单一事实源动态渲染当前有效键位，支持按分类检索与按键说明。
@@ -85,6 +88,15 @@ omni-profile doctor
 
 # 执行微秒级性能基准测试
 omni-profile benchmark
+
+# 查看可选配置持久化状态（默认关闭，零文件写入）
+omni-profile persist status
+
+# 显式启用持久化（缺省记录当前模式，可指定模式名；非法模式将被拒绝）
+omni-profile persist enable mac
+
+# 关闭持久化并清理 persistence.json
+omni-profile persist disable
 
 # 瞬间还原至 Omarchy 原生快捷键
 omni-profile restore
@@ -150,7 +162,7 @@ OmniPal/
 ## 🛡️ 严格设计约束与安全保证
 
 根据 Omarchy 架构规范与 Hard Stop 铁律：
-1. **[H-1] 零配置篡改**：运行态绝不向 `~/.config/hypr/` 写入任何配置文件。
+1. **[H-1] 零配置篡改**：运行态绝不向 `~/.config/hypr/` 写入任何配置文件；持久化仅限用户显式开启（`persist enable`），且只写 `~/.config/omnipal/persistence.json`。
 2. **[H-5] 零像素截图**：`omni.overview` 与所有插件均通过 `hyprctl` 元数据渲染，避免截屏权限与 GPU 显存浪费。
 3. **[H-3] 单一事实源**：键位逻辑全部收敛于 `schema/actions.json`，QML 插件内绝无按键硬编码。
 4. **[H-7] Shell 配置文件隔离**：绝不篡改 `~/.config/omarchy/shell.json`，插件仅以标准符号链接安装在 `~/.config/omarchy/plugins/` 供 shell 动态挂载。
@@ -172,4 +184,5 @@ bash scripts/uninstall.sh
 3. 移除 `~/.local/bin/omni-profile`
 4. 移除 `~/.config/omarchy/plugins/` 下的所有软链接
 5. 清理 `/run/user/$UID/omnipal` 运行时临时目录
+6. 清理可选持久化配置 `~/.config/omnipal/persistence.json`（配置目录为空时一并移除）
 保证系统零文件残留，还原至完全初始状态。

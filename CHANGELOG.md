@@ -4,6 +4,22 @@
 
 ---
 
+## [v1.4.0] - 2026-09-15
+
+### 💾 可选配置持久化 (Opt-in Profile Persistence) — Milestone 2
+- **默认零污染铁律不变（Hard Stop H-1）**：持久化默认关闭，运行时仍是纯内存热切换；仅在用户显式执行 `omni-profile persist enable` 后，才写入唯一文件 `~/.config/omnipal/persistence.json`，绝不触碰 `~/.config/hypr/`。
+- **配置目录统一解析 (`resolve_config_dir()`)**：优先 `OMNIPAL_CONFIG_DIR` 环境变量（测试隔离），其次 `XDG_CONFIG_HOME`，默认 `~/.config/omnipal`。
+- **引擎层持久化 API**：
+  - `get_persistence_status()` 返回规范结构 `{enabled, profile, path, updated_at}`；
+  - `set_persistence(enabled, profile)` 原子写入（tmp + rename）：profile 缺省时取当前激活模式（仍为空则回退 `windows`），非法/未知模式一律拒绝写入；关闭时彻底清理持久化文件；
+  - `get_persisted_profile()` 供守护进程与启动项检测已启用的持久化模式。
+- **切换自动同步**：`switch_mode` 成功后，若持久化已启用则自动将最新模式镜像更新至 `persistence.json`；未启用时保持零文件写入。
+- **CLI 子命令**：新增 `omni-profile persist status [--json]` / `omni-profile persist enable [profile]` / `omni-profile persist disable`，人类可读输出与规范 JSON 双模式。
+- **干净卸载承诺**：`scripts/uninstall.sh` 新增持久化清理步骤，删除 `persistence.json`（支持 `OMNIPAL_CONFIG_DIR` 重定向），配置目录为空时一并安全移除。
+- **测试覆盖**：新增 `TestPersistenceManager`（`TemporaryDirectory` + `OMNIPAL_CONFIG_DIR` 隔离），覆盖默认禁用、enable/disable 往返、非法模式阻断、`switch_mode` 自动同步与环境变量读写隔离；全套 25 项测试 100% 通过。
+
+---
+
 ## [v1.3.0] - 2026-09-15
 
 ### 📐 可视化窗口吸附布局与选择器 (Snap Layouts Picker)

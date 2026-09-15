@@ -172,12 +172,48 @@ def cmd_list(engine: OmniPalEngine, args):
             src += " (覆盖)"
         print(f"{p['id'].ljust(12)}{p['name'].ljust(22)}{str(p['bindings_count']).ljust(10)}{src.ljust(12)}{p['description']}")
 
+def cmd_persist(engine: OmniPalEngine, args):
+    action = getattr(args, "persist_action", None)
+
+    if action == "status":
+        status = engine.get_persistence_status()
+        if args.json:
+            print(json.dumps(status, indent=2, ensure_ascii=False))
+            return
+        if status["enabled"]:
+            print("💾 OmniPal 配置持久化: ✅ 已启用（显式可选功能）")
+            print(f"  • 持久化模式: {status['profile']}")
+            print(f"  • 最近更新: {status.get('updated_at') or '未知'}")
+        else:
+            print("💾 OmniPal 配置持久化: ⏸ 未启用（默认零文件写入运行时模式）")
+        print(f"  • 配置文件: {status['path']}")
+        return
+
+    if action == "enable":
+        if not engine.set_persistence(True, args.profile):
+            print("❌ 启用持久化被拒绝：模式无效或配置写入失败", file=sys.stderr)
+            sys.exit(1)
+        status = engine.get_persistence_status()
+        print(f"✅ 已启用配置持久化: 模式 '{status['profile']}' 记录于 {status['path']}")
+        print("   后续 switch / cycle 成功后将自动同步持久化模式（可随时执行 persist disable 关闭并清理）。")
+        return
+
+    if action == "disable":
+        if not engine.set_persistence(False):
+            print("❌ 关闭持久化失败，请检查配置文件权限", file=sys.stderr)
+            sys.exit(1)
+        print("✅ 已关闭配置持久化并清理持久化文件（恢复默认零文件写入模式）")
+        return
+
+    print("用法: omni-profile persist <status|enable|disable>", file=sys.stderr)
+    sys.exit(1)
+
 def main():
     engine = OmniPalEngine(PROJECT_ROOT)
 
     parser = argparse.ArgumentParser(
         prog="omni-profile",
-        description="OmniPal 运行时内存热切换控制工具 (v1.2.0)"
+        description="OmniPal 运行时内存热切换控制工具 (v1.4.0)"
     )
     subparsers = parser.add_subparsers(dest="command", help="子命令")
 
@@ -235,6 +271,18 @@ def main():
     # daemon
     p_daemon = subparsers.add_parser("daemon", help="前台运行守护进程（带自动退出恢复）")
     p_daemon.set_defaults(func=lambda eng, args: run_daemon())
+
+    # persist
+    p_persist = subparsers.add_parser("persist", help="管理可选配置持久化（默认关闭，零文件写入）")
+    persist_sub = p_persist.add_subparsers(dest="persist_action", required=True, help="持久化操作")
+    p_p_status = persist_sub.add_parser("status", help="查看持久化启用状态与配置文件路径")
+    p_p_status.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_p_status.set_defaults(func=cmd_persist)
+    p_p_enable = persist_sub.add_parser("enable", help="显式启用持久化并记录目标模式（默认当前模式）")
+    p_p_enable.add_argument("profile", nargs="?", default=None, help="要持久化的模式（默认当前已激活模式；非法模式将被拒绝）")
+    p_p_enable.set_defaults(func=cmd_persist)
+    p_p_disable = persist_sub.add_parser("disable", help="关闭持久化并清理 persistence.json")
+    p_p_disable.set_defaults(func=cmd_persist)
 
     args = parser.parse_args()
     if not args.command:

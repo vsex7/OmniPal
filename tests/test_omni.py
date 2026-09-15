@@ -5,7 +5,9 @@ Tests schema consistency, state management, profile parsing, and plugin complian
 """
 
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -368,6 +370,95 @@ class TestOmniPal(unittest.TestCase):
         self.assertNotIn("sh -c", content)
         self.assertIn("--batch", content)
         self.assertIn("workspaces ; clients ; monitors ; activewindow", content)
+
+class TestPersistenceManager(unittest.TestCase):
+    """Validates the opt-in profile persistence isolated via OMNIPAL_CONFIG_DIR."""
+
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._saved_env = os.environ.get("OMNIPAL_CONFIG_DIR")
+        os.environ["OMNIPAL_CONFIG_DIR"] = self._tmp_dir.name
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.persist_path = Path(self._tmp_dir.name) / "persistence.json"
+        # Neutralize live Hyprland eval side effects for persistence flows.
+        self._orig_eval = self.engine._eval_lua
+        self.engine._eval_lua = lambda code: True
+
+    def tearDown(self):
+        self.engine._eval_lua = self._orig_eval
+        if self._saved_env is None:
+            os.environ.pop("OMNIPAL_CONFIG_DIR", None)
+        else:
+            os.environ["OMNIPAL_CONFIG_DIR"] = self._saved_env
+        self._tmp_dir.cleanup()
+
+    def test_default_state_is_disabled(self):
+        """Fresh environment must report disabled with zero persistence files written."""
+        status = self.engine.get_persistence_status()
+        self.assertFalse(status["enabled"])
+        self.assertIsNone(status["profile"])
+        self.assertIsNone(status["updated_at"])
+        self.assertEqual(status["path"], str(self.persist_path))
+        self.assertFalse(self.persist_path.exists(), "默认零文件写入：不得创建 persistence.json")
+        self.assertIsNone(self.engine.get_persisted_profile())
+
+    def test_enable_disable_and_invalid_profile(self):
+        """Enable/disable round-trip plus rejection of unknown profiles."""
+        self.assertTrue(self.engine.set_persistence(True, "mac"))
+        status = self.engine.get_persistence_status()
+        self.assertTrue(status["enabled"])
+        self.assertEqual(status["profile"], "mac")
+        self.assertIsNotNone(status["updated_at"])
+        self.assertTrue(self.persist_path.exists())
+        self.assertEqual(self.engine.get_persisted_profile(), "mac")
+
+        # Illegal profile must be refused without touching the stored state
+        self.assertFalse(self.engine.set_persistence(True, "nonexistent_bogus"))
+        status = self.engine.get_persistence_status()
+        self.assertTrue(status["enabled"])
+        self.assertEqual(status["profile"], "mac")
+
+        self.assertTrue(self.engine.set_persistence(False))
+        status = self.engine.get_persistence_status()
+        self.assertFalse(status["enabled"])
+        self.assertIsNone(status["profile"])
+        self.assertFalse(self.persist_path.exists(), "关闭持久化必须彻底清理 persistence.json")
+        self.assertIsNone(self.engine.get_persisted_profile())
+
+    def test_switch_mode_autosyncs_persisted_profile(self):
+        """switch_mode must mirror into persistence.json only while persistence is enabled."""
+        self.assertTrue(self.engine.set_persistence(True, "windows"))
+        self.assertTrue(self.engine.switch_mode("mac"))
+        status = self.engine.get_persistence_status()
+        self.assertTrue(status["enabled"])
+        self.assertEqual(status["profile"], "mac")
+        self.assertEqual(self.engine.get_persisted_profile(), "mac")
+
+        # Disabled persistence stays fully inert during switches (zero writes)
+        self.assertTrue(self.engine.set_persistence(False))
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertFalse(self.persist_path.exists())
+
+    def test_enable_without_profile_uses_active_mode(self):
+        """Enabling with no explicit profile persists the currently active mode."""
+        self.assertTrue(self.engine.switch_mode("mac"))
+        self.assertTrue(self.engine.set_persistence(True))
+        self.assertEqual(self.engine.get_persistence_status()["profile"], "mac")
+
+    def test_env_config_dir_isolation(self):
+        """OMNIPAL_CONFIG_DIR must fully isolate every persistence read/write."""
+        self.assertTrue(self.engine.set_persistence(True, "windows"))
+        self.assertTrue(self.persist_path.exists())
+
+        with tempfile.TemporaryDirectory() as other_dir:
+            os.environ["OMNIPAL_CONFIG_DIR"] = other_dir
+            status = self.engine.get_persistence_status()
+            self.assertFalse(status["enabled"], "切换 OMNIPAL_CONFIG_DIR 后必须读写隔离")
+            self.assertEqual(status["path"], str(Path(other_dir) / "persistence.json"))
+            self.assertFalse((Path(other_dir) / "persistence.json").exists())
+        os.environ["OMNIPAL_CONFIG_DIR"] = self._tmp_dir.name
+        # Original directory state is untouched and visible again
+        self.assertEqual(self.engine.get_persisted_profile(), "windows")
 
 if __name__ == "__main__":
     unittest.main()

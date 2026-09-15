@@ -10,6 +10,7 @@ Strictly adheres to AGENTS.md rules:
 4. State broadcast via /run/user/$UID/omnipal/state.json (tmpfs)
 5. Instant rollback on injection failure
 6. User custom profiles support via ~/.config/omnipal/profiles/
+7. Opt-in profile persistence ONLY to ~/.config/omnipal/persistence.json (default disabled, zero writes)
 """
 
 import atexit
@@ -65,6 +66,20 @@ def resolve_user_profiles_dir() -> Path:
     if xdg_config:
         return Path(xdg_config) / "omnipal" / "profiles"
     return Path.home() / ".config" / "omnipal" / "profiles"
+
+def resolve_config_dir() -> Path:
+    """Resolves the OmniPal user config directory, honoring OMNIPAL_CONFIG_DIR and XDG."""
+    env_dir = os.environ.get("OMNIPAL_CONFIG_DIR")
+    if env_dir:
+        return Path(env_dir)
+    xdg_config = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config:
+        return Path(xdg_config) / "omnipal"
+    return Path.home() / ".config" / "omnipal"
+
+def persistence_file_path() -> Path:
+    """The single explicit opt-in persistence file. Never touched unless the user enables it."""
+    return resolve_config_dir() / "persistence.json"
 
 def find_socket2_path() -> Optional[Path]:
     """Dynamically resolves Hyprland socket2 path without assuming fixed instance signature."""
@@ -199,6 +214,78 @@ class OmniPalEngine:
                 "file": p_data.get("_file", "")
             })
         return res
+
+    # --- Optional explicit persistence (opt-in only; default runtime stays zero-write) ---
+
+    def get_persistence_status(self) -> Dict[str, Any]:
+        """Returns the explicit persistence state: {enabled, profile, path, updated_at}."""
+        path = persistence_file_path()
+        status: Dict[str, Any] = {"enabled": False, "profile": None, "path": str(path), "updated_at": None}
+        if not path.exists():
+            return status
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return status
+        if isinstance(data, dict):
+            status["enabled"] = bool(data.get("enabled", False))
+            status["profile"] = data.get("profile") if status["enabled"] else None
+            status["updated_at"] = data.get("updated_at")
+        return status
+
+    def get_persisted_profile(self) -> Optional[str]:
+        """Returns the enabled persisted profile id for daemon/startup use, or None."""
+        status = self.get_persistence_status()
+        profile = status.get("profile")
+        if status["enabled"] and profile in self.profiles:
+            return profile
+        return None
+
+    def set_persistence(self, enabled: bool, profile: Optional[str] = None) -> bool:
+        """Enables/disables explicit profile persistence. Writes ONLY ~/.config/omnipal/persistence.json (H-1)."""
+        path = persistence_file_path()
+
+        if not enabled:
+            try:
+                if path.exists():
+                    path.unlink()
+            except Exception as e:
+                print(f"Warning: Failed to remove persistence config {path}: {e}", file=sys.stderr)
+                return False
+            return True
+
+        # Empty profile falls back to the currently active mode, then to windows.
+        target = (profile or self.get_state().get("mode") or "windows").lower().strip()
+        if target not in self.profiles:
+            valid = ", ".join(sorted(self.profiles.keys()))
+            print(f"Error: Unknown profile '{target}' for persistence. Available profiles: {valid}", file=sys.stderr)
+            return False
+
+        data = {
+            "enabled": True,
+            "profile": target,
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            print(f"Warning: Failed to create config dir {path.parent}: {e}", file=sys.stderr)
+            return False
+
+        tmp_file = path.parent / (path.name + ".tmp")
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            tmp_file.replace(path)
+        except Exception as e:
+            print(f"Warning: Failed to write persistence config {path}: {e}", file=sys.stderr)
+            try:
+                tmp_file.unlink()
+            except Exception:
+                pass
+            return False
+        return True
 
     def _eval_lua(self, lua_code: str) -> bool:
         """Executes Lua expressions in Omarchy Hyprland compositor with strict error checking."""
@@ -364,6 +451,9 @@ class OmniPalEngine:
         if success:
             self._write_active_overlay(new_overlay_records)
             self._write_state(target_mode, len(new_overlay_records))
+            # Opt-in persistence: mirror the successful switch only when the user explicitly enabled it.
+            if self.get_persistence_status()["enabled"]:
+                self.set_persistence(True, target_mode)
         else:
             print("Warning: Failed to apply overlay in Hyprland, rolling back to baseline...", file=sys.stderr)
             self.restore()
