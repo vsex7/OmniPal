@@ -1,7 +1,9 @@
 # omni.cheat-sheet — OmniPal 快捷键速查 HUD
 
 按下热键呼出的内存化覆盖层：按 `category` 分组列出**当前生效模式**的快捷键，
-键位数据全部来自 Engine，插件本体不含任何键位副本。
+键位数据全部来自 Engine，插件本体不含任何键位副本。头部胶囊可无缝预览各 Profile，
+分类胶囊 + 搜索双维过滤，物理质感键帽按模式渲染原生字符（⌘ / ⊞ Win / Super），
+按住修饰键即可实时高亮所有使用该键的条目（键盘肌肉记忆训练器）。
 
 对应 `docs/features.md` 的 HUD 功能项，遵守 `AGENTS.md` 铁律 1/2/3/5 与 H-1/H-6/H-7。
 
@@ -37,8 +39,8 @@ CheatSheet.qml ──Process──▶ fetch.sh ──▶ omni-profile status    
 | 文件 | 职责 |
 |---|---|
 | `manifest.json` | 插件清单，`kinds: ["overlay"]`、`keepLoaded: true` |
-| `CheatSheet.qml` | 展示层：PanelWindow + 遮罩 + 分组列表 + 降级状态 |
-| `CheatSheetData.js` | 纯函数：分类标题映射、按 category 分组、组合键拆分、高度计算 |
+| `CheatSheet.qml` | 展示层：PanelWindow + 遮罩 + Profile 预览胶囊 + 分类过滤条 + 键帽行列表 + 实时修饰键高亮 + 降级状态 |
+| `CheatSheetData.js` | 纯函数：分类标题映射、分组、组合键拆分、高度计算、`formatKeyCap` 键帽转译、`extractCategories` 分类计数、`filterRows` 查询×分类过滤、`isModifierActive` 按下修饰键匹配 |
 | `fetch.sh` | 只读数据助手（唯一的外部命令入口） |
 
 ## 宿主契约
@@ -60,16 +62,29 @@ argv 传递，绝不拼进命令行字符串。
 
 居中卡片（毛玻璃：半透明表面 + 合成器 blur，无额外 shader pass）：
 
-- 头部：模式徽标 · 「快捷键速查」 · `Engine 运行中 · 覆盖生效 | 原生模式 | 未运行 | 状态未知` · 条目数 · 预览标记
+- 头部：🪟 Windows 11 / 🍎 macOS / ⊡ Omarchy 原生**预览胶囊组**（点击即切换查看对应
+  Profile；Engine 当前生效模式带绿点标记，预览≠生效一目了然）· 「快捷键速查」·
+  `Engine 运行中 · 覆盖生效 | 原生模式 | 未运行 | 状态未知` · 条目数 · 搜索框
+- 分类筛选胶囊条：`extractCategories` 按当前搜索词实时计数
+  （如「全部 19」「窗口吸附 6」），点击即过滤，`Tab` / `Shift+Tab` 键盘循环；
+  分类少于两项时自动收起不占高度
 - 主体：按 profile 中的 category 出现顺序分组；每组 = 分类标题 + 行
-  （组合键 chips / 动作名 / 描述），超出高度可滚动
+  （组合键键帽 / 动作名 / 描述），超出高度可滚动
+- 键帽行：真实立体按键质感（纵向渐变 + 顶部高光 + 底部阴影凹槽），
+  `formatKeyCap(part, mode)` 按模式渲染物理键帽字符——mac：`⌘ ⌥ ⌃ ⇧ ↵ ⎋ ⌫ ⇥ ␣ ←↓↑→`；
+  windows：`⊞ Win / Alt / Ctrl / Shift / ↵ Enter / ⇥ Tab`；omarchy/通用：`Super / Alt / Ctrl / Shift`。
+  未知按键原样回退，绝不丢条目
+- 实时按键高亮反馈（Live Modifier Highlight）：在 HUD 中按住 Super / Alt / Ctrl / Shift，
+  所有包含该修饰键的行泛起主题色底、对应键帽边框呼吸闪烁（`isModifierActive`），
+  松手即复原——把速查表变成肌肉记忆训练器
 - 底部：操作提示
 
 配色与尺寸全部取 `qs.Commons` 的 `[menu]` 主题令牌（`Color.menu.*`、
 `Style.space/font/cornerRadius/hoverFill`、`Border.surfaceSpec`），跟随 Omarchy
-主题，不自定义色值。
+主题，不自定义色值（键帽高光/阴影的中性白黑除外）。
 
-键盘：`Esc` / 点击遮罩关闭 · `R` 重新读取 · `↑↓ PgUp PgDn Home End` 滚动。
+键盘：`Esc` / 点击遮罩关闭 · `/` 聚焦搜索 · `Tab` / `Shift+Tab` 切换分类胶囊 ·
+`R` 重新读取 · `↑↓ PgUp PgDn Home End` 滚动 · 按住修饰键触发高亮反馈。
 卡片内 `keyCatcher`（`Keys.priority: Keys.BeforeItem`）与 `WlrKeyboardFocus.Exclusive`
 的写法和 `omarchy.emojis` / `omarchy.clipboard` / `omarchy.reminders` 一致。
 
@@ -106,6 +121,7 @@ omarchy-shell shell hide   omni.cheat-sheet
 | 输出不是 JSON 数组 | 「解析 Engine 输出失败」+ 版本一致性提示 |
 | 预览的 Profile 不存在（退出码 2） | 「没有这个模式」+ 该模式的读取命令 |
 | 原生模式（0 条覆盖） | 「当前没有生效的快捷键覆盖」+ `omni-profile switch windows` |
+| 搜索词 × 分类过滤后无结果 | 「没有匹配的条目」+ 换词 / 点「全部」重试提示（原始列表仍在，清空即恢复） |
 | `status` 不可读但 cheatsheet 可读 | 列表照常显示，头部标注「Engine 状态未知」 |
 
 未知 `category` 会以 schema 原始 id 显示（`CheatSheetData.js` 的 `CATEGORY_LABELS`

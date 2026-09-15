@@ -38,20 +38,77 @@ Item {
   property string errorCommand: ""
   property var rawRows: []
   property string filterText: ""
+  property string filterCategory: "all"
+  property var categories: []
+
+  // Live Modifier Highlight 状态：按住 Super/Alt/Ctrl/Shift 时高亮关联行与键帽
+  property var liveMods: ({})
+  property bool modsActive: false
+
+  // 顶部 Profile 快速预览胶囊（只有模式 id 与装饰图标，键位真值仍归 Engine，铁律 3）
+  readonly property var previewModes: [
+    { id: "windows", label: "🪟 Windows 11" },
+    { id: "mac", label: "🍎 macOS" },
+    { id: "omarchy", label: "⊡ Omarchy 原生" }
+  ]
 
   function applyFilter() {
-    var query = root.filterText.trim().toLowerCase()
-    var filtered = root.rawRows
-    if (query !== "") {
-      filtered = root.rawRows.filter(function(item) {
-        var k = String(item.key || "").toLowerCase()
-        var n = String(item.name || "").toLowerCase()
-        var d = String(item.description || "").toLowerCase()
-        return k.indexOf(query) !== -1 || n.indexOf(query) !== -1 || d.indexOf(query) !== -1
-      })
+    var query = root.filterText.trim()
+    var queryRows = SheetData.filterRows(root.rawRows, query, "all")
+    root.categories = SheetData.extractCategories(queryRows)
+    var keep = false
+    for (var i = 0; i < root.categories.length; i++) {
+      if (root.categories[i].id === root.filterCategory) keep = true
     }
-    root.groups = SheetData.groupByCategory(filtered)
-    root.bindingCount = filtered.length
+    if (!keep) root.filterCategory = "all"
+    var rows = root.filterCategory === "all"
+      ? queryRows
+      : SheetData.filterRows(root.rawRows, query, root.filterCategory)
+    root.groups = SheetData.groupByCategory(rows)
+    root.bindingCount = rows.length
+  }
+
+  function selectCategory(id) {
+    root.filterCategory = id
+    root.applyFilter()
+    body.contentY = 0
+  }
+
+  function cycleCategory(dir) {
+    var cats = root.categories
+    if (cats.length <= 1) return
+    var idx = 0
+    for (var i = 0; i < cats.length; i++) if (cats[i].id === root.filterCategory) idx = i
+    root.filterCategory = cats[(idx + dir + cats.length) % cats.length].id
+    root.applyFilter()
+    body.contentY = 0
+  }
+
+  function previewMode(id) {
+    if (root.requestedMode === id) return
+    root.requestedMode = id
+    root.filterCategory = "all"
+    root.refresh()
+  }
+
+  function focusSearch() {
+    searchInput.forceActiveFocus()
+  }
+
+  function syncMods(mask) {
+    var mods = {
+      super: (mask & Qt.MetaModifier) !== 0,
+      alt: (mask & Qt.AltModifier) !== 0,
+      ctrl: (mask & Qt.ControlModifier) !== 0,
+      shift: (mask & Qt.ShiftModifier) !== 0
+    }
+    root.modsActive = mods.super || mods.alt || mods.ctrl || mods.shift
+    root.liveMods = mods
+  }
+
+  function clearMods() {
+    root.liveMods = ({})
+    root.modsActive = false
   }
 
   readonly property string pluginId: (root.manifest && root.manifest.id) || "omni.cheat-sheet"
@@ -88,8 +145,12 @@ Item {
   readonly property int cardWidth: Math.min(panel.width - Style.space(64),
     Math.max(Style.space(520), Math.min(Style.space(780), Math.round(panel.width * 0.5))))
 
+  // 分类胶囊条仅在存在可过滤分类时贡献高度；Flow 按可用宽度决定行数，无循环依赖。
+  readonly property bool categoryBarShown: root.categories.length > 1
+  readonly property int categoryBarHeight: categoryBarShown ? pillFlow.implicitHeight : 0
+  readonly property int categoryBarGap: categoryBarShown ? blockGap : 0
   readonly property int chromeHeight: card.contentTopInset + card.contentBottomInset
-    + titleHeight + blockGap * 3 + footerHeight + 1
+    + titleHeight + blockGap * 3 + footerHeight + 1 + categoryBarHeight + categoryBarGap
   readonly property int bodyContentHeight: root.groups.length > 0
     ? SheetData.contentHeight(root.groups, root.rowHeight, root.groupHeaderHeight, root.groupGap)
     : root.placeholderHeight
@@ -126,6 +187,9 @@ Item {
     root.requestedMode = /^[a-z0-9][a-z0-9_-]*$/.test(mode) ? mode : ""
 
     root.filterText = ""
+    root.filterCategory = "all"
+    root.categories = []
+    root.clearMods()
     if (searchInput) searchInput.text = ""
     root.opened = true
     root.refresh()
@@ -317,10 +381,20 @@ Item {
 
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
+          root.syncMods(event.modifiers)
           var scrollFloor = 0
           var scrollCeil = Math.max(0, body.contentHeight - body.height)
           if (event.key === Qt.Key_Escape) {
             root.dismiss()
+            event.accepted = true
+          } else if (event.key === Qt.Key_Tab) {
+            root.cycleCategory((event.modifiers & Qt.ShiftModifier) !== 0 ? -1 : 1)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Backtab) {
+            root.cycleCategory(-1)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Slash) {
+            root.focusSearch()
             event.accepted = true
           } else if (event.key === Qt.Key_R) {
             root.refresh()
@@ -345,6 +419,9 @@ Item {
             event.accepted = true
           }
         }
+        Keys.onReleased: function(event) {
+          root.syncMods(event.modifiers)
+        }
       }
 
       // ----------------------------------------------------------- header
@@ -358,35 +435,74 @@ Item {
         anchors.rightMargin: card.contentRightInset
         height: root.titleHeight
 
-        Rectangle {
-          id: modePill
-          width: Math.min(modeLabel.implicitWidth + Style.space(18), Style.space(280))
-          height: Style.space(24)
-          radius: Math.min(root.cornerRadius, height / 2)
+        // ---- 顶部 Profile 快速预览胶囊组：点击即切换查看对应模式速查 ----
+        Row {
+          id: previewPills
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          color: Util.alpha(root.accent, 0.12)
-          border.color: Util.alpha(root.accent, 0.4)
-          border.width: 1
+          spacing: Style.space(6)
 
-          Text {
-            id: modeLabel
-            textFormat: Text.PlainText
-            anchors.centerIn: parent
-            width: modePill.width - Style.space(12)
-            text: root.displayModeName
-            color: root.accent
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            font.bold: true
-            horizontalAlignment: Text.AlignHCenter
-            elide: Text.ElideRight
+          Repeater {
+            model: root.previewModes
+
+            delegate: Rectangle {
+              id: previewPill
+              required property var modelData
+              readonly property bool selected: root.displayMode === modelData.id
+              readonly property bool engineActive: root.stateKnown
+                && String(root.engineState.mode || "") === modelData.id
+
+              height: Style.space(26)
+              width: pillInner.implicitWidth + Style.space(16)
+              radius: height / 2
+              color: selected ? Util.alpha(root.accent, 0.18)
+                : pillHover.containsMouse ? Util.alpha(root.foreground, 0.08) : "transparent"
+              border.width: 1
+              border.color: selected ? Util.alpha(root.accent, 0.6) : root.hairline
+              Behavior on color { ColorAnimation { duration: 140 } }
+              Behavior on border.color { ColorAnimation { duration: 140 } }
+
+              Row {
+                id: pillInner
+                anchors.centerIn: parent
+                spacing: Style.space(5)
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  textFormat: Text.PlainText
+                  text: previewPill.modelData.label
+                  color: previewPill.selected ? root.accent : Util.alpha(root.foreground, 0.82)
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: previewPill.selected
+                }
+
+                Rectangle {
+                  // Engine 当前生效模式绿点标记（预览≠生效时一目了然）
+                  visible: previewPill.engineActive
+                  width: Style.space(5)
+                  height: Style.space(5)
+                  radius: 3
+                  color: "#a3be8c"
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+              }
+
+              MouseArea {
+                id: pillHover
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.previewMode(previewPill.modelData.id)
+              }
+            }
           }
         }
 
         Column {
           id: titleColumn
-          anchors.left: modePill.right
+          visible: root.cardWidth >= Style.space(620)
+          anchors.left: previewPills.right
           anchors.leftMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
 
@@ -409,63 +525,50 @@ Item {
           }
         }
 
-        Row {
+        BorderSurface {
+          id: searchBox
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(10)
+          width: Style.space(160)
+          height: Style.space(26)
+          radius: height / 2
+          color: Util.alpha(root.foreground, 0.06)
+          borderSpec: root.borderSpec
+          padding: Style.space(4)
 
-          Text {
-            textFormat: Text.PlainText
-            visible: root.requestedMode !== ""
-            text: "预览模式"
-            color: root.accent
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            anchors.verticalCenter: parent.verticalCenter
-          }
+          Row {
+            anchors.fill: parent
+            spacing: Style.space(6)
 
-          BorderSurface {
-            id: searchBox
-            width: Style.space(160)
-            height: Style.space(26)
-            radius: height / 2
-            color: Util.alpha(root.foreground, 0.06)
-            borderSpec: root.borderSpec
-            padding: Style.space(4)
+            Text {
+              text: "🔍"
+              font.pixelSize: 10
+              color: Util.alpha(root.foreground, 0.5)
+              anchors.verticalCenter: parent.verticalCenter
+            }
 
-            Row {
-              anchors.fill: parent
-              spacing: Style.space(6)
+            TextInput {
+              id: searchInput
+              width: parent.width - Style.space(24)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              color: root.foreground
+              anchors.verticalCenter: parent.verticalCenter
+              selectByMouse: true
 
               Text {
-                text: "🔍"
-                font.pixelSize: 10
-                color: Util.alpha(root.foreground, 0.5)
+                text: "搜索 · /"
+                visible: searchInput.text === ""
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                color: Util.alpha(root.foreground, 0.4)
                 anchors.verticalCenter: parent.verticalCenter
               }
 
-              TextInput {
-                id: searchInput
-                width: parent.width - Style.space(24)
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                color: root.foreground
-                anchors.verticalCenter: parent.verticalCenter
-                selectByMouse: true
-
-                Text {
-                  text: "搜索..."
-                  visible: searchInput.text === ""
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  color: Util.alpha(root.foreground, 0.4)
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-
-                onTextChanged: {
-                  root.filterText = text
-                  root.applyFilter()
-                }
+              onTextChanged: {
+                root.filterText = text
+                root.applyFilter()
+                body.contentY = 0
               }
             }
           }
@@ -484,10 +587,92 @@ Item {
         color: root.hairline
       }
 
+      // ---- 分类筛选胶囊条（带数量徽章，Tab / Shift+Tab 键盘循环） ----
+      Item {
+        id: categoryBar
+        anchors.top: headerRule.bottom
+        anchors.topMargin: root.blockGap
+        anchors.left: parent.left
+        anchors.leftMargin: card.contentLeftInset
+        anchors.right: parent.right
+        anchors.rightMargin: card.contentRightInset
+        height: root.categoryBarShown ? pillFlow.implicitHeight : 0
+
+        Flow {
+          id: pillFlow
+          anchors.left: parent.left
+          anchors.right: parent.right
+          spacing: Style.space(6)
+
+          Repeater {
+            model: root.categories
+
+            delegate: Rectangle {
+              id: catPill
+              required property var modelData
+              readonly property bool selected: root.filterCategory === modelData.id
+
+              width: catPillRow.implicitWidth + Style.space(14)
+              height: Style.space(24)
+              radius: height / 2
+              color: selected ? Util.alpha(root.accent, 0.16)
+                : catPillHover.containsMouse ? Util.alpha(root.foreground, 0.07) : "transparent"
+              border.width: 1
+              border.color: selected ? Util.alpha(root.accent, 0.55) : root.hairline
+              Behavior on color { ColorAnimation { duration: 130 } }
+              Behavior on border.color { ColorAnimation { duration: 130 } }
+
+              Row {
+                id: catPillRow
+                anchors.centerIn: parent
+                spacing: Style.space(5)
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  textFormat: Text.PlainText
+                  text: catPill.modelData.label
+                  color: catPill.selected ? root.accent : Util.alpha(root.foreground, 0.82)
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: catPill.selected
+                }
+
+                Rectangle {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Math.max(Style.space(15), catCountLabel.implicitWidth + Style.space(6))
+                  height: Style.space(14)
+                  radius: 7
+                  color: catPill.selected ? Util.alpha(root.accent, 0.25) : root.chipColor
+
+                  Text {
+                    id: catCountLabel
+                    anchors.centerIn: parent
+                    textFormat: Text.PlainText
+                    text: catPill.modelData.count
+                    color: catPill.selected ? root.accent : Util.alpha(root.foreground, 0.6)
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    font.bold: true
+                  }
+                }
+              }
+
+              MouseArea {
+                id: catPillHover
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.selectCategory(catPill.modelData.id)
+              }
+            }
+          }
+        }
+      }
+
       // ------------------------------------------------------------- body
       Flickable {
         id: body
-        anchors.top: headerRule.bottom
+        anchors.top: categoryBar.bottom
         anchors.topMargin: root.blockGap
         anchors.left: parent.left
         anchors.leftMargin: card.contentLeftInset
@@ -564,6 +749,8 @@ Item {
                   delegate: Item {
                     id: binding
                     required property var modelData
+                    readonly property bool rowLive: root.modsActive
+                      && SheetData.isModifierActive(binding.modelData.key, root.liveMods)
 
                     width: group.width
                     height: root.rowHeight
@@ -571,7 +758,11 @@ Item {
                     Rectangle {
                       anchors.fill: parent
                       radius: Math.min(root.cornerRadius, Style.space(6))
-                      color: bindingMouse.containsMouse ? Style.hoverFill : "transparent"
+                      color: bindingMouse.containsMouse ? Style.hoverFill
+                        : (binding.rowLive ? Util.alpha(root.accent, 0.10) : "transparent")
+                      border.width: binding.rowLive ? 1 : 0
+                      border.color: Util.alpha(root.accent, 0.35)
+                      Behavior on color { ColorAnimation { duration: 120 } }
                     }
 
                     Flow {
@@ -585,21 +776,65 @@ Item {
                         model: SheetData.splitCombo(binding.modelData.key)
 
                         delegate: Rectangle {
+                          id: keyCap
                           required property var modelData
+                          readonly property bool capLive: root.modsActive
+                            && SheetData.isModifierActive(String(keyCap.modelData), root.liveMods)
 
-                          width: keyLabel.implicitWidth + Style.space(12)
-                          height: Math.max(Style.space(20), Style.font.body + Style.space(6))
-                          radius: Math.min(root.cornerRadius, height / 2)
-                          color: root.chipColor
-                          border.color: root.hairline
+                          width: keyLabel.implicitWidth + Style.space(13)
+                          height: Math.max(Style.space(21), Style.font.body + Style.space(7))
+                          radius: Style.space(5)
                           border.width: 1
+                          border.color: Util.alpha(root.foreground, 0.2)
+
+                          // 物理质感键帽：立体渐变 + 顶部高光 + 底部阴影凹槽
+                          gradient: Gradient {
+                            GradientStop {
+                              position: 0
+                              color: keyCap.capLive ? Util.alpha(root.accent, 0.38) : Util.alpha(root.foreground, 0.15)
+                            }
+                            GradientStop {
+                              position: 1
+                              color: keyCap.capLive ? Util.alpha(root.accent, 0.18) : Util.alpha(root.foreground, 0.05)
+                            }
+                          }
+
+                          Rectangle {
+                            anchors {
+                              top: parent.top; topMargin: 1
+                              left: parent.left; leftMargin: 3
+                              right: parent.right; rightMargin: 3
+                            }
+                            height: 1
+                            radius: 1
+                            color: Util.alpha("#ffffff", 0.16)
+                          }
+
+                          Rectangle {
+                            anchors {
+                              bottom: parent.bottom; bottomMargin: 1
+                              left: parent.left; leftMargin: 3
+                              right: parent.right; rightMargin: 3
+                            }
+                            height: 1.5
+                            radius: 1
+                            color: Util.alpha("#000000", 0.28)
+                          }
+
+                          // 实时按键高亮反馈：按住修饰键时关联键帽闪烁
+                          SequentialAnimation on border.color {
+                            loops: Animation.Infinite
+                            running: keyCap.capLive
+                            ColorAnimation { to: Util.alpha(root.accent, 0.95); duration: 280 }
+                            ColorAnimation { to: Util.alpha(root.accent, 0.30); duration: 280 }
+                          }
 
                           Text {
                             id: keyLabel
                             textFormat: Text.PlainText
                             anchors.centerIn: parent
-                            text: modelData
-                            color: root.foreground
+                            text: SheetData.formatKeyCap(String(keyCap.modelData), root.displayMode)
+                            color: keyCap.capLive ? root.accent : root.foreground
                             font.family: root.fontFamily
                             font.pixelSize: Style.font.bodySmall
                             font.bold: true
@@ -655,7 +890,7 @@ Item {
       // -------------------------------------------------- degraded states
       Item {
         id: placeholder
-        anchors.top: headerRule.bottom
+        anchors.top: categoryBar.bottom
         anchors.topMargin: root.blockGap
         anchors.left: parent.left
         anchors.leftMargin: card.contentLeftInset
@@ -730,7 +965,7 @@ Item {
           textFormat: Text.PlainText
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: "Esc / 点击遮罩关闭 · R 刷新 · ↑↓ 滚动"
+          text: "Esc 关闭 · / 搜索 · Tab 切分类 · R 刷新 · ↑↓ 滚动 · 按住 Super/Alt/Ctrl/Shift 高亮关联键位"
           color: root.foreground
           opacity: 0.42
           font.family: root.fontFamily
@@ -752,22 +987,27 @@ Item {
   }
 
   // 降级状态文案。只有文案，不含任何键位数据；列表有内容时全部为空串。
+  readonly property bool filterNoMatches: !root.loading && root.errorKind === ""
+    && root.groups.length === 0 && root.rawRows.length > 0
+
   readonly property string placeholderTitle: root.loading ? "正在读取…"
     : root.errorKind === "no-cli" ? "未找到 OmniPal 命令行工具"
     : root.errorKind === "cli-failed" ? "读取快捷键失败"
     : root.errorKind === "bad-json" ? "解析 Engine 输出失败"
     : root.errorKind === "mode-missing" ? "没有这个模式"
     : root.groups.length > 0 ? ""
+    : root.filterNoMatches ? "没有匹配的条目"
     : root.requestedMode !== "" ? "模式 " + root.displayMode + " 没有可用定义"
     : "当前没有生效的快捷键覆盖"
 
   readonly property string placeholderBody: root.loading ? "正在向 Engine 读取当前 Profile。"
     : root.errorMessage !== "" ? root.errorMessage
     : root.groups.length > 0 ? ""
+    : root.filterNoMatches ? "换一个搜索词，或点击「全部」分类胶囊重试。"
     : root.requestedMode !== "" ? "这个模式没有映射任何快捷键。"
     : "原生模式沿用 Omarchy 默认键位，没有任何覆盖。切换习惯模式后这里会自动列出对应快捷键。"
 
   readonly property string placeholderCommand: root.loading ? ""
     : root.errorCommand !== "" ? root.errorCommand
-    : (root.requestedMode === "" && root.groups.length === 0) ? "omni-profile switch windows" : ""
+    : (root.requestedMode === "" && root.groups.length === 0 && root.rawRows.length === 0) ? "omni-profile switch windows" : ""
 }

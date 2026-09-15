@@ -4,6 +4,18 @@
 
 ---
 
+## [v1.7.0] - 2026-09-15
+
+### ⌨️ omni.cheat-sheet 交互与视觉大升级 — Milestone 5
+- **Profile 快速预览胶囊**：头部 🪟 Windows 11 / 🍎 macOS / ⊡ Omarchy 原生胶囊组，点击经 `fetch.sh` 无缝切换查看对应模式速查；Engine 当前生效模式以绿点标记，预览≠生效状态一目了然（沿用 `{"mode":…}` payload 契约与非法 id 回退）。
+- **分类筛选胶囊条**：`extractCategories(rows)` 提取全部出现分类并实时计数（「全部 19」「窗口吸附 6」徽章），与搜索词双维组合精准过滤（`filterRows(rawRows, query, selectedCategory)`）；分类不足两项自动收起，不占布局高度。
+- **物理质感键帽**：`formatKeyCap(part, mode)` 纯显示层转译——mac 模式渲染 `⌘ ⌥ ⌃ ⇧ ↵ ⎋ ⌫ ⇥ ␣ ←↓↑→`，windows 模式渲染 `⊞ Win / ↵ Enter / ⇥ Tab / Esc`，omarchy/通用回退 `Super / Alt / Ctrl / Shift`；键帽带纵向渐变、顶部高光与底部阴影凹槽的立体质感；未知按键原样回退、绝不丢条目（本文件仍不含任何键位副本，铁律 3 无违例）。
+- **实时按键高亮反馈**：`keyCatcher` 在 press/release 同步修饰键掩码，`isModifierActive(keyCombo, pressedModifiers)` 判定关联条目——按住 Super/Alt/Ctrl/Shift 时，包含该修饰键的行泛起主题色底、对应键帽边框呼吸闪烁，松手即复原，把速查 HUD 变成键盘肌肉记忆训练器。
+- **键盘流优化**：`Esc` 关闭 · `/` 聚焦搜索 · `Tab` / `Shift+Tab` 分类胶囊循环（自动跳过被搜索词清零的分类、越界回「全部」）· `R` 刷新 · `↑↓ PgUp PgDn Home End` 滚动；过滤无结果新增「没有匹配的条目」降级文案，原始数据保留、清空即恢复。
+- **验证**：`qmllint` 零语法错误；纯函数以真实 `omni-profile cheatsheet --json` 输出经差分测试（30 组键帽映射、分类计数守恒、查询×分类联合过滤、修饰键别名 `MOD4/WIN/CMD/OPTION/CONTROL` 与数组/对象双形态）；`check_consistency.py` 100% 通过；全程零写配置、零键位硬编码（H-1 / 铁律 3）。
+
+---
+
 ## [v1.6.0] - 2026-09-15
 
 ### 🎛️ 界面升级：三 Tab 控制中心与 Dock 物理动效 — Milestone 4

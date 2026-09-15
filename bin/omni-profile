@@ -244,7 +244,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="omni-profile",
-        description="OmniPal 运行时内存热切换控制工具 (v1.5.0)"
+        description="OmniPal 运行时内存热切换控制工具 (v1.7.0)"
     )
     subparsers = parser.add_subparsers(dest="command", help="子命令")
 
