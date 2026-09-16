@@ -41,6 +41,22 @@ LUA_DISPATCHERS = {
     "workspace_prev": "hl.dsp.focus({ workspace = 'e-1' })",
 }
 
+VALID_WINDOW_POLICIES = {"tiled", "floating", "follow-profile"}
+WINDOW_POLICY_ALIASES = {
+    "tile": "tiled",
+    "tiled": "tiled",
+    "float": "floating",
+    "floating": "floating",
+    "follow": "follow-profile",
+    "follow-profile": "follow-profile",
+    "follow_profile": "follow-profile",
+}
+
+def normalize_window_policy(policy: Optional[str]) -> Optional[str]:
+    if not policy:
+        return None
+    return WINDOW_POLICY_ALIASES.get(str(policy).lower().strip())
+
 def format_combo(mod: str, key: str) -> str:
     parts = []
     if mod:
@@ -115,6 +131,16 @@ class OmniPalEngine:
         self.snap_zones: Dict[str, Dict[str, Any]] = {}
         self.snap_layouts: List[Dict[str, Any]] = []
         self._last_summon_proc = None
+        self.window_policy: str = "tiled"
+        if STATE_FILE.exists():
+            try:
+                with open(STATE_FILE, "r", encoding="utf-8") as f:
+                    _st = json.load(f)
+                    pol = normalize_window_policy(_st.get("window_policy"))
+                    if pol:
+                        self.window_policy = pol
+            except Exception:
+                pass
         self._load_catalog()
         self._load_snap_schema()
         self._ensure_run_dir()
@@ -395,23 +421,77 @@ class OmniPalEngine:
             print(f"Hyprland eval exception: {e}", file=sys.stderr)
             return False
 
+    def get_effective_window_mode(self, mode: Optional[str] = None, policy: Optional[str] = None) -> str:
+        pol = normalize_window_policy(policy) or self.get_window_policy()
+        if pol == "follow-profile":
+            if mode is None:
+                cur_m = (self.get_state().get("mode") if hasattr(self, "get_state") else "omarchy")
+            else:
+                cur_m = mode
+            m = str(cur_m).lower().strip()
+            return "floating" if m == "mac" else "tiled"
+        return "floating" if pol == "floating" else "tiled"
+
+    def get_window_policy(self) -> str:
+        if STATE_FILE.exists():
+            try:
+                with open(STATE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        pol = normalize_window_policy(data.get("window_policy"))
+                        if pol:
+                            self.window_policy = pol
+                            return pol
+            except Exception:
+                pass
+        return normalize_window_policy(getattr(self, "window_policy", None)) or "tiled"
+
+    def set_window_policy(self, policy: str) -> bool:
+        norm = normalize_window_policy(policy)
+        if not norm:
+            return False
+        self.window_policy = norm
+        cur_state = self.get_state()
+        cur_mode = cur_state.get("mode", "omarchy")
+        count = cur_state.get("active_bindings_count", 0)
+        self._write_state(cur_mode, count, policy=norm)
+        return True
+
     def get_state(self) -> Dict[str, Any]:
+        cur_policy = self.get_window_policy()
+        sock = find_socket2_path()
+        compositor_connected = sock is not None and sock.exists()
         default_state = {
             "version": "1.2.0",
             "mode": "omarchy",
             "name": "Omarchy 原生模式",
+            "display": self.profiles.get("omarchy", {}).get("display", {"icon": "⊡", "brief": "OMA", "color": "#a3be8c"}),
             "active_bindings_count": 0,
-            "status": "idle"
+            "status": "idle",
+            "window_policy": cur_policy,
+            "effective_window_mode": self.get_effective_window_mode("omarchy", cur_policy),
+            "compositor_connected": compositor_connected
         }
         if not STATE_FILE.exists():
             return default_state
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                if not isinstance(data, dict):
+                    return default_state
+                pol = normalize_window_policy(data.get("window_policy")) or cur_policy
+                self.window_policy = pol
+                data["window_policy"] = pol
+                cur_m = data.get("mode", "omarchy")
+                data["effective_window_mode"] = self.get_effective_window_mode(cur_m, pol)
+                data["compositor_connected"] = compositor_connected
+                if "display" not in data or not data["display"]:
+                    data["display"] = self.profiles.get(cur_m, {}).get("display", {})
+                return data
         except Exception:
             return default_state
 
-    def _write_state(self, mode: str, count: int):
+    def _write_state(self, mode: str, count: int, policy: Optional[str] = None):
         self._ensure_run_dir()
         profile_data = self.profiles.get(mode, {})
         profile_name = profile_data.get("name", mode)
@@ -423,6 +503,27 @@ class OmniPalEngine:
             except Exception:
                 pass
 
+        if policy:
+            cur_policy = normalize_window_policy(policy)
+        else:
+            cur_policy = None
+            if STATE_FILE.exists():
+                try:
+                    with open(STATE_FILE, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, dict):
+                            cur_policy = normalize_window_policy(data.get("window_policy"))
+                except Exception:
+                    pass
+            if not cur_policy:
+                cur_policy = normalize_window_policy(getattr(self, "window_policy", None)) or "tiled"
+
+        cur_policy = cur_policy or "tiled"
+        self.window_policy = cur_policy
+        effective_mode = self.get_effective_window_mode(mode, cur_policy)
+        sock = find_socket2_path()
+        compositor_connected = sock is not None and sock.exists()
+
         state_data = {
             "version": "1.2.0",
             "mode": mode,
@@ -432,7 +533,10 @@ class OmniPalEngine:
             "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "pid": os.getpid(),
             "daemon_pid": daemon_pid,
-            "status": "active" if mode != "omarchy" else "native"
+            "status": "active" if mode != "omarchy" else "native",
+            "window_policy": cur_policy,
+            "effective_window_mode": effective_mode,
+            "compositor_connected": compositor_connected
         }
         tmp_file = STATE_FILE.with_suffix(".tmp")
         try:
@@ -585,7 +689,54 @@ class OmniPalEngine:
             })
         return sheet
 
-    def snap(self, zone: str, no_hud: bool = False) -> bool:
+    def get_window_under_cursor(self) -> Optional[Dict[str, Any]]:
+        """Finds the visible window on the active workspace under the cursor, or None."""
+        try:
+            cur_out = subprocess.check_output(["hyprctl", "cursorpos"], text=True, timeout=0.5).strip()
+            if not cur_out or "," not in cur_out:
+                return None
+            cx, cy = [float(p.strip()) for p in cur_out.split(",")]
+
+            mon_out = subprocess.check_output(["hyprctl", "monitors", "-j"], text=True, timeout=0.5)
+            monitors = json.loads(mon_out)
+            active_ws_ids = {m.get("activeWorkspace", {}).get("id") for m in monitors if "activeWorkspace" in m}
+
+            cli_out = subprocess.check_output(["hyprctl", "clients", "-j"], text=True, timeout=0.5)
+            clients = json.loads(cli_out)
+
+            candidates = []
+            for c in clients:
+                if not c.get("mapped", True) or c.get("hidden", False):
+                    continue
+                ws_id = c.get("workspace", {}).get("id")
+                if ws_id not in active_ws_ids:
+                    continue
+                at = c.get("at", [0, 0])
+                sz = c.get("size", [0, 0])
+                x, y = at[0], at[1]
+                w, h = sz[0], sz[1]
+                if x <= cx <= x + w and y <= cy <= y + h:
+                    candidates.append(c)
+
+            if not candidates:
+                return None
+            candidates.sort(key=lambda item: item.get("focusHistoryID", 9999))
+            return candidates[0]
+        except Exception:
+            return None
+
+    def get_active_window(self) -> Optional[Dict[str, Any]]:
+        """Queries the active window in Hyprland, returning its client dict or None."""
+        try:
+            out = subprocess.check_output(["hyprctl", "activewindow", "-j"], text=True, timeout=0.5).strip()
+            if not out:
+                return None
+            data = json.loads(out)
+            return data if isinstance(data, dict) and data.get("address") else None
+        except Exception:
+            return None
+
+    def snap(self, zone: str, target_address: Optional[str] = None, no_hud: bool = False) -> bool:
         """Triggers visual snap feedback and dispatches the corresponding window management action."""
         zone = zone.lower().strip()
         self.record_snap(zone)
@@ -594,9 +745,37 @@ class OmniPalEngine:
 
         # 1. Check for interactive layout picker request (Win+Z Snap Layouts flyout)
         if zone in ("layouts", "picker", "menu"):
+            target_addr = target_address
+            cursor_win = None
+            if not target_addr:
+                cursor_win = self.get_window_under_cursor()
+                if cursor_win and cursor_win.get("address"):
+                    target_addr = cursor_win["address"]
+                    self._eval_lua(f'hl.dispatch(hl.dsp.focus({{ window = "address:{target_addr}" }}))')
+
+            target_title = ""
+            target_class = ""
+            if cursor_win:
+                target_title = cursor_win.get("title", "")
+                target_class = cursor_win.get("class", "")
+            elif target_addr:
+                for w in self.get_windows():
+                    if w.get("address") == target_addr:
+                        target_title = w.get("title", "")
+                        target_class = w.get("class", "")
+                        break
+            if not target_title and not target_class:
+                active = self.get_active_window()
+                if active:
+                    target_title = active.get("title", "")
+                    target_class = active.get("class", "")
+
             snap_data = {
                 "zone": "layouts",
                 "interactive": True,
+                "target_window": target_addr,
+                "target_title": target_title,
+                "target_class": target_class,
                 "gap": gap,
                 "timestamp": time.time()
             }
@@ -610,8 +789,15 @@ class OmniPalEngine:
 
             if not no_hud:
                 try:
+                    payload = {"interactive": True}
+                    if target_addr:
+                        payload["target_window"] = target_addr
+                    if target_title:
+                        payload["target_title"] = target_title
+                    if target_class:
+                        payload["target_class"] = target_class
                     self._last_summon_proc = subprocess.Popen(
-                        ["omarchy-shell", "shell", "summon", "omni.snap-feedback", json.dumps({"interactive": True})],
+                        ["omarchy-shell", "shell", "summon", "omni.snap-feedback", json.dumps(payload)],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         start_new_session=True
@@ -624,6 +810,7 @@ class OmniPalEngine:
         snap_data = {
             "zone": zone,
             "interactive": False,
+            "target_window": target_address,
             "gap": gap,
             "timestamp": time.time()
         }
@@ -638,8 +825,11 @@ class OmniPalEngine:
         # 3. Summon via omarchy-shell asynchronously if not suppressed
         if not no_hud:
             try:
+                summon_payload = {"zone": zone, "interactive": False}
+                if target_address:
+                    summon_payload["target_window"] = target_address
                 self._last_summon_proc = subprocess.Popen(
-                    ["omarchy-shell", "shell", "summon", "omni.snap-feedback", json.dumps({"zone": zone, "interactive": False})],
+                    ["omarchy-shell", "shell", "summon", "omni.snap-feedback", json.dumps(summon_payload)],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
@@ -647,18 +837,24 @@ class OmniPalEngine:
             except Exception:
                 pass
 
+        focus_lua = ""
+        if target_address:
+            clean_addr = target_address.strip()
+            focus_lua = f'hl.dispatch(hl.dsp.focus({{ window = "address:{clean_addr}" }}))\n'
+
         # 4. Fullscreen / maximize dispatch
         if zone in ("maximize", "max"):
-            return self._eval_lua("hl.dsp.window.fullscreen({ mode = 'maximized' })")
+            return self._eval_lua(f"{focus_lua}hl.dispatch(hl.dsp.window.fullscreen({{ mode = 'maximized' }}))")
 
         # 5. Smart restore: unmaximize if fullscreen, unfloat to tiling if floating
         if zone in ("restore", "unmax"):
-            lua_restore = """local w = hl.get_active_window()
+            lua_restore = f"""{focus_lua}local w = hl.get_active_window()
 if w then
-  if w.fullscreen then
-    hl.dsp.window.fullscreen({ mode = 'maximized' })
+  local is_fs = (w.fullscreen == true or w.fullscreen == 1 or w.fullscreen == 2)
+  if is_fs then
+    hl.dispatch(hl.dsp.window.fullscreen({{ mode = 'maximized' }}))
   elseif w.floating then
-    hl.dsp.window.float({ action = 'toggle' })
+    hl.dispatch(hl.dsp.window.float({{ action = 'toggle' }}))
   end
 end"""
             return self._eval_lua(lua_restore)
@@ -671,11 +867,12 @@ end"""
             wr = float(z_meta.get("wr", 0.5))
             hr = float(z_meta.get("hr", 1.0))
 
-            lua_dsp = f"""local w = hl.get_active_window()
+            lua_dsp = f"""{focus_lua}local w = hl.get_active_window()
 if w then
   local m = hl.get_active_monitor()
-  if w.fullscreen then hl.dsp.window.fullscreen({{ mode = 'maximized' }}) end
-  if not w.floating then hl.dsp.window.float({{ action = 'toggle' }}) end
+  local is_fs = (w.fullscreen == true or w.fullscreen == 1 or w.fullscreen == 2)
+  if is_fs then hl.dispatch(hl.dsp.window.fullscreen({{ mode = 'maximized' }})) end
+  if not w.floating then hl.dispatch(hl.dsp.window.float({{ action = 'toggle' }})) end
   local gap = {gap}
   local rx = m.x + (m.reserved and m.reserved.left or 0) + gap
   local ry = m.y + (m.reserved and m.reserved.top or 0) + gap
@@ -689,8 +886,8 @@ if w then
   local th = math.floor(rh * {round(hr, 3)}) - math.floor(gap * (1 - is_top_edge * is_bottom_edge) / 2)
   local tx = rx + math.floor(rw * {round(xr, 3)}) + math.floor(gap * (1 - is_left_edge) / 2)
   local ty = ry + math.floor(rh * {round(yr, 3)}) + math.floor(gap * (1 - is_top_edge) / 2)
-  hl.dsp.window.resize({{ x = math.floor(tw), y = math.floor(th) }})
-  hl.dsp.window.move({{ x = math.floor(tx), y = math.floor(ty) }})
+  hl.dispatch(hl.dsp.window.resize({{ x = math.floor(tw), y = math.floor(th) }}))
+  hl.dispatch(hl.dsp.window.move({{ x = math.floor(tx), y = math.floor(ty) }}))
 end"""
             return self._eval_lua(lua_dsp)
         return True

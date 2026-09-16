@@ -82,14 +82,14 @@ function fallbackProfiles() {
       "id": "windows",
       "name": "Windows 11 习惯模式",
       "description": "还原 Windows 常用快捷键习惯（Alt+F4 关闭、Super+方向键吸附、Super+E 文件管理器等）",
-      "bindings_count": 13,
+      "bindings_count": 14,
       "display": { "icon": "⊞", "brief": "WIN", "color": "#3892d6" }
     },
     {
       "id": "mac",
       "name": "macOS 习惯模式",
       "description": "还原 macOS 常用操作快捷键（Super+Q 关闭、Super+空格启动器、Super+Shift+4 区域截图等）",
-      "bindings_count": 12,
+      "bindings_count": 19,
       "display": { "icon": "◆", "brief": "MAC", "color": "#d8dee9" }
     },
     {
@@ -100,4 +100,78 @@ function fallbackProfiles() {
       "display": { "icon": "⊡", "brief": "OMA", "color": "#a3be8c" }
     }
   ];
+}
+
+var DEFAULT_POLICIES = [
+  {
+    "id": "tiled",
+    "name": "平铺",
+    "english": "Tiled",
+    "icon": "◫",
+    "desc": "新常规窗口自动平铺分屏"
+  },
+  {
+    "id": "floating",
+    "name": "浮动",
+    "english": "Floating",
+    "icon": "❐",
+    "desc": "新常规窗口居中自由浮动"
+  },
+  {
+    "id": "follow-profile",
+    "name": "跟随",
+    "english": "Follow",
+    "icon": "⇄",
+    "desc": "随快捷键模式决定平铺/浮动"
+  }
+];
+
+function windowPolicies() {
+  return DEFAULT_POLICIES;
+}
+
+function normalizePolicy(id) {
+  var key = String(id || "").toLowerCase().trim();
+  if (key === "follow" || key === "follow_profile" || key === "follow-profile") return "follow-profile";
+  if (key === "float" || key === "floating") return "floating";
+  if (key === "tile" || key === "tiled") return "tiled";
+  return "tiled";
+}
+
+function resolvePolicyName(id) {
+  var key = normalizePolicy(id);
+  for (var i = 0; i < DEFAULT_POLICIES.length; i++) {
+    if (DEFAULT_POLICIES[i].id === key) return DEFAULT_POLICIES[i].name;
+  }
+  return "平铺";
+}
+
+function resolvePolicyIcon(id) {
+  var key = normalizePolicy(id);
+  for (var i = 0; i < DEFAULT_POLICIES.length; i++) {
+    if (DEFAULT_POLICIES[i].id === key) return DEFAULT_POLICIES[i].icon;
+  }
+  return "◫";
+}
+
+function resolvePolicyDesc(id, currentMode) {
+  var key = normalizePolicy(id);
+  if (key === "follow-profile") {
+    var modeKey = String(currentMode || "").toLowerCase().trim();
+    var eff = (modeKey === "mac") ? "浮动 (macOS 习惯)" : (modeKey === "windows" ? "平铺 (Windows 习惯)" : (modeKey === "omarchy" ? "平铺 (Omarchy 原生)" : "平铺 (默认习惯)"));
+    return "当前跟随 " + eff;
+  }
+  for (var i = 0; i < DEFAULT_POLICIES.length; i++) {
+    if (DEFAULT_POLICIES[i].id === key) return DEFAULT_POLICIES[i].desc;
+  }
+  return "新常规窗口自动平铺分屏";
+}
+
+function computeEffectiveMode(policy, currentMode) {
+  var p = normalizePolicy(policy);
+  if (p === "follow-profile") {
+    return String(currentMode || "").toLowerCase().trim() === "mac" ? "floating" : "tiled";
+  }
+  if (p === "floating") return "floating";
+  return "tiled";
 }

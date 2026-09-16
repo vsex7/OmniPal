@@ -6,6 +6,7 @@ Tests schema consistency, state management, profile parsing, and plugin complian
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -558,6 +559,372 @@ class TestUsageStatistics(unittest.TestCase):
         self.assertEqual(stats["switches"], {"windows": 1})
         self.assertEqual(stats["snaps"], {})
 
+class TestWindowPolicyAndModeIndicator(unittest.TestCase):
+    """Validates window policy management, state synchronization, and Mode Indicator UI architecture."""
+
+    def setUp(self):
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        # Neutralize live Hyprland eval side effects
+        self._orig_eval = self.engine._eval_lua
+        self.engine._eval_lua = lambda code: True
+
+    def tearDown(self):
+        self.engine._eval_lua = self._orig_eval
+        # Reset policy to tiled for clean baseline
+        self.engine.set_window_policy("tiled")
+
+    def test_window_policy_default_and_set(self):
+        """Verifies default policy is tiled and set_window_policy updates state accurately."""
+        self.engine.set_window_policy("tiled")
+        state = self.engine.get_state()
+        self.assertEqual(state.get("window_policy"), "tiled")
+        self.assertEqual(state.get("effective_window_mode"), "tiled")
+        self.assertEqual(self.engine.get_window_policy(), "tiled")
+
+        # Set to floating
+        self.assertTrue(self.engine.set_window_policy("floating"))
+        state = self.engine.get_state()
+        self.assertEqual(state.get("window_policy"), "floating")
+        self.assertEqual(state.get("effective_window_mode"), "floating")
+
+        # Set to follow-profile
+        self.assertTrue(self.engine.set_window_policy("follow-profile"))
+        state = self.engine.get_state()
+        self.assertEqual(state.get("window_policy"), "follow-profile")
+
+        # Rejection of invalid policy
+        self.assertFalse(self.engine.set_window_policy("invalid_bogus_policy"))
+        self.assertEqual(self.engine.get_window_policy(), "follow-profile")
+
+        # Rejection of profile name 'omarchy' as policy
+        self.assertFalse(self.engine.set_window_policy("omarchy"))
+        self.assertEqual(self.engine.get_window_policy(), "follow-profile")
+
+        # Rejection of empty / null
+        self.assertFalse(self.engine.set_window_policy(""))
+
+    def test_window_policy_alias_normalization(self):
+        """Verifies that common aliases (tile, float, follow) normalize to standard policy IDs."""
+        self.assertTrue(self.engine.set_window_policy("tile"))
+        self.assertEqual(self.engine.get_window_policy(), "tiled")
+
+        self.assertTrue(self.engine.set_window_policy("float"))
+        self.assertEqual(self.engine.get_window_policy(), "floating")
+
+        self.assertTrue(self.engine.set_window_policy("follow"))
+        self.assertEqual(self.engine.get_window_policy(), "follow-profile")
+
+        self.assertTrue(self.engine.set_window_policy("follow_profile"))
+        self.assertEqual(self.engine.get_window_policy(), "follow-profile")
+
+    def test_follow_profile_effective_mode(self):
+        """Verifies that follow-profile dynamically resolves to floating on mac, tiled elsewhere."""
+        self.assertTrue(self.engine.set_window_policy("follow-profile"))
+
+        self.assertTrue(self.engine.switch_mode("windows"))
+        state = self.engine.get_state()
+        self.assertEqual(state.get("effective_window_mode"), "tiled")
+
+        self.assertTrue(self.engine.switch_mode("mac"))
+        state = self.engine.get_state()
+        self.assertEqual(state.get("effective_window_mode"), "floating")
+
+        self.assertTrue(self.engine.switch_mode("omarchy"))
+        state = self.engine.get_state()
+        self.assertEqual(state.get("effective_window_mode"), "tiled")
+
+    def test_window_policy_preserved_on_switch_and_restore(self):
+        """Ensures that switching modes or restoring baseline does not reset window policy."""
+        self.assertTrue(self.engine.set_window_policy("floating"))
+
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertEqual(self.engine.get_window_policy(), "floating")
+
+        self.assertTrue(self.engine.restore())
+        self.assertEqual(self.engine.get_window_policy(), "floating")
+        state = self.engine.get_state()
+        self.assertEqual(state["window_policy"], "floating")
+
+    def test_display_metadata_persistence_in_state(self):
+        """Verifies that state.json includes display metadata (icon, brief, color) for Mode Indicator."""
+        self.assertTrue(self.engine.switch_mode("windows"))
+        state = self.engine.get_state()
+        self.assertIn("display", state)
+        self.assertEqual(state["display"].get("icon"), "⊞")
+        self.assertEqual(state["display"].get("brief"), "WIN")
+        self.assertEqual(state["display"].get("color"), "#3892d6")
+
+        self.assertTrue(self.engine.switch_mode("mac"))
+        state = self.engine.get_state()
+        self.assertEqual(state["display"].get("icon"), "◆")
+        self.assertEqual(state["display"].get("brief"), "MAC")
+
+        self.assertTrue(self.engine.restore())
+        state = self.engine.get_state()
+        self.assertEqual(state["display"].get("icon"), "⊡")
+        self.assertEqual(state["display"].get("brief"), "OMA")
+
+    def test_cli_window_policy_commands(self):
+        """Verifies bin/omni-profile window-policy CLI commands and aliases."""
+        bin_path = str(PROJECT_ROOT / "bin" / "omni-profile")
+
+        # 1. Status string output
+        p1 = subprocess.run([bin_path, "window-policy"], capture_output=True, text=True)
+        self.assertEqual(p1.returncode, 0)
+        self.assertIn("OmniPal 窗口布局策略", p1.stdout)
+
+        # 2. JSON status
+        p2 = subprocess.run([bin_path, "window-policy", "--json"], capture_output=True, text=True)
+        self.assertEqual(p2.returncode, 0)
+        data = json.loads(p2.stdout)
+        self.assertIn("window_policy", data)
+        self.assertIn("effective_window_mode", data)
+
+        # 3. Set via explicit subcommand
+        p3 = subprocess.run([bin_path, "window-policy", "set", "floating"], capture_output=True, text=True)
+        self.assertEqual(p3.returncode, 0)
+        self.assertIn("已更新为: floating", p3.stdout)
+
+        # 4. Set via alias command window-mode
+        p4 = subprocess.run([bin_path, "window-mode", "set", "follow-profile"], capture_output=True, text=True)
+        self.assertEqual(p4.returncode, 0)
+        self.assertIn("已更新为: follow-profile", p4.stdout)
+
+        # 5. Direct policy shorthand: omni-profile window-policy tiled
+        p5 = subprocess.run([bin_path, "window-policy", "tiled"], capture_output=True, text=True)
+        self.assertEqual(p5.returncode, 0)
+        self.assertIn("已更新为: tiled", p5.stdout)
+
+        # 6. Direct alias shorthand: omni-profile window-policy float
+        p6 = subprocess.run([bin_path, "window-policy", "float"], capture_output=True, text=True)
+        self.assertEqual(p6.returncode, 0)
+        self.assertIn("已更新为: floating", p6.stdout)
+
+        # 7. Rejection of invalid policy
+        p7 = subprocess.run([bin_path, "window-policy", "set", "omarchy"], capture_output=True, text=True)
+        self.assertNotEqual(p7.returncode, 0)
+        self.assertIn("无效的窗口策略", p7.stderr)
+
+    def test_mode_indicator_model_helpers(self):
+        """Validates that Model.js contains window policy options and helper functions."""
+        model_file = PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "Model.js"
+        self.assertTrue(model_file.exists())
+        content = model_file.read_text(encoding="utf-8")
+        self.assertIn("DEFAULT_POLICIES", content)
+        self.assertIn("windowPolicies", content)
+        self.assertIn("resolvePolicyName", content)
+        self.assertIn("resolvePolicyIcon", content)
+        self.assertIn("resolvePolicyDesc", content)
+        self.assertIn("computeEffectiveMode", content)
+        self.assertIn("normalizePolicy", content)
+        self.assertIn("tiled", content)
+        self.assertIn("floating", content)
+        self.assertIn("follow-profile", content)
+
+    def test_mode_indicator_model_execution_in_node(self):
+        """Executes Model.js in Node.js to strictly test pure logic functions and fallback counts."""
+        model_file = PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "Model.js"
+        js_code = f"""
+        const fs = require('fs');
+        const vm = require('vm');
+        const content = fs.readFileSync('{model_file}', 'utf-8').replace('.pragma library', '');
+        const ctx = {{}};
+        vm.createContext(ctx);
+        vm.runInContext(content, ctx);
+
+        // Verify fallback profiles count
+        const profs = ctx.fallbackProfiles();
+        const win = profs.find(p => p.id === 'windows');
+        const mac = profs.find(p => p.id === 'mac');
+        if (!win || win.bindings_count !== 14) throw new Error('windows binding count mismatch: ' + (win ? win.bindings_count : null));
+        if (!mac || mac.bindings_count !== 19) throw new Error('mac binding count mismatch: ' + (mac ? mac.bindings_count : null));
+
+        // Verify aliases
+        if (ctx.resolvePolicyName('follow') !== '跟随') throw new Error('alias follow failed');
+        if (ctx.resolvePolicyName('float') !== '浮动') throw new Error('alias float failed');
+        if (ctx.resolvePolicyName('tile') !== '平铺') throw new Error('alias tile failed');
+
+        // Verify computeEffectiveMode
+        if (ctx.computeEffectiveMode('follow', 'mac') !== 'floating') throw new Error('follow mac != floating');
+        if (ctx.computeEffectiveMode('follow', 'windows') !== 'tiled') throw new Error('follow windows != tiled');
+        if (ctx.computeEffectiveMode('float', 'windows') !== 'floating') throw new Error('float windows != floating');
+        """
+        res = subprocess.run(["node", "-e", js_code], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Node execution error: {res.stderr}")
+
+    def test_mode_indicator_qml_and_ipc_structure(self):
+        """Validates that BarWidget.qml embeds PopupCard with window policy controls and IPC."""
+        qml_file = PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "BarWidget.qml"
+        self.assertTrue(qml_file.exists())
+        content = qml_file.read_text(encoding="utf-8")
+        self.assertIn("PopupCard", content)
+        self.assertIn("windowPolicy", content)
+        self.assertIn("effectiveWindowMode", content)
+        self.assertIn("compositorConnected", content)
+        self.assertIn("policyOptions", content)
+        self.assertIn("effPolicyBadge", content)
+        self.assertIn("setPolicy", content)
+        self.assertIn("getWindowPolicy", content)
+        self.assertIn("getEffectiveWindowMode", content)
+        self.assertIn("setWindowPolicy", content)
+        self.assertIn("closePanel", content)
+        self.assertIn("releasePopout", content)
+
+    def test_mode_indicator_manifest(self):
+        """Validates manifest compliance and metadata."""
+        manifest_file = PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "manifest.json"
+        self.assertTrue(manifest_file.exists())
+        with open(manifest_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertEqual(data["schemaVersion"], 1)
+        self.assertEqual(data["id"], "omni.mode-indicator")
+        self.assertEqual(data["entryPoints"]["barWidget"], "BarWidget.qml")
+
+    def test_multi_instance_window_policy_sync_and_anti_clobber(self):
+        """Validates that concurrent/daemon engine instances do not clobber externally updated window policy."""
+        e1 = OmniPalEngine(PROJECT_ROOT)
+        e2 = OmniPalEngine(PROJECT_ROOT)
+
+        # 1. e2 sets policy to floating
+        self.assertTrue(e2.set_window_policy("floating"))
+        self.assertEqual(e2.get_window_policy(), "floating")
+
+        # 2. e1 should dynamically observe the updated policy without restart
+        self.assertEqual(e1.get_window_policy(), "floating")
+        self.assertEqual(e1.get_effective_window_mode("windows"), "floating")
+
+        # 3. e1 switches mode or restores baseline; must NOT clobber window policy back to tiled
+        self.assertTrue(e1.switch_mode("windows"))
+        self.assertEqual(e1.get_window_policy(), "floating")
+        self.assertEqual(e2.get_window_policy(), "floating")
+
+        self.assertTrue(e1.restore())
+        self.assertEqual(e1.get_window_policy(), "floating")
+        state = e1.get_state()
+        self.assertEqual(state.get("window_policy"), "floating")
+
+        # Reset for subsequent tests
+        e1.set_window_policy("tiled")
+
+    def test_cli_window_policy_json_flags(self):
+        """Verifies that --json works on set and direct shortcut subcommands."""
+        bin_path = str(PROJECT_ROOT / "bin" / "omni-profile")
+
+        p1 = subprocess.run([bin_path, "window-policy", "set", "floating", "--json"], capture_output=True, text=True)
+        self.assertEqual(p1.returncode, 0)
+        data1 = json.loads(p1.stdout)
+        self.assertTrue(data1.get("success"))
+        self.assertEqual(data1.get("window_policy"), "floating")
+
+        p2 = subprocess.run([bin_path, "window-policy", "tile", "--json"], capture_output=True, text=True)
+        self.assertEqual(p2.returncode, 0)
+        data2 = json.loads(p2.stdout)
+        self.assertTrue(data2.get("success"))
+        self.assertEqual(data2.get("window_policy"), "tiled")
+
+    def test_qml_syntax_via_qmllint(self):
+        """Verifies that BarWidget.qml passes Qt6 qmllint syntax checking."""
+        qmllint_bin = "/usr/lib/qt6/bin/qmllint"
+        if not os.path.exists(qmllint_bin):
+            self.skipTest("qmllint not installed on system")
+
+        qml_path = str(PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "BarWidget.qml")
+        p = subprocess.run([
+            qmllint_bin,
+            "-I", "/usr/share/omarchy/shell",
+            "-I", str(PROJECT_ROOT / "plugins" / "omni.mode-indicator"),
+            qml_path
+        ], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, f"qmllint failed: {p.stderr}")
+
+    def test_normalize_policy_safeguards_in_node(self):
+        """Verifies that Model.js normalizePolicy safely defaults to tiled for corrupted/unknown inputs."""
+        model_file = PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "Model.js"
+        js_code = f"""
+        const fs = require('fs');
+        const vm = require('vm');
+        const content = fs.readFileSync('{model_file}', 'utf-8').replace('.pragma library', '');
+        const ctx = {{}};
+        vm.createContext(ctx);
+        vm.runInContext(content, ctx);
+
+        // All invalid/unknown/empty inputs must normalize safely to 'tiled'
+        if (ctx.normalizePolicy(null) !== 'tiled') throw new Error('null failed');
+        if (ctx.normalizePolicy(undefined) !== 'tiled') throw new Error('undefined failed');
+        if (ctx.normalizePolicy('') !== 'tiled') throw new Error('empty string failed');
+        if (ctx.normalizePolicy('invalid_garbage') !== 'tiled') throw new Error('garbage failed');
+        if (ctx.normalizePolicy('unknown') !== 'tiled') throw new Error('unknown failed');
+
+        // Valid aliases must continue to resolve accurately
+        if (ctx.normalizePolicy('tile') !== 'tiled') throw new Error('tile failed');
+        if (ctx.normalizePolicy('tiled') !== 'tiled') throw new Error('tiled failed');
+        if (ctx.normalizePolicy('float') !== 'floating') throw new Error('float failed');
+        if (ctx.normalizePolicy('floating') !== 'floating') throw new Error('floating failed');
+        if (ctx.normalizePolicy('follow') !== 'follow-profile') throw new Error('follow failed');
+        if (ctx.normalizePolicy('follow-profile') !== 'follow-profile') throw new Error('follow-profile failed');
+        if (ctx.normalizePolicy('follow_profile') !== 'follow-profile') throw new Error('follow_profile failed');
+        """
+        res = subprocess.run(["node", "-e", js_code], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Node execution error: {res.stderr}")
+
+    def test_corrupted_state_policy_recovery(self):
+        """Verifies that engine and CLI recover safely when state.json is corrupted or contains invalid policy types."""
+        from engine.engine import STATE_FILE
+        # Backup existing state
+        orig_state_text = STATE_FILE.read_text(encoding="utf-8") if STATE_FILE.exists() else None
+        try:
+            # 1. Non-dict JSON in state.json
+            STATE_FILE.write_text("[1, 2, 3]", encoding="utf-8")
+            self.assertEqual(self.engine.get_window_policy(), "tiled")
+            self.assertEqual(self.engine.get_effective_window_mode(), "tiled")
+            st = self.engine.get_state()
+            self.assertEqual(st.get("window_policy"), "tiled")
+
+            # 2. Corrupted raw syntax in state.json
+            STATE_FILE.write_text("NOT_VALID_JSON{{{", encoding="utf-8")
+            self.assertEqual(self.engine.get_window_policy(), "tiled")
+            self.assertEqual(self.engine.get_effective_window_mode(), "tiled")
+            st = self.engine.get_state()
+            self.assertEqual(st.get("window_policy"), "tiled")
+
+            # 3. Invalid policy value inside valid dict
+            STATE_FILE.write_text(json.dumps({"mode": "omarchy", "window_policy": "bogus_gibberish"}), encoding="utf-8")
+            self.assertEqual(self.engine.get_window_policy(), "tiled")
+            self.assertEqual(self.engine.get_effective_window_mode(), "tiled")
+        finally:
+            if orig_state_text is not None:
+                STATE_FILE.write_text(orig_state_text, encoding="utf-8")
+            elif STATE_FILE.exists():
+                STATE_FILE.unlink()
+
+    def test_snap_with_target_address(self):
+        """Verifies that snap accepts target_address and records it in snap.json."""
+        from engine.engine import SNAP_FILE
+        test_addr = "0x12345678abcd"
+        self.engine.snap("left", target_address=test_addr, no_hud=True)
+        self.assertTrue(SNAP_FILE.exists())
+        data = json.loads(SNAP_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(data.get("zone"), "left")
+        self.assertEqual(data.get("target_window"), test_addr)
+
+    def test_snap_layouts_target_window_record(self):
+        """Verifies that snap layouts records target_window (either cursor-detected or None)."""
+        from engine.engine import SNAP_FILE
+        self.engine.snap("layouts", no_hud=True)
+        self.assertTrue(SNAP_FILE.exists())
+        data = json.loads(SNAP_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(data.get("zone"), "layouts")
+        self.assertTrue(data.get("interactive"))
+        self.assertIn("target_window", data)
+
+    def test_get_window_under_cursor_robustness(self):
+        """Ensures get_window_under_cursor executes without crashing under arbitrary environment."""
+        res = self.engine.get_window_under_cursor()
+        if res is not None:
+            self.assertIsInstance(res, dict)
+            self.assertIn("address", res)
+
 if __name__ == "__main__":
     unittest.main()
+
 

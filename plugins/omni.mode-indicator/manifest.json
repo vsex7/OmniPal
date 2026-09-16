@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "omni.mode-indicator",
   "name": "OmniPal 模式指示器与快捷面板",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "OmniPal",
-  "description": "显示当前肌肉记忆快捷键模式，支持托盘展示与右键快捷控制面板",
+  "description": "显示当前肌肉记忆快捷键模式，支持托盘展示与右键快捷控制面板（模式切换与窗口策略）",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "OmniPal 模式指示器",
-    "description": "显示并切换 Windows / macOS / Omarchy 快捷键模式",
+    "description": "显示并切换 Windows / macOS / Omarchy 快捷键模式及窗口策略",
     "category": "Compositor",
     "allowMultiple": false
   }

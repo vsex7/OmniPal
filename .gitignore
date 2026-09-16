@@ -6,3 +6,4 @@ __pycache__/
 htmlcov/
 *.log
 .DS_Store
+.agents/
