@@ -63,6 +63,22 @@ BarWidget {
     }
   }
 
+  Timer {
+    id: stateRetryTimer
+    interval: 1000
+    repeat: false
+    onTriggered: stateFile.reload()
+  }
+
+  // 守护进程重启或状态文件重建时自愈恢复；连接成功后自动暂停，零CPU开销
+  Timer {
+    id: autoHealTimer
+    interval: 2000
+    running: !root.engineRunning
+    repeat: true
+    onTriggered: stateFile.reload()
+  }
+
   FileView {
     id: stateFile
     path: root.statePath
@@ -70,7 +86,10 @@ BarWidget {
     atomicWrites: true
     printErrors: false
     onLoaded: root.loadState(text())
-    onLoadFailed: root.engineRunning = false
+    onLoadFailed: {
+      root.engineRunning = false
+      stateRetryTimer.restart()
+    }
     onFileChanged: reload()
   }
 
@@ -134,10 +153,13 @@ BarWidget {
 
   function switchMode(modeId) {
     if (!modeId) return
-    root.currentMode = modeId
-    root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, modeId)
+    var safePattern = /^[a-zA-Z0-9_.-]+$/
+    var cleanMode = String(modeId).trim()
+    if (!safePattern.test(cleanMode)) return
+    root.currentMode = cleanMode
+    root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, cleanMode)
     for (var i = 0; i < root.profiles.length; i++) {
-      if (root.profiles[i].id === modeId) {
+      if (root.profiles[i].id === cleanMode) {
         var p = root.profiles[i]
         root.currentName = Model.resolveName(p)
         root.currentIcon = Model.resolveIcon(p)
@@ -147,7 +169,7 @@ BarWidget {
         break
       }
     }
-    runCmd("omni-profile switch " + modeId)
+    runCmd("omni-profile switch " + cleanMode)
   }
 
   function setPolicy(policyId) {
@@ -177,12 +199,12 @@ BarWidget {
     runCmd("omarchy-shell shell toggle omni.settings")
   }
 
-  function openOverview() {
-    runCmd("omarchy-shell shell toggle omni.overview")
-  }
-
   function triggerSnap() {
     runCmd("omni-profile snap layouts")
+  }
+
+  function openOverview() {
+    runCmd("omarchy-shell shell toggle omni.overview")
   }
 
   function runDoctor() {
@@ -210,15 +232,11 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  WidgetButton {
+  BarIconButton {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.engineRunning
-      ? (root.currentIcon + " " + root.currentBrief)
-      : "⊘ OFF"
-    fontFamily: Style.font.family
-    horizontalMargin: 8
+    text: root.engineRunning ? root.currentIcon : "⊘"
     foreground: root.engineRunning ? root.currentColor : Color.muted
     tooltipText: root.engineRunning
       ? ("OmniPal: " + root.currentName + "\n生效快捷键: " + root.activeBindingsCount + "\n窗口策略: " + Model.resolvePolicyName(root.windowPolicy) + " (" + root.effectiveWindowMode + ")\n左键: 轮转模式 | 右键: 快捷控制面板 | 中键: 设置")
@@ -709,21 +727,21 @@ BarWidget {
       }
 
       ActionRow {
-        iconText: "🗂️"
-        label: "任务视图 (Task View)"
-        hint: "Super + Tab"
-        onTriggered: {
-          root.openOverview()
-          root.closePanel()
-        }
-      }
-
-      ActionRow {
         iconText: "🪟"
         label: "触发布局吸附 (Snap Layout)"
         hint: "Super + Z"
         onTriggered: {
           root.triggerSnap()
+          root.closePanel()
+        }
+      }
+
+      ActionRow {
+        iconText: "🗂️"
+        label: "多任务空间概览 (Overview)"
+        hint: "Super + Tab"
+        onTriggered: {
+          root.openOverview()
           root.closePanel()
         }
       }

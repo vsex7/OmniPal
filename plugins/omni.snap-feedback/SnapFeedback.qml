@@ -64,6 +64,10 @@ Item {
     root.targetWindowClass = (p.target_class ? String(p.target_class).trim() : "")
 
     if (p.interactive === true || p.zone === "layouts" || p.zone === "picker" || (!p.zone && p.interactive !== false)) {
+      if (root.opened && root.interactive) {
+        root.dismiss()
+        return
+      }
       root.interactive = true
       root.hoveredZone = ""
       root.focusedTemplateIndex = -1
@@ -107,12 +111,23 @@ Item {
 
   function executeSnap(targetZone) {
     if (!targetZone) return
-    var addrArg = root.targetWindowAddress ? (" " + root.targetWindowAddress) : ""
-    var cmd = "which omni-profile >/dev/null 2>&1 && omni-profile snap " + targetZone + addrArg + " --no-hud || \"$HOME/.local/bin/omni-profile\" snap " + targetZone + addrArg + " --no-hud"
+    var safePattern = /^[a-zA-Z0-9_.-]+$/
+    var cleanZone = String(targetZone).trim()
+    if (!safePattern.test(cleanZone)) return
+
+    var cmd = ["omni-profile", "snap", cleanZone]
+    if (root.targetWindowAddress) {
+      var cleanAddr = String(root.targetWindowAddress).trim()
+      if (safePattern.test(cleanAddr)) {
+        cmd.push(cleanAddr)
+      }
+    }
+    cmd.push("--no-hud")
+
     if (typeof Quickshell.execDetached === "function") {
-      Quickshell.execDetached(["sh", "-c", cmd])
+      Quickshell.execDetached(cmd)
     } else {
-      dispatchProc.command = ["sh", "-c", cmd]
+      dispatchProc.command = cmd
       dispatchProc.running = true
     }
     root.dismiss()
@@ -159,10 +174,12 @@ Item {
     command: ["omni-profile", "snap-layouts", "--json"]
     running: false
     stdout: StdioCollector {
+      id: schemaCollector
       waitForEnd: true
-      onStreamFinished: function() {
-        if (text && text.trim() !== "") {
-          Model.loadSchemaJson(text)
+      onStreamFinished: function(raw) {
+        var str = (raw && raw.trim() !== "") ? raw : (schemaCollector.text ? schemaCollector.text : "")
+        if (str && str.trim() !== "") {
+          Model.loadSchemaJson(str)
           root.templates = Model.TEMPLATES
         }
       }
@@ -252,9 +269,11 @@ Item {
           }
         }
 
-        // 数字键 1-6 处理 (Windows 11 Snap Layouts 核心两阶逻辑)
-        if (event.key >= Qt.Key_1 && event.key <= Qt.Key_6) {
-          var num = event.key - Qt.Key_1 + 1 // 1 ~ 6
+        // 数字键 1-6 处理 (Windows 11 Snap Layouts 核心两阶逻辑：支持主键盘与小键盘)
+        var isNumKey = (event.key >= Qt.Key_1 && event.key <= Qt.Key_6)
+        var isNumpadKey = (event.key >= Qt.Key_Numpad1 && event.key <= Qt.Key_Numpad6)
+        if (isNumKey || isNumpadKey) {
+          var num = isNumKey ? (event.key - Qt.Key_1 + 1) : (event.key - Qt.Key_Numpad1 + 1) // 1 ~ 6
 
           if (root.focusedTemplateIndex === -1) {
             // 阶段 1：未选模板时，按 1-6 选中对应模板，并默认聚焦到第 1 个分区
@@ -642,6 +661,11 @@ Item {
         clip: true
         Behavior on border.color { ColorAnimation { duration: 120 } }
 
+        // 吸收卡片空白区点击，防止点击空白处透传穿透导致面板被全屏遮罩误关闭
+        MouseArea {
+          anchors.fill: parent
+        }
+
         // 顶端极光微反光线 (Specular Hairline)
         Rectangle {
           anchors.top: parent.top
@@ -998,8 +1022,6 @@ Item {
 
                         onEntered: {
                           root.hoveredZone = modelData.id
-                          root.focusedTemplateIndex = tplCard.index
-                          root.focusedSlotIndex = slotRect.index
                         }
                         onExited: {
                           if (root.hoveredZone === modelData.id) {

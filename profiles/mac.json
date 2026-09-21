@@ -40,11 +40,6 @@
       "key": "3"
     },
     {
-      "action": "task_view",
-      "mod": "SUPER",
-      "key": "Up"
-    },
-    {
       "action": "workspace_prev",
       "mod": "SUPER CTRL",
       "key": "Left"
@@ -103,6 +98,11 @@
       "action": "snap_layouts",
       "mod": "SUPER ALT",
       "key": "Z"
+    },
+    {
+      "action": "task_view",
+      "mod": "SUPER",
+      "key": "Tab"
     }
   ]
 }

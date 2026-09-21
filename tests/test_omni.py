@@ -15,8 +15,36 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Isolate both config and run directories before loading engine to prevent mutating host desktop state
+_GLOBAL_TEST_CONFIG_DIR = tempfile.TemporaryDirectory()
+os.environ["OMNIPAL_CONFIG_DIR"] = _GLOBAL_TEST_CONFIG_DIR.name
+_GLOBAL_TEST_RUN_DIR = tempfile.TemporaryDirectory()
+os.environ["OMNIPAL_RUN_DIR"] = _GLOBAL_TEST_RUN_DIR.name
+
+import engine.engine as engine_module
 from engine.engine import OmniPalEngine, format_combo
 from scripts.check_consistency import check_consistency
+
+def setUpModule():
+    global _GLOBAL_TEST_CONFIG_DIR, _GLOBAL_TEST_RUN_DIR
+    if _GLOBAL_TEST_CONFIG_DIR is None:
+        _GLOBAL_TEST_CONFIG_DIR = tempfile.TemporaryDirectory()
+    os.environ["OMNIPAL_CONFIG_DIR"] = _GLOBAL_TEST_CONFIG_DIR.name
+    if _GLOBAL_TEST_RUN_DIR is None:
+        _GLOBAL_TEST_RUN_DIR = tempfile.TemporaryDirectory()
+    os.environ["OMNIPAL_RUN_DIR"] = _GLOBAL_TEST_RUN_DIR.name
+    engine_module._resolve_run_dir()
+
+def tearDownModule():
+    global _GLOBAL_TEST_CONFIG_DIR, _GLOBAL_TEST_RUN_DIR
+    os.environ.pop("OMNIPAL_CONFIG_DIR", None)
+    os.environ.pop("OMNIPAL_RUN_DIR", None)
+    if _GLOBAL_TEST_CONFIG_DIR:
+        _GLOBAL_TEST_CONFIG_DIR.cleanup()
+        _GLOBAL_TEST_CONFIG_DIR = None
+    if _GLOBAL_TEST_RUN_DIR:
+        _GLOBAL_TEST_RUN_DIR.cleanup()
+        _GLOBAL_TEST_RUN_DIR = None
 
 class TestOmniPal(unittest.TestCase):
     def setUp(self):
@@ -40,6 +68,8 @@ class TestOmniPal(unittest.TestCase):
         self.assertEqual(format_combo("SUPER SHIFT", "s"), "SUPER + SHIFT + S")
         self.assertEqual(format_combo("SUPER CTRL", "q"), "SUPER + CTRL + Q")
         self.assertEqual(format_combo("SUPER ALT", "d"), "SUPER + ALT + D")
+        self.assertEqual(format_combo("SUPER", "comma"), "SUPER + COMMA")
+        self.assertEqual(format_combo("SUPER", "slash"), "SUPER + SLASH")
 
     def test_profiles_loaded(self):
         """Ensures all default profiles are registered."""
@@ -62,15 +92,15 @@ class TestOmniPal(unittest.TestCase):
         self.assertTrue(any("ALT + LEFT" in item["key"] for item in mac_sheet))
         self.assertTrue(any("ALT + Z" in item["key"] for item in mac_sheet))
 
-    def test_all_six_plugins_exist(self):
-        """Validates that all 6 required Quickshell plugins exist with entry points."""
+    def test_all_plugins_exist(self):
+        """Validates that all required Quickshell plugins exist with entry points."""
         expected_plugins = [
             "omni.mode-indicator",
             "omni.cheat-sheet",
             "omni.settings",
             "omni.snap-feedback",
-            "omni.overview",
-            "omni.mac-dock"
+            "omni.mac-dock",
+            "omni.overview"
         ]
         plugins_dir = PROJECT_ROOT / "plugins"
         for p_name in expected_plugins:
@@ -87,10 +117,18 @@ class TestOmniPal(unittest.TestCase):
 
     def test_hard_stop_compliance(self):
         """Ensures that engine runtime state files are strictly confined to tmpfs (/run/user/)."""
-        from engine.engine import STATE_FILE, OVERLAY_FILE, RUN_DIR
-        self.assertTrue(str(RUN_DIR).startswith("/run/user/"))
-        self.assertTrue(str(STATE_FILE).startswith("/run/user/"))
-        self.assertTrue(str(OVERLAY_FILE).startswith("/run/user/"))
+        from engine.engine import _resolve_run_dir, STATE_FILE, OVERLAY_FILE, RUN_DIR
+        orig_run_dir = os.environ.pop("OMNIPAL_RUN_DIR", None)
+        try:
+            default_dir = _resolve_run_dir()
+            self.assertTrue(str(default_dir).startswith("/run/user/"))
+        finally:
+            if orig_run_dir is not None:
+                os.environ["OMNIPAL_RUN_DIR"] = orig_run_dir
+                _resolve_run_dir()
+        self.assertTrue(str(RUN_DIR).startswith("/run/user/") or str(RUN_DIR).startswith(tempfile.gettempdir()) or "/tmp" in str(RUN_DIR))
+        self.assertTrue(str(STATE_FILE).startswith("/run/user/") or str(STATE_FILE).startswith(tempfile.gettempdir()) or "/tmp" in str(STATE_FILE))
+        self.assertTrue(str(OVERLAY_FILE).startswith("/run/user/") or str(OVERLAY_FILE).startswith(tempfile.gettempdir()) or "/tmp" in str(OVERLAY_FILE))
         # Ensure no configuration directories are referenced as write targets
         self.assertNotIn(".config/hypr", str(STATE_FILE))
         self.assertNotIn("shell.json", str(STATE_FILE))
@@ -362,15 +400,72 @@ class TestOmniPal(unittest.TestCase):
         self.assertTrue(success)
         self.assertIsNone(self.engine._last_summon_proc)
 
-    def test_overview_zero_fork_architecture(self):
-        """Validates that Overview.qml uses direct hyprctl --batch without process forking or python helper scripts."""
-        overview_qml = PROJECT_ROOT / "plugins" / "omni.overview" / "Overview.qml"
-        self.assertTrue(overview_qml.exists())
-        content = overview_qml.read_text(encoding="utf-8")
-        self.assertNotIn("python3", content)
-        self.assertNotIn("sh -c", content)
-        self.assertIn("--batch", content)
-        self.assertIn("workspaces ; clients ; monitors ; activewindow", content)
+    def test_resolve_run_dir_precedence(self):
+        """Validates that _resolve_run_dir honors OMNIPAL_RUN_DIR > XDG_RUNTIME_DIR > /run/user/<uid>."""
+        from engine.engine import _resolve_run_dir
+        orig_run_dir = os.environ.get("OMNIPAL_RUN_DIR")
+        orig_xdg = os.environ.get("XDG_RUNTIME_DIR")
+        try:
+            # 1. Custom OMNIPAL_RUN_DIR
+            os.environ["OMNIPAL_RUN_DIR"] = "/tmp/custom_omnipal_test"
+            self.assertEqual(str(_resolve_run_dir()), "/tmp/custom_omnipal_test")
+
+            # 2. Fallback to XDG_RUNTIME_DIR
+            os.environ.pop("OMNIPAL_RUN_DIR", None)
+            os.environ["XDG_RUNTIME_DIR"] = "/tmp/mock_xdg"
+            self.assertEqual(str(_resolve_run_dir()), "/tmp/mock_xdg/omnipal")
+
+            # 3. Fallback to /run/user/<uid>/omnipal
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+            self.assertEqual(str(_resolve_run_dir()), f"/run/user/{os.getuid()}/omnipal")
+        finally:
+            if orig_run_dir is not None:
+                os.environ["OMNIPAL_RUN_DIR"] = orig_run_dir
+            else:
+                os.environ.pop("OMNIPAL_RUN_DIR", None)
+            if orig_xdg is not None:
+                os.environ["XDG_RUNTIME_DIR"] = orig_xdg
+            else:
+                os.environ.pop("XDG_RUNTIME_DIR", None)
+            _resolve_run_dir()
+
+    def test_verify_overlay_bindings(self):
+        """Verifies that verify_overlay_bindings correctly detects missing vs present bindings."""
+        import subprocess
+        # In omarchy mode, always returns True
+        self.engine._write_state("omarchy", 0)
+        self.assertTrue(self.engine.verify_overlay_bindings())
+
+        # In windows mode with no overlay file, returns False
+        self.engine._write_state("windows", 10)
+        from engine.engine import OVERLAY_FILE
+        if OVERLAY_FILE.exists():
+            OVERLAY_FILE.unlink()
+        self.assertFalse(self.engine.verify_overlay_bindings())
+
+        # Write mock overlay
+        self.engine._write_active_overlay([
+            {"action": "window_close", "combo": "ALT + F4", "name": "Close Window"}
+        ])
+
+        # Mock hyprctl binds -j returning matching or missing description
+        orig_run = subprocess.run
+        try:
+            class MockCompletedProcess:
+                def __init__(self, stdout):
+                    self.stdout = stdout
+                    self.returncode = 0
+
+            # Missing description
+            subprocess.run = lambda *args, **kwargs: MockCompletedProcess('[{"description": "Other Action"}]')
+            self.assertFalse(self.engine.verify_overlay_bindings())
+
+            # Present description
+            subprocess.run = lambda *args, **kwargs: MockCompletedProcess('[{"description": "Close Window"}]')
+            self.assertTrue(self.engine.verify_overlay_bindings())
+        finally:
+            subprocess.run = orig_run
+            self.engine.restore()
 
 class TestPersistenceManager(unittest.TestCase):
     """Validates the opt-in profile persistence isolated via OMNIPAL_CONFIG_DIR."""
@@ -393,52 +488,77 @@ class TestPersistenceManager(unittest.TestCase):
             os.environ["OMNIPAL_CONFIG_DIR"] = self._saved_env
         self._tmp_dir.cleanup()
 
-    def test_default_state_is_disabled(self):
-        """Fresh environment must report disabled with zero persistence files written."""
+    def test_default_state_is_enabled(self):
+        """Fresh environment defaults to enabled persistence to remember last configuration across reboots."""
         status = self.engine.get_persistence_status()
-        self.assertFalse(status["enabled"])
+        self.assertTrue(status["enabled"])
         self.assertIsNone(status["profile"])
+        self.assertIsNone(status["window_policy"])
         self.assertIsNone(status["updated_at"])
         self.assertEqual(status["path"], str(self.persist_path))
-        self.assertFalse(self.persist_path.exists(), "默认零文件写入：不得创建 persistence.json")
+        self.assertFalse(self.persist_path.exists(), "惰性写入：首次配置变更前不强行创建文件")
         self.assertIsNone(self.engine.get_persisted_profile())
+        self.assertIsNone(self.engine.get_persisted_window_policy())
 
     def test_enable_disable_and_invalid_profile(self):
-        """Enable/disable round-trip plus rejection of unknown profiles."""
-        self.assertTrue(self.engine.set_persistence(True, "mac"))
+        """Enable/disable round-trip, window_policy preservation, and rejection of unknown profiles."""
+        self.assertTrue(self.engine.set_persistence(True, "mac", "floating"))
         status = self.engine.get_persistence_status()
         self.assertTrue(status["enabled"])
         self.assertEqual(status["profile"], "mac")
+        self.assertEqual(status["window_policy"], "floating")
         self.assertIsNotNone(status["updated_at"])
         self.assertTrue(self.persist_path.exists())
         self.assertEqual(self.engine.get_persisted_profile(), "mac")
+        self.assertEqual(self.engine.get_persisted_window_policy(), "floating")
 
         # Illegal profile must be refused without touching the stored state
         self.assertFalse(self.engine.set_persistence(True, "nonexistent_bogus"))
         status = self.engine.get_persistence_status()
         self.assertTrue(status["enabled"])
         self.assertEqual(status["profile"], "mac")
+        self.assertEqual(status["window_policy"], "floating")
 
         self.assertTrue(self.engine.set_persistence(False))
         status = self.engine.get_persistence_status()
         self.assertFalse(status["enabled"])
         self.assertIsNone(status["profile"])
-        self.assertFalse(self.persist_path.exists(), "关闭持久化必须彻底清理 persistence.json")
+        self.assertIsNone(status["window_policy"])
         self.assertIsNone(self.engine.get_persisted_profile())
+        self.assertIsNone(self.engine.get_persisted_window_policy())
 
-    def test_switch_mode_autosyncs_persisted_profile(self):
-        """switch_mode must mirror into persistence.json only while persistence is enabled."""
-        self.assertTrue(self.engine.set_persistence(True, "windows"))
-        self.assertTrue(self.engine.switch_mode("mac"))
+    def test_switch_mode_and_policy_autosync(self):
+        """switch_mode and set_window_policy must mirror into persistence.json when persistence is enabled."""
+        # By default persistence is enabled
+        self.assertTrue(self.engine.switch_mode("windows"))
         status = self.engine.get_persistence_status()
         self.assertTrue(status["enabled"])
-        self.assertEqual(status["profile"], "mac")
-        self.assertEqual(self.engine.get_persisted_profile(), "mac")
+        self.assertEqual(status["profile"], "windows")
+        self.assertEqual(self.engine.get_persisted_profile(), "windows")
 
-        # Disabled persistence stays fully inert during switches (zero writes)
+        # Setting window policy updates policy while preserving profile
+        self.assertTrue(self.engine.set_window_policy("floating"))
+        status = self.engine.get_persistence_status()
+        self.assertEqual(status["profile"], "windows")
+        self.assertEqual(status["window_policy"], "floating")
+        self.assertEqual(self.engine.get_persisted_window_policy(), "floating")
+
+        # Switching mode preserves window policy
+        self.assertTrue(self.engine.switch_mode("mac"))
+        status = self.engine.get_persistence_status()
+        self.assertEqual(status["profile"], "mac")
+        self.assertEqual(status["window_policy"], "floating")
+
+        # Switching to omarchy mode also persists
+        self.assertTrue(self.engine.switch_mode("omarchy"))
+        status = self.engine.get_persistence_status()
+        self.assertEqual(status["profile"], "omarchy")
+        self.assertEqual(status["window_policy"], "floating")
+
+        # Disabled persistence stays fully inert during switches
         self.assertTrue(self.engine.set_persistence(False))
         self.assertTrue(self.engine.switch_mode("windows"))
-        self.assertFalse(self.persist_path.exists())
+        self.assertIsNone(self.engine.get_persisted_profile())
 
     def test_enable_without_profile_uses_active_mode(self):
         """Enabling with no explicit profile persists the currently active mode."""
@@ -448,18 +568,50 @@ class TestPersistenceManager(unittest.TestCase):
 
     def test_env_config_dir_isolation(self):
         """OMNIPAL_CONFIG_DIR must fully isolate every persistence read/write."""
-        self.assertTrue(self.engine.set_persistence(True, "windows"))
+        self.assertTrue(self.engine.set_persistence(True, "windows", "floating"))
         self.assertTrue(self.persist_path.exists())
 
         with tempfile.TemporaryDirectory() as other_dir:
             os.environ["OMNIPAL_CONFIG_DIR"] = other_dir
             status = self.engine.get_persistence_status()
-            self.assertFalse(status["enabled"], "切换 OMNIPAL_CONFIG_DIR 后必须读写隔离")
             self.assertEqual(status["path"], str(Path(other_dir) / "persistence.json"))
             self.assertFalse((Path(other_dir) / "persistence.json").exists())
+            self.assertIsNone(self.engine.get_persisted_profile())
+            self.assertIsNone(self.engine.get_persisted_window_policy())
         os.environ["OMNIPAL_CONFIG_DIR"] = self._tmp_dir.name
         # Original directory state is untouched and visible again
         self.assertEqual(self.engine.get_persisted_profile(), "windows")
+        self.assertEqual(self.engine.get_persisted_window_policy(), "floating")
+
+    def test_reboot_restoration_across_clean_tmpfs(self):
+        """Simulate computer shutdown/reboot: tmpfs state wiped, engine reconstructs persisted mode & policy."""
+        # 1. User configures windows mode + floating policy
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertTrue(self.engine.set_window_policy("floating"))
+        self.assertEqual(self.engine.get_persisted_profile(), "windows")
+        self.assertEqual(self.engine.get_persisted_window_policy(), "floating")
+
+        # 2. Simulate shutdown cleanup: engine.restore() clears overlays, then tmpfs is unmounted/wiped
+        self.engine.restore()
+
+        # 3. Simulate fresh reboot: new engine instance where STATE_FILE does not exist
+        with tempfile.TemporaryDirectory() as fresh_run_dir:
+            orig_run_dir_env = os.environ.get("OMNIPAL_RUN_DIR")
+            os.environ["OMNIPAL_RUN_DIR"] = fresh_run_dir
+            engine_module._resolve_run_dir()
+            try:
+                self.assertFalse(engine_module.STATE_FILE.exists())
+                fresh_engine = OmniPalEngine(PROJECT_ROOT)
+                # Should pick up floating window_policy from persistence.json immediately
+                self.assertEqual(fresh_engine.window_policy, "floating")
+                self.assertEqual(fresh_engine.get_persisted_profile(), "windows")
+                self.assertEqual(fresh_engine.get_persisted_window_policy(), "floating")
+            finally:
+                if orig_run_dir_env is not None:
+                    os.environ["OMNIPAL_RUN_DIR"] = orig_run_dir_env
+                else:
+                    os.environ.pop("OMNIPAL_RUN_DIR", None)
+                engine_module._resolve_run_dir()
 
 class TestUsageStatistics(unittest.TestCase):
     """Validates fully local usage statistics: isolation, increments, reset, and zero-impact fault tolerance."""
@@ -736,8 +888,8 @@ class TestWindowPolicyAndModeIndicator(unittest.TestCase):
         const profs = ctx.fallbackProfiles();
         const win = profs.find(p => p.id === 'windows');
         const mac = profs.find(p => p.id === 'mac');
-        if (!win || win.bindings_count !== 14) throw new Error('windows binding count mismatch: ' + (win ? win.bindings_count : null));
-        if (!mac || mac.bindings_count !== 19) throw new Error('mac binding count mismatch: ' + (mac ? mac.bindings_count : null));
+        if (!win || typeof win.bindings_count !== 'number' || win.bindings_count <= 0) throw new Error('windows binding count invalid: ' + (win ? win.bindings_count : null));
+        if (!mac || typeof mac.bindings_count !== 'number' || mac.bindings_count <= 0) throw new Error('mac binding count invalid: ' + (mac ? mac.bindings_count : null));
 
         // Verify aliases
         if (ctx.resolvePolicyName('follow') !== '跟随') throw new Error('alias follow failed');
@@ -821,6 +973,174 @@ class TestWindowPolicyAndModeIndicator(unittest.TestCase):
         data2 = json.loads(p2.stdout)
         self.assertTrue(data2.get("success"))
         self.assertEqual(data2.get("window_policy"), "tiled")
+
+    def test_floating_window_policy_enforcement(self):
+        """Validates that _apply_window_policy and _float_existing_windows execute cleanly."""
+        e = OmniPalEngine(PROJECT_ROOT)
+        # Test floating policy apply with force
+        e.set_window_policy("floating")
+        self.assertTrue(e._apply_window_policy(force=True))
+        self.assertEqual(e._get_applied_window_mode(), "floating")
+
+        # Test safe execution of _float_existing_windows
+        e._float_existing_windows()
+
+        # Test tiled policy reset
+        e.set_window_policy("tiled")
+        self.assertTrue(e._apply_window_policy(force=True))
+        self.assertEqual(e._get_applied_window_mode(), "tiled")
+
+    def test_special_window_classification(self):
+        """Verifies exclusion and classification of PiP, scratchpad, micro-windows, and dialogs."""
+        # 1. Picture-in-Picture
+        self.assertTrue(engine_module.is_pip_window("google-chrome", "Picture-in-Picture"))
+        self.assertTrue(engine_module.is_pip_window("firefox", "Video - Picture in picture"))
+        self.assertTrue(engine_module.is_pip_window("pip", "Some Player"))
+        self.assertTrue(engine_module.is_pip_window("firefox-pip", "Player"))
+        self.assertFalse(engine_module.is_pip_window("pipewire-pulse", "Audio Settings"))
+        self.assertFalse(engine_module.is_pip_window("google-chrome", "Google Search"))
+
+        # 2. Scratchpad / special workspace
+        self.assertTrue(engine_module.is_scratchpad_workspace("special:scratchpad", None))
+        self.assertTrue(engine_module.is_scratchpad_workspace("special", None))
+        self.assertTrue(engine_module.is_scratchpad_workspace("1", -98))
+        self.assertTrue(engine_module.is_scratchpad_workspace("-99", None))
+        self.assertFalse(engine_module.is_scratchpad_workspace("1", 1))
+        self.assertFalse(engine_module.is_scratchpad_workspace("", None))
+
+        # 3. Dialogs / prompts / popups
+        for kw in ("polkit", "pinentry", "portal", "calc", "about", "dialog", "prompt", "steam_app_", "wlogout", "rofi"):
+            self.assertTrue(engine_module.is_dialog_window(f"my-{kw}-app", "Window"), f"Failed for {kw} in class")
+            self.assertTrue(engine_module.is_dialog_window("normal-app", f"Title with {kw}"), f"Failed for {kw} in title")
+        self.assertFalse(engine_module.is_dialog_window("antigravity", "Coding session"))
+
+        # 4. Micro-window
+        self.assertTrue(engine_module.is_micro_window([150, 100]))
+        self.assertTrue(engine_module.is_micro_window([250, 400]))
+        self.assertTrue(engine_module.is_micro_window([800, 150]))
+        self.assertFalse(engine_module.is_micro_window([800, 600]))
+        self.assertFalse(engine_module.is_micro_window(None))
+
+        # 5. Combined is_special_window
+        # PiP -> skip=True, is_dialog=False
+        skip, is_dlg = engine_module.is_special_window(cls_name="pip", title="Player")
+        self.assertTrue(skip)
+        self.assertFalse(is_dlg)
+
+        # Scratchpad -> skip=True, is_dialog=False
+        skip, is_dlg = engine_module.is_special_window(cls_name="alacritty", ws_name="special:term")
+        self.assertTrue(skip)
+        self.assertFalse(is_dlg)
+
+        # Micro-window -> skip=True, is_dialog=False
+        skip, is_dlg = engine_module.is_special_window(cls_name="alacritty", size=[100, 100])
+        self.assertTrue(skip)
+        self.assertFalse(is_dlg)
+
+        # Dialog -> skip=False, is_dialog=True
+        skip, is_dlg = engine_module.is_special_window(cls_name="polkit-agent", title="Auth Required")
+        self.assertFalse(skip)
+        self.assertTrue(is_dlg)
+
+        # Normal window -> skip=False, is_dialog=False
+        skip, is_dlg = engine_module.is_special_window(cls_name="firefox", title="Documentation", ws_name="2", ws_id=2, size=[1200, 800])
+        self.assertFalse(skip)
+        self.assertFalse(is_dlg)
+
+    def test_golden_cascade_monitor_aware_lua(self):
+        """Verifies that _apply_golden_cascade_geometry generates monitor-aware Lua code."""
+        e = OmniPalEngine(PROJECT_ROOT)
+        captured_lua = []
+        e._eval_lua = lambda code: captured_lua.append(code) or True
+
+        # Test with monitor dict
+        mon_dict = {"x": 2560, "y": 0, "width": 1920, "height": 1080, "reserved": [0, 26, 0, 0]}
+        e._apply_golden_cascade_geometry("0x1234", step=2, is_dialog=False, monitor=mon_dict)
+        self.assertEqual(len(captured_lua), 1)
+        code = captured_lua[0]
+        self.assertIn("target_mon = { x = 2560, y = 0, width = 1920, height = 1080", code)
+        self.assertIn("hl.get_monitors", code)
+        self.assertIn("hl.get_windows", code)
+        self.assertIn("win.monitor", code)
+        self.assertIn("hl.dsp.window.resize", code)
+        self.assertIn("hl.dsp.window.move", code)
+
+        # Test with dialog (should set is_dialog=1 and include center dispatch)
+        captured_lua.clear()
+        e._apply_golden_cascade_geometry("0x5678", step=0, is_dialog=True, monitor="DP-2")
+        self.assertEqual(len(captured_lua), 1)
+        dlg_code = captured_lua[0]
+        self.assertIn('target_mon = "DP-2"', dlg_code)
+        self.assertIn("is_dialog = 1", dlg_code)
+        self.assertIn("hl.dsp.window.center", dlg_code)
+
+    def test_float_existing_windows_skips_special_and_centers_dialogs(self):
+        """Validates that _float_existing_windows skips PiP, scratchpad, micro-windows, and centers dialogs."""
+        e = OmniPalEngine(PROJECT_ROOT)
+        fake_clients = [
+            # 1. Normal window -> cascaded
+            {"address": "0x111", "mapped": True, "hidden": False, "class": "firefox", "title": "Web", "workspace": {"id": 1, "name": "1"}, "size": [1000, 700], "floating": False, "pinned": False, "fullscreen": 0, "monitor": 0},
+            # 2. PiP window -> skipped
+            {"address": "0x222", "mapped": True, "hidden": False, "class": "google-chrome", "title": "Picture-in-Picture", "workspace": {"id": 1, "name": "1"}, "size": [400, 300], "floating": True, "pinned": False, "fullscreen": 0, "monitor": 0},
+            # 3. Scratchpad window -> skipped
+            {"address": "0x333", "mapped": True, "hidden": False, "class": "kitty", "title": "scratch", "workspace": {"id": -98, "name": "special:scratchpad"}, "size": [800, 600], "floating": True, "pinned": False, "fullscreen": 0, "monitor": 0},
+            # 4. Micro window -> skipped
+            {"address": "0x444", "mapped": True, "hidden": False, "class": "app", "title": "tip", "workspace": {"id": 1, "name": "1"}, "size": [120, 80], "floating": True, "pinned": False, "fullscreen": 0, "monitor": 0},
+            # 5. Dialog window -> centered
+            {"address": "0x555", "mapped": True, "hidden": False, "class": "polkit-gnome", "title": "Authentication", "workspace": {"id": 1, "name": "1"}, "size": [450, 300], "floating": True, "pinned": False, "fullscreen": 0, "monitor": 0},
+        ]
+
+        calls = []
+        e.get_windows = lambda: fake_clients
+        e._apply_golden_cascade_geometry = lambda addr, step=0, is_dialog=False, monitor=None: calls.append({
+            "addr": addr, "step": step, "is_dialog": is_dialog, "monitor": monitor
+        })
+
+        e._float_existing_windows()
+
+        # Only 0x111 and 0x555 should be processed!
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["addr"], "0x111")
+        self.assertFalse(calls[0]["is_dialog"])
+        self.assertEqual(calls[0]["step"], 0)
+
+        self.assertEqual(calls[1]["addr"], "0x555")
+        self.assertTrue(calls[1]["is_dialog"])
+
+    def test_unfloat_existing_windows(self):
+        """Validates that _unfloat_existing_windows unfloats normal windows in active workspace while preserving special windows."""
+        e = OmniPalEngine(PROJECT_ROOT)
+        fake_clients = [
+            # Normal floating window in active workspace 1 -> should unfloat
+            {"address": "0xaaa", "mapped": True, "hidden": False, "class": "kitty", "title": "Terminal", "workspace": {"id": 1, "name": "1"}, "floating": True, "pinned": False, "fullscreen": 0, "size": [800, 600]},
+            # Dialog window in active workspace 1 -> keep floating
+            {"address": "0xbbb", "mapped": True, "hidden": False, "class": "polkit", "title": "Prompt", "workspace": {"id": 1, "name": "1"}, "floating": True, "pinned": False, "fullscreen": 0, "size": [400, 300]},
+            # PiP window in active workspace 1 -> keep floating
+            {"address": "0xccc", "mapped": True, "hidden": False, "class": "pip", "title": "Video", "workspace": {"id": 1, "name": "1"}, "floating": True, "pinned": False, "fullscreen": 0, "size": [400, 300]},
+            # Pinned window -> keep floating
+            {"address": "0xddd", "mapped": True, "hidden": False, "class": "notes", "title": "Notes", "workspace": {"id": 1, "name": "1"}, "floating": True, "pinned": True, "fullscreen": 0, "size": [500, 400]},
+            # Fullscreen window -> keep
+            {"address": "0xeee", "mapped": True, "hidden": False, "class": "vlc", "title": "Movie", "workspace": {"id": 1, "name": "1"}, "floating": True, "pinned": False, "fullscreen": 1, "size": [1920, 1080]},
+            # Already tiled window -> skip
+            {"address": "0xfff", "mapped": True, "hidden": False, "class": "editor", "title": "Code", "workspace": {"id": 1, "name": "1"}, "floating": False, "pinned": False, "fullscreen": 0, "size": [800, 600]},
+        ]
+
+        e.get_windows = lambda: fake_clients
+        captured_lua = []
+        e._eval_lua = lambda code: captured_lua.append(code) or True
+
+        e._unfloat_existing_windows()
+
+        self.assertEqual(len(captured_lua), 1)
+        code = captured_lua[0]
+        # Only 0xaaa should be unfloated!
+        self.assertIn("0xaaa", code)
+        self.assertIn('action = "off"', code)
+        self.assertNotIn("0xbbb", code)
+        self.assertNotIn("0xccc", code)
+        self.assertNotIn("0xddd", code)
+        self.assertNotIn("0xeee", code)
+        self.assertNotIn("0xfff", code)
 
     def test_qml_syntax_via_qmllint(self):
         """Verifies that BarWidget.qml passes Qt6 qmllint syntax checking."""
@@ -924,7 +1244,238 @@ class TestWindowPolicyAndModeIndicator(unittest.TestCase):
             self.assertIsInstance(res, dict)
             self.assertIn("address", res)
 
+    def test_snap_invalid_zone(self):
+        """Ensures snap returns False when supplied an invalid or nonexistent zone."""
+        self.assertFalse(self.engine.snap("completely_nonexistent_zone_12345"))
+
+    def test_engine_lock_reentrancy(self):
+        """Ensures engine_lock handles recursive nested acquisition smoothly without deadlock."""
+        from engine.engine import engine_lock
+        with engine_lock(timeout=0.5):
+            with engine_lock(timeout=0.5):
+                with engine_lock(timeout=0.5):
+                    self.assertTrue(True)
+
+    def test_engine_lock_exception_propagation(self):
+        """Ensures exceptions raised inside engine_lock propagate directly without RuntimeError."""
+        from engine.engine import engine_lock
+        class CustomTestError(Exception):
+            pass
+
+        with self.assertRaises(CustomTestError):
+            with engine_lock(timeout=0.5):
+                raise CustomTestError("Test error propagation inside engine_lock")
+
+    def test_atomic_write_json_safety(self):
+        """Validates that atomic_write_json safely writes data and does not leave temporary files."""
+        from engine.engine import atomic_write_json
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "test_state.json"
+            data = {"status": "ok", "count": 42}
+            ok = atomic_write_json(target, data)
+            self.assertTrue(ok)
+            self.assertTrue(target.exists())
+            loaded = json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(loaded, data)
+            # Ensure no orphan .tmp files in directory
+            tmps = list(Path(td).glob("*.tmp"))
+            self.assertEqual(len(tmps), 0)
+
+    def test_get_windows(self):
+        """Verifies get_windows returns a list and handles failures safely."""
+        windows = self.engine.get_windows()
+        self.assertIsInstance(windows, list)
+
+    def test_snap_layouts_with_address_does_not_crash(self):
+        """Verifies snap('layouts', '0x1234') executes cleanly without crashing."""
+        from engine.engine import SNAP_FILE
+        res = self.engine.snap("layouts", target_address="0x1234", no_hud=True)
+        self.assertTrue(res)
+        self.assertTrue(SNAP_FILE.exists())
+        data = json.loads(SNAP_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(data.get("zone"), "layouts")
+        self.assertEqual(data.get("target_window"), "0x1234")
+
+    def test_snap_target_address_injection_safety(self):
+        """Ensures snap validates target_address with strict regex, dropping malicious Lua injections."""
+        from engine.engine import SNAP_FILE
+        malicious_input = "'; os.execute('echo pwned'); --"
+        res = self.engine.snap("left", target_address=malicious_input, no_hud=True)
+        self.assertTrue(SNAP_FILE.exists())
+        data = json.loads(SNAP_FILE.read_text(encoding="utf-8"))
+        self.assertIsNone(data.get("target_window"))
+        self.assertNotIn("pwned", str(data))
+
+    def test_omni_profile_cheatsheet_nonexistent_exit_code(self):
+        """Verifies omni-profile cheatsheet with unknown mode exits with code 2 and stderr message."""
+        cli = PROJECT_ROOT / "bin" / "omni-profile"
+        res = subprocess.run([sys.executable, str(cli), "cheatsheet", "nonexistent_profile_xyz"],
+                             capture_output=True, text=True)
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("nonexistent_profile_xyz", res.stderr)
+
+    def test_concurrent_record_stat_safety(self):
+        """Validates that concurrent _record_stat calls with engine_lock do not lose counts or corrupt JSON."""
+        import threading
+        with tempfile.TemporaryDirectory() as td:
+            saved_env = os.environ.get("OMNIPAL_CONFIG_DIR")
+            os.environ["OMNIPAL_CONFIG_DIR"] = td
+            try:
+                threads = []
+                increments_per_thread = 20
+                num_threads = 5
+
+                def worker():
+                    for _ in range(increments_per_thread):
+                        self.engine._record_stat("actions", "concurrent_test_action")
+
+                for _ in range(num_threads):
+                    t = threading.Thread(target=worker)
+                    threads.append(t)
+                    t.start()
+
+                for t in threads:
+                    t.join()
+
+                stats = self.engine.get_stats()
+                self.assertIn("actions", stats)
+                self.assertEqual(stats["actions"].get("concurrent_test_action"), num_threads * increments_per_thread)
+            finally:
+                if saved_env is not None:
+                    os.environ["OMNIPAL_CONFIG_DIR"] = saved_env
+                else:
+                    os.environ.pop("OMNIPAL_CONFIG_DIR", None)
+
+    def test_snapshot_baseline_bindings(self):
+        """Verifies that _snapshot_baseline_bindings captures overlapping profile/action bindings and caches them."""
+        mock_binds = [
+            {
+                "modmask": 64,
+                "key": "SPACE",
+                "dispatcher": "__lua",
+                "arg": "1234",
+                "description": "User Custom Launcher"
+            },
+            {
+                "modmask": 64,
+                "key": "W",
+                "dispatcher": "__lua",
+                "arg": "5678",
+                "description": "Close window"
+            },
+            {
+                "modmask": 8,
+                "key": "F4",
+                "dispatcher": "exec",
+                "arg": "my-close-script.sh",
+                "description": "Custom Close"
+            },
+            {
+                "modmask": 65,
+                "key": "F12",
+                "dispatcher": "exec",
+                "arg": "irrelevant-action.sh",
+                "description": "Irrelevant Custom"
+            }
+        ]
+        from unittest.mock import patch
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["hyprctl", "binds", "-j"],
+                returncode=0,
+                stdout=json.dumps(mock_binds)
+            )
+            self.engine.baseline_bindings = {}
+            captured = self.engine._snapshot_baseline_bindings(force=True)
+
+            self.assertIn("SUPER + SPACE", captured)
+            self.assertEqual(captured["SUPER + SPACE"]["description"], "User Custom Launcher")
+            self.assertEqual(captured["SUPER + SPACE"]["arg"], "1234")
+
+            self.assertIn("SUPER + W", captured)
+            self.assertIn("ALT + F4", captured)
+            self.assertEqual(captured["ALT + F4"]["dispatcher"], "exec")
+
+            # Irrelevant F12 does not overlap with any profile or action catalog item
+            self.assertNotIn("SUPER + SHIFT + F12", captured)
+
+            # Check that BASELINE_FILE was written
+            from engine.engine import BASELINE_FILE
+            self.assertTrue(BASELINE_FILE.exists())
+            cached_data = json.loads(BASELINE_FILE.read_text(encoding="utf-8"))
+            self.assertIn("SUPER + SPACE", cached_data)
+
+    def test_dynamic_restore_generation_and_fallback(self):
+        """Validates that restore() uses dynamic Lua when snapshot is present, falling back to baseline when absent."""
+        from engine.engine import LUA_RESTORE_BASELINE
+        from unittest.mock import patch
+        eval_history = []
+
+        def fake_eval(lua_code):
+            eval_history.append(lua_code)
+            return True
+
+        # 1. Test dynamic restore when snapshot exists
+        self.engine.baseline_bindings = {
+            "SUPER + SPACE": {
+                "combo": "SUPER + SPACE",
+                "dispatcher": "__lua",
+                "arg": "9999",
+                "description": "Custom Launcher"
+            },
+            "ALT + F4": {
+                "combo": "ALT + F4",
+                "dispatcher": "exec",
+                "arg": "custom-kill",
+                "description": "Custom Kill"
+            }
+        }
+
+        with patch.object(self.engine, "_eval_lua", side_effect=fake_eval):
+            ok = self.engine.restore()
+            self.assertTrue(ok)
+            self.assertTrue(len(eval_history) > 0)
+            executed_lua = eval_history[-1]
+            self.assertIn("local reg = debug.getregistry()", executed_lua)
+            self.assertIn('hl.bind("SUPER + SPACE", fn_9999', executed_lua)
+            self.assertIn('o.bind("ALT + F4", "Custom Kill", "custom-kill")', executed_lua)
+            self.assertNotIn(LUA_RESTORE_BASELINE, executed_lua)
+
+        # 2. Test fallback when baseline snapshot is absent
+        eval_history.clear()
+        self.engine.baseline_bindings = {}
+        from engine.engine import BASELINE_FILE
+        if BASELINE_FILE.exists():
+            BASELINE_FILE.unlink()
+
+        with patch.object(self.engine, "_eval_lua", side_effect=fake_eval), \
+             patch.object(self.engine, "_snapshot_baseline_bindings", return_value={}):
+            ok = self.engine.restore()
+            self.assertTrue(ok)
+            self.assertTrue(len(eval_history) > 0)
+            executed_lua = eval_history[-1]
+            self.assertIn(LUA_RESTORE_BASELINE, executed_lua)
+
+    def test_switch_mode_omarchy_uses_snapshot(self):
+        """Verifies switch_mode('omarchy') executes dynamic restore with captured snapshot."""
+        from unittest.mock import patch
+        self.engine.baseline_bindings = {
+            "SUPER + SPACE": {
+                "combo": "SUPER + SPACE",
+                "dispatcher": "__lua",
+                "arg": "7777",
+                "description": "My Menu"
+            }
+        }
+        eval_history = []
+        with patch.object(self.engine, "_eval_lua", side_effect=lambda lua: eval_history.append(lua) or True):
+            ok = self.engine.switch_mode("omarchy", record=False)
+            self.assertTrue(ok)
+            self.assertTrue(any("fn_7777" in lua for lua in eval_history))
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

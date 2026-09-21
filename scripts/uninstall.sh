@@ -17,14 +17,23 @@ if [ -x "${BIN_TARGET}" ]; then
     "${BIN_TARGET}" restore || true
 fi
 
-# 2. 停用并移除 systemd 服务
+# 2. 停用并移除 systemd 服务及残留孤儿进程
 if [ -f "${SERVICE_FILE}" ]; then
     echo "🛑 停止并清理 systemd 用户服务..."
     systemctl --user stop omnipal.service 2>/dev/null || true
     systemctl --user disable omnipal.service 2>/dev/null || true
     rm -f "${SERVICE_FILE}"
-    systemctl --user daemon-reload
+    systemctl --user daemon-reload 2>/dev/null || true
 fi
+pkill -f 'omni-profile daemon' 2>/dev/null || true
+pkill -f 'engine/engine.py --daemon' 2>/dev/null || true
+# 等待守护进程退出，避免文件删除竞争
+for _ in {1..20}; do
+    if ! pgrep -f 'omni-profile daemon|engine/engine.py --daemon' >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.1
+done
 
 # 3. 移除 CLI 软链接
 if [ -L "${BIN_TARGET}" ] || [ -f "${BIN_TARGET}" ]; then
@@ -36,9 +45,12 @@ fi
 OMARCHY_PLUGINS_DIR="${HOME}/.config/omarchy/plugins"
 if [ -d "${OMARCHY_PLUGINS_DIR}" ]; then
     for p_link in "${OMARCHY_PLUGINS_DIR}"/omni.*; do
-        if [ -L "${p_link}" ] || [ -d "${p_link}" ]; then
-            rm -rf "${p_link}"
+        if [ -L "${p_link}" ]; then
+            rm -f "${p_link}"
             echo "🗑️ 已移除插件软链接: $(basename "${p_link}")"
+        elif [ -d "${p_link}" ]; then
+            # 真实目录（非安装脚本创建的软链接）不做递归删除，避免误删用户文件。
+            echo "⚠️ 跳过非软链接目录（请确认归属后手动处理）: ${p_link}"
         fi
     done
 fi

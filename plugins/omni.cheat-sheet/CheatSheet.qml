@@ -13,7 +13,7 @@ import "CheatSheetData.js" as SheetData
 //   • 键位数据只来自 Engine：`omni-profile cheatsheet [mode] --json`（Engine 侧
 //     再联合 schema/actions.json 与 profiles/*.json），当前模式与 Engine 状态来自
 //     `omni-profile status --json`。本文件不存在任何键位列表副本。
-//   • 一次 fetch.sh 调用同时拿两块数据：不轮询、不常驻。
+//   • 一次进程调用同时拿两块数据：不轮询、不常驻。
 //   • 拿不到数据时展示可操作的提示文本，不抛异常（优雅降级）。
 Item {
   id: root
@@ -170,13 +170,6 @@ Item {
 
   // -------------------------------------------------------- data plumbing
 
-  // fetch.sh sits next to this file, so a plugin installed anywhere still
-  // resolves its own helper without hardcoding a repo path.
-  readonly property string fetchScript: {
-    var url = String(Qt.resolvedUrl("fetch.sh"))
-    return url.indexOf("file://") === 0 ? decodeURIComponent(url.slice(7)) : url
-  }
-
   function open(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
@@ -215,7 +208,10 @@ Item {
   // catcher actually owns focus, otherwise Esc/r would be dead.
   function focusContent() {
     keyCatcher.forceActiveFocus()
-    if (!keyCatcher.activeFocus) focusRetry.restart()
+    if (!keyCatcher.activeFocus) {
+      focusRetry.retryCount = 0
+      focusRetry.restart()
+    }
   }
 
   function refresh() {
@@ -223,7 +219,15 @@ Item {
     root.errorMessage = ""
     root.errorCommand = ""
     root.loading = true
-    dataProc.command = ["bash", root.fetchScript, root.requestedMode]
+    dataProc.command = [
+      "bash", "-c",
+      "CLI=$(command -v omni-profile 2>/dev/null || echo \"$HOME/.local/bin/omni-profile\"); " +
+      "if [ ! -x \"$CLI\" ]; then echo NO_CLI; exit 0; fi; " +
+      "echo '<<<OMNI_STATUS>>>'; \"$CLI\" status --json 2>/dev/null || echo '{}'; " +
+      "echo '<<<OMNI_SHEET>>>'; if [ -n \"$0\" ]; then \"$CLI\" cheatsheet \"$0\" --json 2>/dev/null || echo '[]'; else \"$CLI\" cheatsheet --json 2>/dev/null || echo '[]'; fi; " +
+      "echo \"<<<OMNI_RC>>>$?\"",
+      root.requestedMode
+    ]
     dataProc.running = true
   }
 
@@ -283,8 +287,8 @@ Item {
     }
 
     if (exitCode !== 0) {
-      root.failWith("cli-failed", "bash " + root.fetchScript,
-        "数据助手执行失败（退出码 " + exitCode + "）。")
+      root.failWith("cli-failed", root.commandFor(root.requestedMode),
+        "数据读取执行失败（退出码 " + exitCode + "）。")
       return
     }
     // omni-profile 用退出码 2 表示“没有这个 Profile”。
@@ -334,9 +338,14 @@ Item {
     id: focusRetry
     interval: 40
     repeat: true
+    property int retryCount: 0
     onTriggered: {
+      retryCount++
       keyCatcher.forceActiveFocus()
-      if (keyCatcher.activeFocus || !root.opened) stop()
+      if (keyCatcher.activeFocus || !root.opened || retryCount >= 25) {
+        retryCount = 0
+        stop()
+      }
     }
   }
 

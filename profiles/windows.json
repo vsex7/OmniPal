@@ -45,11 +45,6 @@
       "key": "L"
     },
     {
-      "action": "task_view",
-      "mod": "SUPER",
-      "key": "Tab"
-    },
-    {
       "action": "clipboard_history",
       "mod": "SUPER",
       "key": "V"
@@ -78,6 +73,11 @@
       "action": "snap_layouts",
       "mod": "SUPER",
       "key": "Z"
+    },
+    {
+      "action": "task_view",
+      "mod": "SUPER",
+      "key": "Tab"
     }
   ]
 }

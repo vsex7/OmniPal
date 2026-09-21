@@ -42,6 +42,7 @@ Item {
   // ---------- 可选配置持久化状态（omni-profile persist status --json） ----------
   property bool persistEnabled: false
   property string persistProfile: ""
+  property string persistPolicy: ""
   property string persistUpdatedAt: ""
   property string persistPath: ""
   property bool persistBusy: false
@@ -65,9 +66,9 @@ Item {
       id: "windows",
       icon: "⊞",
       name: "Windows 11 习惯模式",
-      desc: "Alt+F4 关闭窗口 · Win+方向键智能吸附 · Win+E 文件管理器 · Ctrl+Shift+Esc 任务管理器",
-      count: 13,
-      color: "#0078d4",
+      desc: "",
+      count: 0,
+      color: "#3892d6",
       source: "project",
       override: false
     },
@@ -75,9 +76,9 @@ Item {
       id: "mac",
       icon: "◆",
       name: "macOS 习惯模式",
-      desc: "Super+Q 退出程序 · Super+Space 聚焦搜索 · Super+Shift+3/4 截图 · Super+H 最小化",
-      count: 12,
-      color: "#a2aaad",
+      desc: "",
+      count: 0,
+      color: "#d8dee9",
       source: "project",
       override: false
     },
@@ -85,7 +86,7 @@ Item {
       id: "omarchy",
       icon: "⊡",
       name: "Omarchy 原生模式",
-      desc: "纯粹的 Hyprland 原生平铺体验 · 无任何按键拦截与覆盖 · 极简高效",
+      desc: "",
       count: 0,
       color: "#a3be8c",
       source: "project",
@@ -260,6 +261,7 @@ Item {
       var d = JSON.parse(rawText)
       root.persistEnabled = d.enabled === true
       root.persistProfile = d.profile || ""
+      root.persistPolicy = d.window_policy || ""
       root.persistUpdatedAt = d.updated_at || ""
       root.persistPath = d.path || ""
     } catch (e) {}
@@ -287,8 +289,23 @@ Item {
     } catch (e) {}
   }
 
+  onOpenedChanged: {
+    if (root.opened) {
+      stateFile.reload()
+      listProc.running = true
+      persistProc.running = true
+    }
+  }
+
   onActiveTabChanged: {
     if (root.activeTab === 2 && !root.statsLoaded) root.refreshStats()
+  }
+
+  Timer {
+    id: stateRetryTimer
+    interval: 1000
+    repeat: false
+    onTriggered: stateFile.reload()
   }
 
   // ---------- 数据源进程 ----------
@@ -299,7 +316,10 @@ Item {
     atomicWrites: true
     printErrors: false
     onLoaded: root.loadState(text())
-    onLoadFailed: root.engineRunning = false
+    onLoadFailed: {
+      root.engineRunning = false
+      stateRetryTimer.restart()
+    }
     onFileChanged: reload()
   }
 
@@ -324,14 +344,14 @@ Item {
         try {
           var parsed = JSON.parse(data)
           if (Array.isArray(parsed) && parsed.length > 0) {
-            var iconMap = { "windows": "⊞", "mac": "◆", "omarchy": "⊡" }
-            var colorMap = { "windows": "#0078d4", "mac": "#a2aaad", "omarchy": "#a3be8c" }
             var customColors = ["#b48ead", "#ebcb8b", "#88c0d0", "#d08770", "#81a1c1"]
             var items = []
             for (var i = 0; i < parsed.length; i++) {
               var p = parsed[i]
-              var icon = iconMap[p.id] || "◇"
-              var color = colorMap[p.id] || customColors[i % customColors.length]
+              // 显示元数据取自 profile 的 display 块（单一事实源），本地仅保留兜底值
+              var disp = (p && p.display) || {}
+              var icon = disp.icon || "◇"
+              var color = disp.color || customColors[i % customColors.length]
               var desc = p.description || (p.source === "user" ? "用户自定义配置模式" : "")
               items.push({
                 id: p.id,
@@ -1002,7 +1022,7 @@ Item {
                         }
                         Text {
                           anchors.verticalCenter: parent.verticalCenter
-                          text: "配置持久化（可选）"
+                          text: "配置持久化（关机/重启记忆）"
                           font.family: Style.font.family
                           font.pixelSize: Style.font.body
                           font.bold: true
@@ -1023,7 +1043,7 @@ Item {
 
                     Text {
                       width: parent.width
-                      text: "开启后重启自动载入首选模式；关闭时保证磁盘零配置文件残留。"
+                      text: "默认开启，关机或重启后自动恢复上次使用的模式与窗口策略；关闭时重启恢复默认。"
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       color: Util.alpha(root.foreground, 0.7)
@@ -1042,8 +1062,8 @@ Item {
                         text: root.persistBusy
                           ? "⏳ 正在同步持久化状态…"
                           : (root.persistEnabled
-                              ? ("✅ 已启用 · 重启自动载入首选模式：" + root.modeNameOf(root.persistProfile) + "（" + root.persistProfile + "）" + (root.persistUpdatedAt ? " · 更新于 " + root.fmtTs(root.persistUpdatedAt) : ""))
-                              : "⏸ 未启用 · 默认纯内存热切换，磁盘零配置文件残留")
+                              ? ("✅ 已启用 · 自动记忆关机前配置：" + root.modeNameOf(root.persistProfile) + "（" + root.persistProfile + "）" + (root.persistPolicy ? " · " + (root.persistPolicy === "floating" ? "浮动" : "平铺") : "") + (root.persistUpdatedAt ? " · 更新于 " + root.fmtTs(root.persistUpdatedAt) : ""))
+                              : "⏸ 已禁用 · 关机/重启恢复默认，磁盘零残留")
                         font.family: Style.font.family
                         font.pixelSize: Style.font.caption
                         color: root.persistEnabled ? root.okColor : Util.alpha(root.foreground, 0.65)
@@ -1111,7 +1131,7 @@ Item {
 
                       Text {
                         anchors.centerIn: parent
-                        text: "▦  呼出 Snap 布局菜单 (Win+Z)"
+                        text: "▦  呼出 Snap 布局菜单"
                         font.family: Style.font.family
                         font.pixelSize: Style.font.bodySmall
                         font.bold: true
@@ -1522,7 +1542,7 @@ Item {
                     Text {
                       visible: root.statsLoaded && root.statsSnapList.length === 0
                       width: parent.width
-                      text: "暂无吸附记录 · 通过 Win+Z 布局菜单或吸附快捷键自动累积"
+                      text: "暂无吸附记录 · 通过吸附布局菜单或吸附快捷键自动累积"
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       color: Util.alpha(root.foreground, 0.5)

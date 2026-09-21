@@ -76,13 +76,23 @@ Item {
   }
 
   function refreshClients() {
+    clientsProc.running = false
     clientsProc.running = true
+  }
+
+  IpcHandler {
+    target: "omni.mac-dock"
+    function toggle(): void { root.toggle() }
+    function open(): void { root.open("{}") }
+    function close(): void { root.dismiss() }
+    function refresh(): void { root.refreshClients() }
   }
 
   // ---------- 窗口动作（全部经 hyprctl dispatch，无绑定修改） ----------
   function focusAddress(addr) {
     if (!addr) return
-    Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.focus({ window = \"address:" + addr + "\" })"])
+    var addrStr = (addr.indexOf("address:") === 0) ? addr : ("address:" + addr)
+    Quickshell.execDetached(["hyprctl", "dispatch", "focuswindow", addrStr])
   }
 
   function closeApp(item) {
@@ -276,10 +286,12 @@ Item {
     id: clientsProc
     command: ["hyprctl", "clients", "-j"]
     running: false
-    stdout: SplitParser {
-      onRead: function(data) {
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: function(raw) {
+        if (!raw || raw.trim() === "") return
         try {
-          var parsed = JSON.parse(data)
+          var parsed = JSON.parse(raw)
           if (Array.isArray(parsed)) {
             root.runningClients = parsed.filter(function(x) { return x && x.mapped })
             root.rebuildItems()
@@ -514,7 +526,7 @@ Item {
   // ---------- 右键上下文动作卡片（独立浮层，点击外部 / Esc 自动关闭） ----------
   PanelWindow {
     id: cardPanel
-    visible: root.contextItem !== null
+    visible: root.opened && root.contextItem !== null
     anchors { bottom: true; left: true; right: true }
     implicitHeight: Style.space(340)
     color: "transparent"

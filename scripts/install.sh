@@ -46,11 +46,12 @@ cat > "${SERVICE_FILE}" <<EOF
 Description=OmniPal Runtime Hot-Switching Daemon
 Documentation=https://github.com/vsex7/OmniPal
 PartOf=graphical-session.target
+After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=${PROJECT_ROOT}/bin/omni-profile daemon
-ExecStop=${PROJECT_ROOT}/bin/omni-profile restore
+ExecStart="${PROJECT_ROOT}/bin/omni-profile" daemon
+ExecStop="${PROJECT_ROOT}/bin/omni-profile" restore
 Restart=on-failure
 RestartSec=3
 
@@ -58,7 +59,8 @@ RestartSec=3
 WantedBy=graphical-session.target
 EOF
 
-systemctl --user daemon-reload
+systemctl --user daemon-reload 2>/dev/null || echo "⚠️ systemd 用户会话不可用（SSH/无 DBUS）：服务文件已生成，登录图形会话后自动生效"
+systemctl --user enable --now omnipal.service 2>/dev/null || true
 echo "✅ 用户守护服务已生成: ${SERVICE_FILE}"
 
 echo ""

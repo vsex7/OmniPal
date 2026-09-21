@@ -1,17 +1,13 @@
+import QtQuick
+import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
-import QtQuick
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// OmniPal 任务视图与空间多工作区概览 (omni.overview)
-//
-// 架构规范：
-// 1. 空间多工作区 16:9 画布平铺：直观还原物理桌面与窗口在屏幕上的相对空间排布。
-// 2. 严守 Hard Stop H-5（零像素截图）：基于 Compositor 矢量元数据绘制，响应快、极轻量、绝无隐私泄露。
-// 3. 键盘流极速调度：Tab/方向键轮转窗口、1-9 直达桌面、Shift+1-9 跨桌面瞬移、回车聚焦、Del 关闭、Esc 退出。
+// OmniPal Overview - GTA V 战术武器轮盘多任务视界 (终极精细打磨版)
 Item {
   id: root
 
@@ -20,252 +16,347 @@ Item {
   property var manifest: null
 
   property bool opened: false
+  property var allClients: []
+  property var workspaces: []
+  property int activeWorkspaceId: 1
+  property int selectedIndex: 0
+  property string activeAddress: ""
+  property int monitorWidth: 2560
+  property int monitorHeight: 1440
+  property string searchQuery: ""
+
+  // 拖拽至黑洞状态追踪
+  property bool isDraggingCard: false
+  property string draggedAddress: ""
+  property var draggedSlotData: null
+  property real dragGlobalX: 0
+  property real dragGlobalY: 0
+
   readonly property string pluginId: (root.manifest && root.manifest.id) || "omni.overview"
 
-  property var rawWorkspaces: []
-  property var rawClients: []
-  property var rawMonitors: []
-  property var activeWorkspaces: []
-  property var allWindows: []
-  property string focusedWindowAddress: ""
-  property string selectedWindowAddress: ""
-  property int activeWorkspaceId: 1
-  property int navigationIndex: 0
-  property string filterText: ""
+  readonly property var fetchCommand: [
+    "bash", "-c",
+    "echo '<<<ACTIVE>>>'; hyprctl -j activewindow 2>/dev/null || echo '{}'; echo '<<<CLIENTS>>>'; hyprctl -j clients 2>/dev/null || echo '[]'; echo '<<<WORKSPACES>>>'; hyprctl -j workspaces 2>/dev/null || echo '[]'; echo '<<<MONITORS>>>'; hyprctl -j monitors 2>/dev/null || echo '[]'"
+  ]
 
-  readonly property var monitorBox: {
-    if (root.rawMonitors && root.rawMonitors.length > 0) {
-      var m = root.rawMonitors[0]
-      return { x: m.x || 0, y: m.y || 0, width: m.width || 1920, height: m.height || 1080 }
+  // 目标转移工作区
+  readonly property int targetTransferWorkspaceId: {
+    if (root.activeWorkspaceId === 1) return 2
+    return (root.activeWorkspaceId === 2) ? 1 : (root.activeWorkspaceId + 1)
+  }
+
+  // 当前画布上可见的窗口列表：仅限当前活动工作区真实窗口
+  readonly property var visibleWindows: {
+    if (!root.allClients || root.allClients.length === 0) return []
+    var curWsList = []
+    for (var i = 0; i < root.allClients.length; i++) {
+      if (root.allClients[i].workspaceId === root.activeWorkspaceId) {
+        curWsList.push(root.allClients[i])
+      }
     }
-    return { x: 0, y: 0, width: panel.width || 1920, height: panel.height || 1080 }
+    return curWsList
   }
 
-  function open(payloadJson) {
-    root.opened = true
-    root.filterText = ""
-    fetchData()
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  // 模糊搜索过滤
+  readonly property var filteredWindows: Model.filterWindows(root.visibleWindows, root.searchQuery)
+
+  // GTA V 经典武器轮盘极坐标几何排布
+  readonly property var layoutWindows: Model.calculateGtaWheelLayout(
+    root.filteredWindows,
+    panel ? panel.width : 2560,
+    panel ? panel.height : 1440
+  )
+
+  readonly property var currentSelectedWin: (root.layoutWindows && root.selectedIndex >= 0 && root.selectedIndex < root.layoutWindows.length) ? root.layoutWindows[root.selectedIndex] : null
+
+  onSelectedIndexChanged: {
+    if (gtaCanvas) gtaCanvas.requestPaint()
   }
 
-  function close() {
-    root.opened = false
-  }
-
-  function dismiss() {
-    root.opened = false
-    if (root.shell && typeof root.shell.hide === "function") root.shell.hide(root.pluginId)
-  }
-
-  function toggle() {
-    if (root.opened) root.dismiss()
-    else root.open("{}")
-  }
-
-  function fetchData() {
-    if (dataProc.running) dataProc.running = false
-    dataProc.running = true
-  }
-
-  function activateWindow(addr) {
-    if (!addr) return
-    root.dismiss()
-    dispatchProc.command = ["hyprctl", "dispatch", "hl.dsp.focus({ window = \"address:" + addr + "\" })"]
-    dispatchProc.running = true
-  }
-
-  function switchToWorkspace(wsId) {
-    if (!wsId) return
-    root.dismiss()
-    dispatchProc.command = ["hyprctl", "dispatch", "hl.dsp.focus({ workspace = \"" + String(wsId) + "\" })"]
-    dispatchProc.running = true
-  }
-
-  function moveWindowToWorkspace(addr, wsId) {
-    if (!addr || !wsId) return
-    dispatchProc.command = ["hyprctl", "dispatch", "hl.dsp.window.move({ workspace = \"" + String(wsId) + "\", follow = false, window = \"address:" + addr + "\" })"]
-    dispatchProc.running = true
-    refreshTimer.restart()
-  }
-
-  function closeWindow(addr) {
-    if (!addr) return
-    dispatchProc.command = ["hyprctl", "dispatch", "hl.dsp.window.close({ window = \"address:" + addr + "\" })"]
-    dispatchProc.running = true
-    refreshTimer.restart()
-  }
-
-  function cycleWindow(delta) {
-    if (!root.allWindows || root.allWindows.length === 0) return
-    root.navigationIndex = Model.navigateIndex(root.navigationIndex, delta, root.allWindows.length)
-    var target = root.allWindows[root.navigationIndex]
-    if (target) {
-      root.selectedWindowAddress = target.address
+  onLayoutWindowsChanged: {
+    if (root.selectedIndex >= root.layoutWindows.length || root.selectedIndex < 0) {
+      root.selectedIndex = 0
     }
-  }
-
-  Timer {
-    id: refreshTimer
-    interval: 90
-    repeat: false
-    onTriggered: root.fetchData()
+    if (gtaCanvas) gtaCanvas.requestPaint()
   }
 
   Process {
     id: dataProc
-    command: ["hyprctl", "-j", "--batch", "workspaces ; clients ; monitors ; activewindow"]
-    running: false
-
+    command: root.fetchCommand
     stdout: StdioCollector {
+      id: outCollector
       waitForEnd: true
       onStreamFinished: function() {
-        var rawText = text
-        if (!rawText || rawText.trim() === "") return
-        try {
-          var parts = rawText.split("\n\n").map(function(s) { return s.trim() }).filter(function(s) { return s.length > 0 })
-          if (parts.length >= 4) {
-            root.rawWorkspaces = JSON.parse(parts[0])
-            root.rawClients = JSON.parse(parts[1])
-            root.rawMonitors = JSON.parse(parts[2])
-            var aw = JSON.parse(parts[3])
-            if (aw && aw.address) {
-              root.focusedWindowAddress = aw.address
-              if (aw.workspace && aw.workspace.id) {
-                root.activeWorkspaceId = aw.workspace.id
-              }
-            }
-            root.refreshWorkspaces()
-          }
-        } catch (e) {}
+        var str = outCollector.text ? outCollector.text : ""
+        var parsed = Model.parseFetchOutput(str)
+        root.allClients = parsed.clients || []
+        root.activeAddress = parsed.activeAddress || ""
+        root.activeWorkspaceId = parsed.activeWorkspaceId || 1
+        root.workspaces = parsed.workspaces || []
+        if (parsed.monitorWidth > 0 && parsed.monitorHeight > 0) {
+          root.monitorWidth = parsed.monitorWidth
+          root.monitorHeight = parsed.monitorHeight
+        }
+
+        if (root.selectedIndex >= root.layoutWindows.length || root.selectedIndex < 0) {
+          root.selectedIndex = 0
+        }
+        if (gtaCanvas) gtaCanvas.requestPaint()
       }
     }
   }
 
-  function refreshWorkspaces() {
-    var wsMap = {}
-    var list = []
-    var allWins = []
+  function refresh() {
+    dataProc.running = false
+    dataProc.command = root.fetchCommand
+    dataProc.running = true
+  }
 
-    // 0. 解析显示器映射表
-    var monMap = {}
-    for (var m = 0; m < root.rawMonitors.length; m++) {
-      var mon = root.rawMonitors[m]
-      if (mon && mon.name) {
-        monMap[mon.name] = { x: mon.x || 0, y: mon.y || 0, width: mon.width || 1920, height: mon.height || 1080 }
-      }
-    }
+  function open(payloadJson) {
+    root.opened = true
+    root.searchQuery = ""
+    root.isDraggingCard = false
+    root.draggedAddress = ""
+    root.draggedSlotData = null
+    root.refresh()
+    Qt.callLater(function() {
+      if (keyCatcher) keyCatcher.forceActiveFocus()
+      if (gtaCanvas) gtaCanvas.requestPaint()
+    })
+  }
 
-    // 1. 收集已存在的所有工作区
-    for (var i = 0; i < root.rawWorkspaces.length; i++) {
-      var ws = root.rawWorkspaces[i]
-      if (ws && ws.id > 0) {
-        var wsMon = (ws.monitor && monMap[ws.monitor]) ? monMap[ws.monitor] : root.monitorBox
-        wsMap[ws.id] = { id: ws.id, name: ws.name || String(ws.id), monitorBox: wsMon, windows: [] }
-      }
-    }
-
-    // 2. 保证当前活动工作区必定存在
-    if (!wsMap[root.activeWorkspaceId] && root.activeWorkspaceId > 0) {
-      wsMap[root.activeWorkspaceId] = { id: root.activeWorkspaceId, name: String(root.activeWorkspaceId), monitorBox: root.monitorBox, windows: [] }
-    }
-
-    // 3. 将窗口分配至各自工作区
-    var query = root.filterText.trim().toLowerCase()
-    for (var j = 0; j < root.rawClients.length; j++) {
-      var c = root.rawClients[j]
-      if (c && c.mapped && c.workspace && c.workspace.id > 0) {
-        var wTitle = String(c.title || "").toLowerCase()
-        var wClass = String(c.class || "").toLowerCase()
-        if (query !== "" && wTitle.indexOf(query) === -1 && wClass.indexOf(query) === -1) {
-          continue
-        }
-
-        var tId = c.workspace.id
-        if (!wsMap[tId]) {
-          wsMap[tId] = { id: tId, name: String(tId), monitorBox: root.monitorBox, windows: [] }
-        }
-        wsMap[tId].windows.push(c)
-        allWins.push(c)
-      }
-    }
-
-    // 4. 按工作区 ID 排序
-    var sortedIds = Object.keys(wsMap).map(Number).sort(function(a, b) { return a - b })
-    var maxId = 0
-    for (var k = 0; k < sortedIds.length; k++) {
-      var sid = sortedIds[k]
-      list.push(wsMap[sid])
-      if (sid > maxId) maxId = sid
-    }
-
-    // 5. 若未在搜索过滤状态且工作区编号小于 9，提供新建桌面插槽 (+)
-    if (maxId < 9 && query === "") {
-      list.push({
-        id: maxId + 1,
-        name: String(maxId + 1),
-        monitorBox: root.monitorBox,
-        windows: [],
-        isNewSlot: true
-      })
-    }
-
-    root.activeWorkspaces = list
-    root.allWindows = allWins
-
-    // 同步当前选中的活动窗口
-    if (root.selectedWindowAddress === "" || !allWins.some(function(w) { return w.address === root.selectedWindowAddress })) {
-      root.selectedWindowAddress = root.focusedWindowAddress || (allWins.length > 0 ? allWins[0].address : "")
+  function dismiss() {
+    root.opened = false
+    root.searchQuery = ""
+    root.isDraggingCard = false
+    if (root.shell && typeof root.shell.hide === "function") {
+      root.shell.hide(root.pluginId)
     }
   }
 
-  Process {
-    id: dispatchProc
-    command: ["true"]
-    running: false
+  function close() {
+    root.opened = false
+    root.searchQuery = ""
+    root.isDraggingCard = false
+  }
+
+  function toggle() {
+    if (root.opened) {
+      root.dismiss()
+    } else {
+      root.open("{}")
+    }
+  }
+
+  function focusWindow(address) {
+    if (address) {
+      var addrStr = (address.indexOf("address:") === 0) ? address : ("address:" + address)
+      var luaCmd = "hl.dsp.focus({ window = \"" + addrStr + "\" })"
+      Quickshell.execDetached(["hyprctl", "dispatch", luaCmd])
+      Quickshell.execDetached(["hyprctl", "dispatch", "focuswindow", addrStr])
+    }
+    root.dismiss()
+  }
+
+  function closeWindow(address) {
+    if (!address) return
+    var addrStr = (address.indexOf("address:") === 0) ? address : ("address:" + address)
+    var luaCmd = "hl.dsp.window.close({ window = \"" + addrStr + "\" })"
+    Quickshell.execDetached(["hyprctl", "dispatch", luaCmd])
+    Quickshell.execDetached(["hyprctl", "dispatch", "closewindow", addrStr])
+    refreshTimer.restart()
+  }
+
+  function moveWindowToWorkspace(address, targetWs) {
+    if (!address) return
+    var addrStr = (address.indexOf("address:") === 0) ? address : ("address:" + address)
+    var wsStr = String(targetWs)
+    var dspCmd = "hl.dsp.window.move({ window = \"" + addrStr + "\", workspace = \"" + wsStr + "\", silent = true })"
+    var evalCmd = "return hl.dispatch(hl.dsp.window.move({ window = \"" + addrStr + "\", workspace = \"" + wsStr + "\", silent = true }))"
+    Quickshell.execDetached(["hyprctl", "dispatch", dspCmd])
+    Quickshell.execDetached(["hyprctl", "eval", evalCmd])
+    Quickshell.execDetached(["hyprctl", "dispatch", "movetoworkspacesilent", wsStr + "," + addrStr])
+    
+    if (portalHole) {
+      portalHole.triggerAbsorption()
+    }
+    refreshTimer.restart()
+  }
+
+  Timer {
+    id: refreshTimer
+    interval: 120
+    repeat: false
+    onTriggered: {
+      if (root.opened) {
+        root.refresh()
+      }
+    }
   }
 
   IpcHandler {
     target: "omni.overview"
+    function toggle(): void { root.toggle() }
     function open(): void { root.open("{}") }
     function close(): void { root.dismiss() }
-    function toggle(): void { root.toggle() }
-    function next(): void { root.cycleWindow(1) }
-    function prev(): void { root.cycleWindow(-1) }
+    function refresh(): void { root.refresh() }
   }
 
   PanelWindow {
     id: panel
     visible: root.opened
-    anchors { top: true; bottom: true; left: true; right: true }
+    anchors {
+      top: true
+      bottom: true
+      left: true
+      right: true
+    }
     color: "transparent"
     WlrLayershell.namespace: "omni-overview"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
-    // 背景暗色遮罩（点击空白关闭）
+    // 背景：GTA 5 经典子弹时间慢动作电影暗角与景深晕映
     Rectangle {
+      id: backdrop
       anchors.fill: parent
-      color: Util.alpha(Color.menu.scrim || "#000000", 0.65)
+      color: Qt.rgba(0.02, 0.03, 0.05, 0.92)
       opacity: root.opened ? 1.0 : 0.0
-      Behavior on opacity { NumberAnimation { duration: 120 } }
 
-      MouseArea {
-        anchors.fill: parent
-        onClicked: root.dismiss()
+      Behavior on opacity {
+        NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
       }
-    }
 
-    // 主容器：带平滑入场微缩放与透明度渐变
-    Item {
-      id: mainContainer
-      anchors.fill: parent
-      opacity: root.opened ? 1.0 : 0.0
-      scale: root.opened ? 1.0 : 0.98
-      Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
-      Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
+      // ----------------------------------------------------
+      // 全局统一鼠标手势控制器 (兼顾极速推选、点击聚焦、按住拖拽入黑洞)
+      // ----------------------------------------------------
+      MouseArea {
+        id: flickArea
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: root.isDraggingCard ? Qt.ClosedHandCursor : (pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor)
 
-      // 全局键盘导航捕获器
+        property real pressX: 0
+        property real pressY: 0
+        property bool isPressedDown: false
+        property int pressSlotIdx: -1
+
+        onPressed: function(mouse) {
+          pressX = mouse.x
+          pressY = mouse.y
+          isPressedDown = true
+          root.isDraggingCard = false
+
+          var cx = width / 2
+          var cy = height / 2
+          var dx = mouse.x - cx
+          var dy = mouse.y - cy
+          var dist = Math.sqrt(dx * dx + dy * dy)
+
+          if (dist <= 500 && root.layoutWindows.length > 0) {
+            var angle = Math.atan2(dy, dx)
+            var clickedIdx = (dist > 75) ? Model.getWedgeIndexFromAngle(angle, root.layoutWindows.length) : root.selectedIndex
+            if (clickedIdx >= 0 && clickedIdx < root.layoutWindows.length) {
+              pressSlotIdx = clickedIdx
+              root.selectedIndex = clickedIdx
+            } else {
+              pressSlotIdx = -1
+            }
+          } else {
+            pressSlotIdx = -1
+          }
+        }
+
+        onPositionChanged: function(mouse) {
+          var cx = width / 2
+          var cy = height / 2
+
+          // 1. 如果按下并发生位移（> 6px），并且按在有效窗口上，触发向黑洞拖拽
+          if (isPressedDown && pressSlotIdx >= 0 && pressSlotIdx < root.layoutWindows.length) {
+            var dxP = mouse.x - pressX
+            var dyP = mouse.y - pressY
+            if (!root.isDraggingCard && (Math.abs(dxP) > 6 || Math.abs(dyP) > 6)) {
+              root.isDraggingCard = true
+              var targetWin = root.layoutWindows[pressSlotIdx]
+              root.draggedAddress = targetWin.address
+              root.draggedSlotData = targetWin
+              if (portalHole) portalHole.isDraggingAny = true
+            }
+          }
+
+          // 2. 如果正在拖拽中，更新跟随坐标并检测黑洞引力场
+          if (root.isDraggingCard) {
+            root.dragGlobalX = mouse.x
+            root.dragGlobalY = mouse.y
+            if (portalHole) {
+              var holePt = portalHole.mapFromItem(backdrop, mouse.x, mouse.y)
+              portalHole.isDragOver = portalHole.checkContains(holePt)
+            }
+            return
+          }
+
+          // 3. 悬浮未按下时的推选手势 (GTA 5 武器推选感)
+          var dx = mouse.x - cx
+          var dy = mouse.y - cy
+          var dist = Math.sqrt(dx * dx + dy * dy)
+
+          if (dist >= 75 && dist <= 500 && root.layoutWindows.length > 0) {
+            var angle = Math.atan2(dy, dx)
+            var targetIdx = Model.getWedgeIndexFromAngle(angle, root.layoutWindows.length)
+            if (targetIdx >= 0 && targetIdx < root.layoutWindows.length) {
+              if (targetIdx !== root.selectedIndex) {
+                root.selectedIndex = targetIdx
+              }
+            }
+          }
+        }
+
+        onReleased: function(mouse) {
+          var wasDragging = root.isDraggingCard
+          var hadPressSlot = (pressSlotIdx >= 0 && pressSlotIdx < root.layoutWindows.length)
+          var slotWin = hadPressSlot ? root.layoutWindows[pressSlotIdx] : null
+
+          isPressedDown = false
+          pressSlotIdx = -1
+
+          // 如果是在拖拽状态下松手
+          if (wasDragging) {
+            var holePt = portalHole ? portalHole.mapFromItem(backdrop, mouse.x, mouse.y) : null
+            if (portalHole && holePt && portalHole.checkContains(holePt)) {
+              root.moveWindowToWorkspace(root.draggedAddress, root.targetTransferWorkspaceId)
+            }
+            root.isDraggingCard = false
+            root.draggedAddress = ""
+            root.draggedSlotData = null
+            if (portalHole) {
+              portalHole.isDraggingAny = false
+              portalHole.isDragOver = false
+            }
+            return
+          }
+
+          // 如果未拖拽（轻点/单击），执行聚焦
+          var cx = width / 2
+          var cy = height / 2
+          var dx = mouse.x - cx
+          var dy = mouse.y - cy
+          var dist = Math.sqrt(dx * dx + dy * dy)
+
+          if (dist <= 500 && root.layoutWindows.length > 0) {
+            var chosenWin = slotWin ? slotWin : root.layoutWindows[root.selectedIndex]
+            if (chosenWin && chosenWin.address) {
+              root.focusWindow(chosenWin.address)
+              return
+            }
+          }
+
+          // 点击在最外侧空白处退出
+          root.dismiss()
+        }
+      }
+
+      // 键盘事件捕获器
       Item {
         id: keyCatcher
         anchors.fill: parent
@@ -274,198 +365,353 @@ Item {
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
-            root.dismiss()
             event.accepted = true
-          } else if (event.key === Qt.Key_Tab) {
-            var isShift = (event.modifiers & Qt.ShiftModifier) !== 0
-            root.cycleWindow(isShift ? -1 : 1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Right || event.key === Qt.Key_Down) {
-            root.cycleWindow(1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Up) {
-            root.cycleWindow(-1)
-            event.accepted = true
-          } else if (event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
-            var num = event.key - Qt.Key_0
-            if ((event.modifiers & Qt.ShiftModifier) !== 0) {
-              if (root.selectedWindowAddress !== "") {
-                root.moveWindowToWorkspace(root.selectedWindowAddress, num)
-                event.accepted = true
-                return
-              }
+            if (root.searchQuery.length > 0) {
+              root.searchQuery = ""
+              root.selectedIndex = 0
             } else {
-              root.switchToWorkspace(num)
+              root.dismiss()
+            }
+            return
+          }
+
+          var total = root.layoutWindows.length
+
+          // GTA 5 数字键槽位快速直达 [1-8]
+          if (root.searchQuery === "" && event.key >= Qt.Key_1 && event.key <= Qt.Key_8 && !(event.modifiers & Qt.ControlModifier) && !(event.modifiers & Qt.AltModifier)) {
+            var targetIdx = event.key - Qt.Key_1
+            if (targetIdx >= 0 && targetIdx < total && root.layoutWindows[targetIdx]) {
               event.accepted = true
+              root.focusWindow(root.layoutWindows[targetIdx].address)
               return
             }
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
-            if (root.selectedWindowAddress !== "") {
-              root.activateWindow(root.selectedWindowAddress)
-            } else {
-              root.switchToWorkspace(root.activeWorkspaceId)
-            }
+          }
+
+          // 顺时针 / 逆时针武器轮盘切片步进
+          if (event.key === Qt.Key_Tab || event.key === Qt.Key_Right || event.key === Qt.Key_Down || (root.searchQuery === "" && (event.key === Qt.Key_L || event.key === Qt.Key_J))) {
             event.accepted = true
-          } else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace) {
-            if (root.selectedWindowAddress !== "") {
-              root.closeWindow(root.selectedWindowAddress)
+            if (total > 0) {
+              root.selectedIndex = (root.selectedIndex + 1) % total
+            }
+            return
+          }
+
+          if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Left || event.key === Qt.Key_Up || (root.searchQuery === "" && (event.key === Qt.Key_H || event.key === Qt.Key_K))) {
+            event.accepted = true
+            if (total > 0) {
+              root.selectedIndex = (root.selectedIndex - 1 + total) % total
+            }
+            return
+          }
+
+          // 回车 / 空格：确认聚焦窗口
+          if (event.key === Qt.Key_Return || (root.searchQuery === "" && event.key === Qt.Key_Space)) {
+            event.accepted = true
+            if (root.currentSelectedWin && root.currentSelectedWin.address) {
+              root.focusWindow(root.currentSelectedWin.address)
+            }
+            return
+          }
+
+          // 关闭当前窗口 (x / Delete)
+          if ((root.searchQuery === "" && event.key === Qt.Key_X) || event.key === Qt.Key_Delete) {
+            event.accepted = true
+            if (root.currentSelectedWin && root.currentSelectedWin.address) {
+              root.closeWindow(root.currentSelectedWin.address)
+            }
+            return
+          }
+
+          // 发送到另一个工作区 (m 快捷键触发黑洞传送)
+          if (root.searchQuery === "" && event.key === Qt.Key_M) {
+            event.accepted = true
+            if (root.currentSelectedWin && root.currentSelectedWin.address) {
+              root.moveWindowToWorkspace(root.currentSelectedWin.address, root.targetTransferWorkspaceId)
+            }
+            return
+          }
+
+          // 退格
+          if (event.key === Qt.Key_Backspace) {
+            event.accepted = true
+            if (root.searchQuery.length > 0) {
+              root.searchQuery = root.searchQuery.substring(0, root.searchQuery.length - 1)
+              root.selectedIndex = 0
+            } else if (root.currentSelectedWin && root.currentSelectedWin.address) {
+              root.closeWindow(root.currentSelectedWin.address)
+            }
+            return
+          }
+
+          // 实时打字搜索
+          if (event.text && event.text.length === 1 && !event.isAutoRepeat) {
+            var ch = event.text
+            if (ch.charCodeAt(0) >= 32 && ch.charCodeAt(0) <= 126) {
               event.accepted = true
+              root.searchQuery += ch
+              root.selectedIndex = 0
+              return
             }
-          } else if (event.key === Qt.Key_Slash) {
-            searchInput.forceActiveFocus()
-            event.accepted = true
-          } else if (event.text && event.text.length > 0 && event.key !== Qt.Key_Space && event.key !== Qt.Key_Tab && event.key !== Qt.Key_Escape) {
-            searchInput.forceActiveFocus()
-            searchInput.text += event.text
-            event.accepted = true
           }
         }
       }
 
-      // 顶部标头栏与快捷提示
+      // ==========================================
+      // 1. GTA 5 武器圆环轮盘本体 (Canvas 硬件加速渲染)
+      // ==========================================
+      Canvas {
+        id: gtaCanvas
+        anchors.fill: parent
+
+        onPaint: {
+          var ctx = getContext("2d")
+          var w = width
+          var h = height
+          var cx = w / 2
+          var cy = h / 2
+
+          ctx.clearRect(0, 0, w, h)
+
+          var wins = root.layoutWindows || []
+          var total = wins.length
+
+          // 1.1 绘制全底盘暗色战术深轨环
+          ctx.beginPath()
+          ctx.arc(cx, cy, 475, 0, 2 * Math.PI)
+          ctx.arc(cx, cy, 195, 0, 2 * Math.PI, true)
+          ctx.fillStyle = "rgba(10, 13, 18, 0.45)"
+          ctx.fill()
+
+          // 1.2 绘制每个真实活动窗口扇区
+          for (var i = 0; i < total; i++) {
+            var item = wins[i]
+            var isSel = (i === root.selectedIndex)
+            var rIn = item.rInner || 215
+            var rOut = isSel ? (item.rOuterHover || 480) : (item.rOuter || 450)
+
+            // 扇区几何路径
+            ctx.beginPath()
+            ctx.arc(cx, cy, rOut, item.startAngle, item.endAngle, false)
+            ctx.arc(cx, cy, rIn, item.endAngle, item.startAngle, true)
+            ctx.closePath()
+
+            if (isSel) {
+              // 选中态：GTA 5 标志性战术亮橙高能渐变填充
+              var grad = ctx.createRadialGradient(cx, cy, rIn, cx, cy, rOut)
+              grad.addColorStop(0, "rgba(255, 119, 0, 0.32)")
+              grad.addColorStop(0.65, "rgba(255, 119, 0, 0.48)")
+              grad.addColorStop(1, "rgba(255, 140, 0, 0.65)")
+              ctx.fillStyle = grad
+              ctx.fill()
+
+              // 亮橙色加粗高光描边 (带强烈外发光)
+              ctx.lineWidth = 4.0
+              ctx.strokeStyle = "#ff7700"
+              ctx.shadowColor = "#ff7700"
+              ctx.shadowBlur = 28
+              ctx.stroke()
+              ctx.shadowBlur = 0
+
+              // 扇区两端高光刻度线 (GTA 武器槽位精密咬合锁扣)
+              var midA = item.midAngle
+              ctx.lineWidth = 3
+              ctx.strokeStyle = "#ffffff"
+              var notchR1 = rIn + 10
+              var notchR2 = rIn + 26
+              ctx.beginPath()
+              ctx.moveTo(cx + notchR1 * Math.cos(midA), cy + notchR1 * Math.sin(midA))
+              ctx.lineTo(cx + notchR2 * Math.cos(midA), cy + notchR2 * Math.sin(midA))
+              ctx.stroke()
+
+            } else {
+              // 普通活动窗口槽位：深灰黑哑光硬质机甲表面
+              var normalGrad = ctx.createRadialGradient(cx, cy, rIn, cx, cy, rOut)
+              normalGrad.addColorStop(0, "rgba(22, 27, 36, 0.94)")
+              normalGrad.addColorStop(1, "rgba(16, 19, 26, 0.96)")
+              ctx.fillStyle = normalGrad
+              ctx.fill()
+
+              ctx.lineWidth = 1.5
+              ctx.strokeStyle = "rgba(255, 255, 255, 0.14)"
+              ctx.stroke()
+            }
+          }
+
+          // 1.3 绘制外圈 GTA 5 战术准星圆点与刻度 (Crosshair Reticles)
+          if (total > 0) {
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.35)"
+            ctx.lineWidth = 1.2
+            var reticleR = 490
+            var angles = [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2]
+            for (var k = 0; k < angles.length; k++) {
+              var a = angles[k]
+              var rx = cx + reticleR * Math.cos(a)
+              var ry = cy + reticleR * Math.sin(a)
+              ctx.beginPath()
+              ctx.arc(rx, ry, 4, 0, 2 * Math.PI)
+              ctx.stroke()
+              ctx.beginPath()
+              ctx.moveTo(rx - 9, ry); ctx.lineTo(rx + 9, ry)
+              ctx.moveTo(rx, ry - 9); ctx.lineTo(rx, ry + 9)
+              ctx.stroke()
+            }
+          }
+        }
+      }
+
+      // ==========================================
+      // 2. GTA 5 中心英雄核心与状态属性面板 (Center Hero HUD)
+      // ==========================================
       Item {
-        id: headerBar
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.margins: Style.space(20)
-        height: Style.space(36)
-        z: 20
+        id: centerHeroHub
+        anchors.centerIn: parent
+        width: 370
+        height: 370
 
-        // 左侧主标头徽章
+        // 中心深黑大圆盘底座 (带多层倒角金属轮廓)
         Rectangle {
-          anchors.left: parent.left
-          anchors.verticalCenter: parent.verticalCenter
-          height: Style.space(32)
-          implicitWidth: headerText.implicitWidth + Style.space(24)
-          radius: Style.cornerRadius
-          color: Qt.rgba(0.08, 0.10, 0.13, 0.85)
-          border.color: Util.alpha(Color.accent || "#88c0d0", 0.4)
-          border.width: 1
+          anchors.fill: parent
+          radius: width / 2
+          color: "#07090e"
+          border.width: 2.5
+          border.color: root.currentSelectedWin ? "#ff7700" : Qt.rgba(1, 1, 1, 0.18)
 
-          Row {
-            id: headerRow
-            anchors.centerIn: parent
-            spacing: Style.space(8)
+          Behavior on border.color { ColorAnimation { duration: 120 } }
 
-            Text {
-              text: "🖥️"
-              font.pixelSize: Style.font.body
-              anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-              id: headerText
-              text: "任务视图 · 空间多工作区概览"
-              font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
-              font.bold: true
-              color: "#ffffff"
-              anchors.verticalCenter: parent.verticalCenter
-            }
-          }
-        }
-
-        // 中间快捷操作提示胶囊
-        Rectangle {
-          anchors.centerIn: parent
-          height: Style.space(32)
-          implicitWidth: hintText.implicitWidth + Style.space(24)
-          radius: Style.cornerRadius
-          color: Qt.rgba(0.08, 0.10, 0.13, 0.70)
-          border.color: Qt.rgba(1, 1, 1, 0.15)
-          border.width: 1
-
-          Text {
-            id: hintText
-            anchors.centerIn: parent
-            text: "Tab: 轮转 · 1–9: 切换桌面 · Shift+1–9: 移至桌面 · 回车: 聚焦 · Del: 关窗 · Esc: 退出"
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            color: Util.alpha(Color.foreground, 0.8)
-          }
-        }
-
-        // 右侧极速过滤搜索框
-        Rectangle {
-          id: searchBox
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          height: Style.space(32)
-          width: searchInput.activeFocus || searchInput.text !== "" ? Style.space(240) : Style.space(130)
-          radius: Style.cornerRadius
-          color: Qt.rgba(0.08, 0.10, 0.13, 0.85)
-          border.color: searchInput.activeFocus ? (Color.accent || "#88c0d0") : Qt.rgba(1, 1, 1, 0.15)
-          border.width: 1
-
-          Behavior on width { NumberAnimation { duration: 120 } }
-
-          Row {
+          // 内圈微妙科技暗线
+          Rectangle {
             anchors.fill: parent
-            anchors.leftMargin: Style.space(8)
-            anchors.rightMargin: Style.space(8)
-            spacing: Style.space(6)
+            anchors.margins: 6
+            radius: width / 2
+            color: "transparent"
+            border.width: 1
+            border.color: Qt.rgba(255, 255, 255, 0.06)
+          }
 
-            Text {
-              text: "🔍"
-              font.pixelSize: Style.font.caption
-              color: Util.alpha(Color.foreground, 0.6)
-              anchors.verticalCenter: parent.verticalCenter
-            }
+          // 核心内容排版
+          Column {
+            anchors.centerIn: parent
+            width: parent.width - 56
+            spacing: 8
 
-            TextInput {
-              id: searchInput
-              width: parent.width - Style.space(32)
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              color: Color.foreground
-              anchors.verticalCenter: parent.verticalCenter
-              selectByMouse: true
+            // 顶部横条：ACTIVE WINDOW: [APP_NAME]
+            Rectangle {
+              height: 24
+              width: parent.width
+              color: "#131720"
+              radius: 4
+              border.width: 1
+              border.color: root.currentSelectedWin ? Qt.rgba(255, 119, 0, 0.3) : Qt.rgba(1, 1, 1, 0.08)
 
               Text {
-                visible: searchInput.text === "" && !searchInput.activeFocus
-                text: "按 / 或键入搜索..."
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
-                color: Util.alpha(Color.foreground, 0.4)
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              onTextChanged: {
-                root.filterText = text
-                root.refreshWorkspaces()
-              }
-
-              Keys.onEscapePressed: {
-                if (text !== "") {
-                  text = ""
-                } else {
-                  keyCatcher.forceActiveFocus()
-                }
-              }
-
-              Keys.onReturnPressed: {
-                if (root.allWindows && root.allWindows.length > 0) {
-                  root.activateWindow(root.selectedWindowAddress || root.allWindows[0].address)
-                }
+                anchors.centerIn: parent
+                text: "ACTIVE: [" + (root.currentSelectedWin ? root.currentSelectedWin.activeName : "NONE") + "]"
+                color: "#ff7700"
+                font.pixelSize: 11
+                font.bold: true
+                font.family: "monospace"
+                elide: Text.ElideRight
+                width: parent.width - 16
+                horizontalAlignment: Text.AlignHCenter
+                font.letterSpacing: 1
               }
             }
 
-            // 清空搜索图标
+            // 当前窗口大图标 (带环境光晕)
+            Item {
+              width: 56
+              height: 56
+              anchors.horizontalCenter: parent.horizontalCenter
+
+              Rectangle {
+                anchors.centerIn: parent
+                width: 48
+                height: 48
+                radius: 24
+                color: root.currentSelectedWin ? Qt.rgba(255, 119, 0, 0.12) : "transparent"
+              }
+
+              Image {
+                anchors.centerIn: parent
+                width: 44
+                height: 44
+                source: Quickshell.iconPath(root.currentSelectedWin ? (root.currentSelectedWin.iconName || "application-x-executable") : "omarchy", true)
+                fillMode: Image.PreserveAspectFit
+              }
+            }
+
+            // 真实窗口标题
             Text {
-              visible: searchInput.text !== ""
-              text: "✕"
-              font.pixelSize: 10
-              color: Util.alpha(Color.foreground, 0.5)
-              anchors.verticalCenter: parent.verticalCenter
+              text: (root.currentSelectedWin && (root.currentSelectedWin.title || root.currentSelectedWin.appName)) ? String(root.currentSelectedWin.title || root.currentSelectedWin.appName) : "No Window Selected"
+              color: "#ffffff"
+              font.pixelSize: 13
+              font.bold: true
+              font.family: Style.font.family
+              horizontalAlignment: Text.AlignHCenter
+              maximumLineCount: 2
+              wrapMode: Text.Wrap
+              elide: Text.ElideRight
+              width: parent.width
+              lineHeight: 1.15
+            }
 
-              MouseArea {
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                  searchInput.text = ""
-                  keyCatcher.forceActiveFocus()
+            // GTA 5 风格战术属性状态条组 (Tactical Stat Bars)
+            Column {
+              width: parent.width
+              spacing: 6
+
+              // 属性 1: Workspace
+              Row {
+                width: parent.width
+                spacing: 8
+                Text { text: "WORKSPACE:"; color: "#8892b0"; font.pixelSize: 9; font.bold: true; font.family: "monospace"; width: 85 }
+                Rectangle {
+                  height: 6
+                  width: parent.width - 93
+                  radius: 2
+                  color: "#181b24"
+                  anchors.verticalCenter: parent.verticalCenter
+                  Rectangle {
+                    height: parent.height
+                    width: parent.width * 0.85
+                    radius: 2
+                    color: "#ff7700"
+                  }
+                }
+              }
+
+              // 属性 2: Layout Mode
+              Row {
+                width: parent.width
+                spacing: 8
+                Text { text: "LAYOUT MODE:"; color: "#8892b0"; font.pixelSize: 9; font.bold: true; font.family: "monospace"; width: 85 }
+                Rectangle {
+                  height: 6
+                  width: parent.width - 93
+                  radius: 2
+                  color: "#181b24"
+                  anchors.verticalCenter: parent.verticalCenter
+                  Rectangle {
+                    height: parent.height
+                    width: root.currentSelectedWin && root.currentSelectedWin.layoutMode === "FLOAT" ? parent.width * 0.45 : parent.width * 0.95
+                    radius: 2
+                    color: "#00f0ff"
+                  }
+                }
+              }
+
+              // 属性 3: Process PID
+              Row {
+                width: parent.width
+                spacing: 8
+                Text { text: "PROCESS PID:"; color: "#8892b0"; font.pixelSize: 9; font.bold: true; font.family: "monospace"; width: 85 }
+                Text {
+                  text: root.currentSelectedWin ? (String(root.currentSelectedWin.pid) + " · " + (root.currentSelectedWin.resolutionStr || "1280×800")) : "-"
+                  color: "#cbd5e1"
+                  font.pixelSize: 9
+                  font.bold: true
+                  font.family: "monospace"
+                  anchors.verticalCenter: parent.verticalCenter
                 }
               }
             }
@@ -473,112 +719,153 @@ Item {
         }
       }
 
-      // 核心区域：16:9 空间多工作区画布网格
-      Item {
-        id: canvasArea
-        anchors.top: headerBar.bottom
-        anchors.bottom: bottomBar.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.margins: Style.space(24)
+      // ==========================================
+      // 3. 轮盘扇区内容覆盖层 (Wedge Slot Repeater)
+      // ==========================================
+      Repeater {
+        model: root.layoutWindows
 
-        readonly property var gridCalc: Model.calculateGrid(
-          Math.max(1, root.activeWorkspaces.length),
-          canvasArea.width,
-          canvasArea.height,
-          { gap: Style.space(24), padding: Style.space(16), aspectRatio: 16.0 / 9.0 }
-        )
+        delegate: OverviewCard {
+          required property var modelData
+          required property int index
 
-        Repeater {
-          model: root.activeWorkspaces
+          windowData: modelData
+          cardIndex: index
+          isSelected: (root.selectedIndex === index)
 
-          delegate: WorkspaceCard {
-            id: cardItem
-            required property var modelData
-            required property int index
+          x: Math.round(modelData.anchorX - width / 2)
+          y: Math.round(modelData.anchorY - height / 2)
 
-            readonly property var cardGeom: {
-              if (canvasArea.gridCalc && canvasArea.gridCalc.cards && canvasArea.gridCalc.cards[index]) {
-                return canvasArea.gridCalc.cards[index]
-              }
-              return { x: 50 + index * 240, y: 50, width: 320, height: 180 }
-            }
-
-            x: cardGeom.x
-            y: cardGeom.y
-            width: cardGeom.width
-            height: cardGeom.height
-
-            workspaceData: modelData
-            windowsList: modelData.windows || []
-            monitorBox: modelData.monitorBox || root.monitorBox
-            isActiveWorkspace: modelData.id === root.activeWorkspaceId
-            focusedAddress: root.focusedWindowAddress
-            selectedAddress: root.selectedWindowAddress
-
-            onWorkspaceClicked: function(wsId) {
-              root.switchToWorkspace(wsId)
-            }
-
-            onWindowClicked: function(w) {
-              if (w && w.address) {
-                root.activateWindow(w.address)
-              }
-            }
-
-            onWindowCloseRequested: function(w) {
-              if (w && w.address) {
-                root.closeWindow(w.address)
-              }
-            }
-          }
+          z: isSelected ? 100 : (10 + index)
         }
       }
 
-      // 底部状态统计栏
-      Item {
-        id: bottomBar
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
+      // ==========================================
+      // 4. 轮盘右侧黑洞传送门 (Black Hole Event Horizon Portal)
+      // ==========================================
+      BlackHole {
+        id: portalHole
+        visible: root.opened && backdrop.opacity > 0.05
         anchors.right: parent.right
-        anchors.margins: Style.space(16)
-        height: Style.space(24)
+        anchors.rightMargin: Math.max(70, (parent.width - 1020) / 4)
+        anchors.verticalCenter: parent.verticalCenter
+        targetWorkspaceId: root.targetTransferWorkspaceId
+        isDraggingAny: root.isDraggingCard
+        z: 150
+      }
+
+      // ==========================================
+      // 5. 拖拽跟随幻影 (Drag Ghost Proxy)
+      // ==========================================
+      Rectangle {
+        id: dragGhost
+        visible: root.isDraggingCard && root.draggedSlotData !== null
+        width: 155
+        height: 82
+        radius: 12
+        color: portalHole.isDragOver ? Qt.rgba(1, 0, 0.5, 0.55) : Qt.rgba(0.06, 0.08, 0.12, 0.90)
+        border.width: 2
+        border.color: portalHole.isDragOver ? "#ff007f" : "#00f0ff"
+        z: 999
+
+        x: root.dragGlobalX - width / 2
+        y: root.dragGlobalY - height / 2
+
+        scale: portalHole.isDragOver ? 0.65 : 1.08
+        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+        Behavior on border.color { ColorAnimation { duration: 120 } }
 
         Row {
           anchors.centerIn: parent
-          spacing: Style.space(16)
+          spacing: 10
 
-          Text {
-            text: "活跃桌面: " + root.activeWorkspaces.length
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            color: Util.alpha(Color.foreground, 0.5)
+          Image {
+            width: 34
+            height: 34
+            source: Quickshell.iconPath(root.draggedSlotData ? (root.draggedSlotData.iconName || "application-x-executable") : "", true)
+            fillMode: Image.PreserveAspectFit
+            anchors.verticalCenter: parent.verticalCenter
           }
 
-          Text {
-            text: "·"
-            font.pixelSize: Style.font.caption
-            color: Util.alpha(Color.foreground, 0.3)
+          Column {
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 2
+            Text {
+              text: root.draggedSlotData ? String(root.draggedSlotData.appName || "").toUpperCase() : ""
+              color: "#ffffff"
+              font.pixelSize: 11
+              font.bold: true
+              font.family: Style.font.family
+              elide: Text.ElideRight
+              width: 85
+            }
+            Text {
+              text: portalHole.isDragOver ? "ENTERING HOLE..." : "DRAGGING"
+              color: portalHole.isDragOver ? "#ff007f" : "#00f0ff"
+              font.pixelSize: 9
+              font.bold: true
+              font.family: "monospace"
+            }
+          }
+        }
+      }
+
+      // ==========================================
+      // 6. 底部 GTA 风格操作指示 Bar
+      // ==========================================
+      Rectangle {
+        id: gtaFooter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 28
+        anchors.horizontalCenter: parent.horizontalCenter
+        height: 32
+        radius: 16
+        color: "#12151e"
+        border.width: 1
+        border.color: Qt.rgba(1, 1, 1, 0.12)
+
+        Row {
+          anchors.centerIn: parent
+          anchors.leftMargin: 20
+          anchors.rightMargin: 20
+          spacing: 16
+
+          Row {
+            spacing: 6
+            Text { text: "MOUSE"; color: "#ff7700"; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
+            Text { text: "FLICK TO SELECT"; color: "#94a3b8"; font.pixelSize: 10; font.family: Style.font.family }
           }
 
-          Text {
-            text: "打开窗口: " + root.allWindows.length
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            color: Util.alpha(Color.foreground, 0.5)
+          Text { text: "·"; color: Qt.rgba(1, 1, 1, 0.2); font.pixelSize: 11 }
+
+          Row {
+            spacing: 6
+            Text { text: "DRAG → HOLE"; color: "#ff007f"; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
+            Text { text: "MOVE TO WORKSPACE [" + root.targetTransferWorkspaceId + "]"; color: "#94a3b8"; font.pixelSize: 10; font.family: Style.font.family }
           }
 
-          Text {
-            text: "·"
-            font.pixelSize: Style.font.caption
-            color: Util.alpha(Color.foreground, 0.3)
+          Text { text: "·"; color: Qt.rgba(1, 1, 1, 0.2); font.pixelSize: 11 }
+
+          Row {
+            spacing: 6
+            Text { text: "[M]"; color: "#00f0ff"; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
+            Text { text: "QUICK TRANSFER"; color: "#94a3b8"; font.pixelSize: 10; font.family: Style.font.family }
           }
 
-          Text {
-            text: "模式: Windows 11 / 空间概览"
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
-            color: Util.alpha(Color.foreground, 0.4)
+          Text { text: "·"; color: Qt.rgba(1, 1, 1, 0.2); font.pixelSize: 11 }
+
+          Row {
+            spacing: 6
+            Text { text: "ENTER / CLICK"; color: "#ffffff"; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
+            Text { text: "EQUIP / FOCUS"; color: "#94a3b8"; font.pixelSize: 10; font.family: Style.font.family }
+          }
+
+          Text { text: "·"; color: Qt.rgba(1, 1, 1, 0.2); font.pixelSize: 11 }
+
+          Row {
+            spacing: 6
+            Text { text: "ESC"; color: "#ffffff"; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
+            Text { text: "CANCEL"; color: "#94a3b8"; font.pixelSize: 10; font.family: Style.font.family }
           }
         }
       }
