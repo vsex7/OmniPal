@@ -1556,6 +1556,31 @@ class TestPhoneMirrorIntegration(unittest.TestCase):
         self.assertEqual(status["pids"], [])
         self.assertEqual(status["devices"], [])
 
+    def test_malformed_device_list_degrades_safely(self):
+        """Malformed devices.json entries must not break status or doctor."""
+        from engine.phone_runner import diagnose_phone_environment, get_phone_status
+
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        (self.config_dir / "devices.json").write_text(
+            json.dumps({"devices": ["invalid", {"id": "valid-phone"}]}),
+            encoding="utf-8",
+        )
+
+        status = get_phone_status()
+        self.assertFalse(status["running"])
+        self.assertEqual([device["id"] for device in status["devices"]], ["valid-phone"])
+
+        diag = diagnose_phone_environment()
+        self.assertEqual([device["id"] for device in diag["devices"]], ["valid-phone"])
+
+        (self.config_dir / "devices.json").write_text(
+            json.dumps({"devices": "invalid"}),
+            encoding="utf-8",
+        )
+        status = get_phone_status()
+        self.assertEqual(status["devices"], [])
+        self.assertEqual(diagnose_phone_environment()["devices"], [])
+
     def test_scrcpy_special_window_protection(self):
         """Tests that scrcpy windows are recognized as special floating windows."""
         from engine.engine import is_special_window
@@ -1702,6 +1727,94 @@ class TestPhoneMirrorIntegration(unittest.TestCase):
         # Non-existent device targeting fails cleanly
         self.assertFalse(start_phone_mirror(device_id="non_existent_phone_123"))
         self.assertFalse(stop_phone_mirror(device_id="non_existent_phone_123"))
+
+    def test_start_fails_when_requested_target_is_not_alive(self):
+        """A live device must not mask a failed start for another requested target."""
+        from unittest.mock import patch
+        from engine.phone_runner import start_phone_mirror
+
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        (self.config_dir / "devices.json").write_text(
+            json.dumps({
+                "notify": False,
+                "devices": [
+                    {"id": "phone-a", "serial": "SERIAL-A"},
+                    {"id": "phone-b", "serial": "SERIAL-B"},
+                ],
+            }),
+            encoding="utf-8",
+        )
+        live_pids = {"phone-a": 4242}
+
+        with patch("engine.phone_runner.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"), \
+             patch("engine.phone_runner._get_connected_adb_devices", return_value={"SERIAL-B": "device"}), \
+             patch("engine.phone_runner._read_pid_record", return_value={
+                 "pids": [4242],
+                 "device_pids": live_pids,
+                 "device_meta": {
+                     "phone-a": {"title": "OmniPal Phone - phone-a", "started_at": 1},
+                 },
+             }), \
+             patch("engine.phone_runner._write_pid_record", side_effect=lambda pids, *args: dict(pids)), \
+             patch("engine.phone_runner._is_pid_alive", side_effect=lambda pid, *args: pid == 4242), \
+             patch("engine.phone_runner.subprocess.Popen", side_effect=OSError("spawn failed")), \
+             patch("engine.phone_runner.time.sleep"):
+            self.assertFalse(start_phone_mirror(device_id="phone-b"))
+
+    def test_start_retries_transient_scrcpy_failure(self):
+        """A transient spawn failure must not fail an otherwise valid target."""
+        from unittest.mock import patch
+        from engine.phone_runner import start_phone_mirror
+
+        class FakeProcess:
+            pid = 99001
+            stderr = None
+
+            @staticmethod
+            def poll():
+                return None
+
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        (self.config_dir / "devices.json").write_text(
+            json.dumps({
+                "notify": False,
+                "devices": [{"id": "phone-retry", "serial": "SERIAL-RETRY"}],
+            }),
+            encoding="utf-8",
+        )
+
+        with patch("engine.phone_runner.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"), \
+             patch("engine.phone_runner._get_connected_adb_devices", return_value={"SERIAL-RETRY": "device"}), \
+             patch("engine.phone_runner._read_pid_record", return_value={"pids": [], "device_pids": {}, "device_meta": {}}), \
+             patch("engine.phone_runner._write_pid_record", side_effect=lambda pids, *args: dict(pids)), \
+             patch("engine.phone_runner._is_pid_alive", return_value=True), \
+             patch("engine.phone_runner.subprocess.Popen", side_effect=[OSError("transient"), FakeProcess()]), \
+             patch("engine.phone_runner.time.sleep"):
+            self.assertTrue(start_phone_mirror(device_id="phone-retry"))
+
+    def test_auto_wifi_disabled_never_uses_ip_fallback(self):
+        """auto_wifi=false must use USB only and avoid opening the configured IP."""
+        from unittest.mock import patch
+        from engine.phone_runner import start_phone_mirror
+
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        (self.config_dir / "devices.json").write_text(
+            json.dumps({
+                "auto_wifi": False,
+                "notify": False,
+                "devices": [{"id": "usb-only", "serial": "", "ip": "192.0.2.10"}],
+            }),
+            encoding="utf-8",
+        )
+
+        with patch("engine.phone_runner.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"), \
+             patch("engine.phone_runner._get_connected_adb_devices", return_value={}), \
+             patch("engine.phone_runner._check_tcp_port", return_value=True) as check_port, \
+             patch("engine.phone_runner.subprocess.Popen") as popen, \
+             patch("engine.phone_runner.time.sleep"):
+            self.assertFalse(start_phone_mirror(device_id="usb-only"))
+            check_port.assert_not_called()
+            popen.assert_not_called()
 
     def test_pid_reuse_is_not_treated_as_scrcpy(self):
         """An unrelated process must never satisfy the managed scrcpy identity check."""

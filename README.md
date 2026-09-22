@@ -29,7 +29,7 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
   - Quickshell 插件通过 `Quickshell.Io.FileView` 响应更新，无需后台密集轮询。
 - **配置持久化（Persistence，默认开启）**：
   - 默认开启以保证关机与重启后体验一致（自动记忆关机前的 Profile 与 Window Policy），严格隔离保存于 `~/.config/omnipal/persistence.json`（绝不写入 `~/.config/hypr/`，符合 H-1 铁律）；支持 `OMNIPAL_CONFIG_DIR` 重定向。
-  - `switch` / `window-policy` 调整后自动同步；亦可随时执行 `omni-profile persist disable` 关闭并保持纯内存零写入。
+  - `switch` / `window-policy` 调整后自动同步；亦可随时执行 `omni-profile persist disable` 关闭重启恢复。本地统计仍由 `stats.json` 独立记录。
 - **本地使用统计（Local Usage Statistics，纯本地零上传）**：
   - 仅记录模式切换、吸附区域与动作触发的聚合计数，写入 `~/.config/omnipal/stats.json`，零按键内容、零网络通信。
   - 统计读写全程静默容错，任何异常都不影响热切换与吸附执行（延迟指标 < 10ms 不回归）。
@@ -83,13 +83,13 @@ omni-profile cheatsheet
 # 窗口智能吸附（支持 left/right/up/down/center/third-left/third-right/two-thirds-left/two-thirds-right）
 omni-profile snap center
 
-# 列出规范吸附布局编目（6 模板 × 30 分区，--json 机器可读输出）
+# 列出规范吸附布局编目（6 模板 × 37 分区，--json 机器可读输出）
 omni-profile snap-layouts
 
 # 执行系统健康诊断与一致性校验
 omni-profile doctor
 
-# 执行微秒级性能基准测试
+# 执行毫秒级性能基准测试
 omni-profile benchmark
 
 # 查看配置持久化状态（默认开启，自动记住关机前配置）
@@ -98,7 +98,7 @@ omni-profile persist status
 # 显式设置持久化（可指定模式与窗口策略）
 omni-profile persist enable mac --policy floating
 
-# 关闭持久化（切换为纯内存零写入模式，重启后恢复默认原生）
+# 关闭重启恢复（本地统计仍可独立写入）
 omni-profile persist disable
 
 # 查看本地使用统计（模式切换频次排行、吸附区域 Top 榜，完全本地零上传）
@@ -202,4 +202,4 @@ bash scripts/uninstall.sh
 5. 清理 `/run/user/$UID/omnipal` 运行时临时目录
 6. 停止受管 `scrcpy` 进程，并清理 `persistence.json` / `stats.json` / `devices.json`（配置目录为空时一并移除）
 
-保证系统零文件残留，还原至完全初始状态。
+卸载会清理 OmniPal 受管的运行文件、链接与默认数据，并保留用户在 `~/.config/omnipal/profiles/` 中自定义的 Profile。

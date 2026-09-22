@@ -144,7 +144,7 @@ omni-profile uninstall        # 清理自身文件
 ./scripts/uninstall.sh
 ```
 
-卸载后系统 100% 回到初始基线状态，无残留绑定和文件。
+卸载会恢复初始绑定，并清理 OmniPal 受管的链接与运行文件；用户自定义 Profile 会保留。
 
 ---
 
@@ -188,7 +188,7 @@ docs/
 ├── introduction.md          # 项目整体功能介绍与设计规范（本文档）
 ├── features.md              # 完整功能清单与交付阶段标记
 ├── allm.md                  # 用户使用指南与综合参考手册
-├── BENCHMARK.md             # 微秒级热切换性能基准实测报告
+├── BENCHMARK.md             # 毫秒级热切换性能基准实测报告
 ├── KNOWN_ISSUES.md          # 运行环境、依赖边界与已知限制说明
 ├── ACCEPTANCE_REPORT.md     # 真机全项验收报告与清单
 └── ROADMAP_TO_V1.md         # 交付准出规范与路线图

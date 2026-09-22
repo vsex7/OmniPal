@@ -226,7 +226,8 @@ def get_phone_status() -> Dict[str, Any]:
     overall status and per-device state.
     """
     cfg = load_devices_config()
-    configured_devices = cfg.get("devices", [])
+    raw_devices = cfg.get("devices", [])
+    configured_devices = raw_devices if isinstance(raw_devices, list) else []
     expected_titles = {
         str(d.get("id") or d.get("serial") or "device"): f"OmniPal Phone - {d.get('name', d.get('id', 'device'))}"
         for d in configured_devices
@@ -248,6 +249,8 @@ def get_phone_status() -> Dict[str, Any]:
 
     devices_status = []
     for d in configured_devices:
+        if not isinstance(d, dict):
+            continue
         dev_id = d.get("id", d.get("serial", "phone"))
         dev_pid = active_device_pids.get(dev_id)
         if not dev_pid:
@@ -318,11 +321,64 @@ def _check_tcp_port(ip: str, port: int = 5555, timeout: float = 0.5) -> bool:
         return False
 
 
+def _apply_hyprland_window_geometries(devices: List[Dict[str, Any]]) -> None:
+    """Under Hyprland/Wayland, client apps cannot position their own windows via --window-x/y.
+    Query hyprctl clients and reposition scrcpy windows to their configured geometry.
+    """
+    if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return
+    try:
+        res = subprocess.run(["hyprctl", "-j", "clients"], capture_output=True, text=True, timeout=2.0)
+        if res.returncode != 0 or not res.stdout.strip():
+            return
+        clients = json.loads(res.stdout)
+    except Exception:
+        return
+
+    for dev in devices:
+        geo = dev.get("geometry", {})
+        if not geo:
+            continue
+        gx = geo.get("x")
+        gy = geo.get("y")
+        gw = geo.get("width")
+        gh = geo.get("height")
+        if gx is None and gy is None and gw is None and gh is None:
+            continue
+
+        d_id = str(dev.get("id") or dev.get("serial") or "")
+        name = str(dev.get("name", d_id))
+        target_title = f"OmniPal Phone - {name}"
+
+        for c in clients:
+            if c.get("class") == "scrcpy" and (c.get("title") == target_title or name in c.get("title", "")):
+                addr = c.get("address", "")
+                if not addr:
+                    continue
+                if not c.get("floating", False):
+                    subprocess.run(
+                        ["hyprctl", "dispatch", f'hl.dsp.window.float({{ action = "enable", window = "address:{addr}" }})'],
+                        capture_output=True,
+                        timeout=1.0,
+                    )
+                if gw is not None and gh is not None:
+                    subprocess.run(
+                        ["hyprctl", "dispatch", f'hl.dsp.window.resize({{ x = {int(gw)}, y = {int(gh)}, window = "address:{addr}" }})'],
+                        capture_output=True,
+                        timeout=1.0,
+                    )
+                if gx is not None and gy is not None:
+                    subprocess.run(
+                        ["hyprctl", "dispatch", f'hl.dsp.window.move({{ x = {int(gx)}, y = {int(gy)}, window = "address:{addr}" }})'],
+                        capture_output=True,
+                        timeout=1.0,
+                    )
+
+
 def start_phone_mirror(device_id: Optional[str] = None) -> bool:
     """
-    Launches scrcpy sessions in background using subprocess.Popen.
-    If device_id is provided, only mirrors that specific device.
-    Supports USB detection and Wi-Fi fallback.
+    Spawns scrcpy instances for configured devices.
+    If device_id is provided, only mirrors that device.
     """
     scrcpy_bin = shutil.which("scrcpy")
     if not scrcpy_bin:
@@ -337,7 +393,8 @@ def start_phone_mirror(device_id: Optional[str] = None) -> bool:
         return False
 
     cfg = load_devices_config()
-    devices = cfg.get("devices", [])
+    raw_devices = cfg.get("devices", [])
+    devices = [d for d in raw_devices if isinstance(d, dict)] if isinstance(raw_devices, list) else []
     if not devices:
         print("⚠️ [phone_runner] No devices configured in devices.json", file=sys.stderr)
         return False
@@ -350,6 +407,8 @@ def start_phone_mirror(device_id: Optional[str] = None) -> bool:
     else:
         target_devs = devices
 
+    target_ids = {str(d.get("id") or d.get("serial") or "device") for d in target_devs}
+
     auto_wifi = cfg.get("auto_wifi", True)
     default_bitrate = cfg.get("default_bitrate", "4M")
     turn_screen_off = cfg.get("turn_screen_off", False)
@@ -357,7 +416,6 @@ def start_phone_mirror(device_id: Optional[str] = None) -> bool:
     no_audio = cfg.get("no_audio", False)
     do_notify = cfg.get("notify", True)
 
-    connected_adb = _get_connected_adb_devices()
     record = _read_pid_record()
     current_device_pids = record.get("device_pids", {})
     current_device_meta = record.get("device_meta", {})
@@ -373,19 +431,22 @@ def start_phone_mirror(device_id: Optional[str] = None) -> bool:
     }
 
     launched_names: List[str] = []
+    launch_diagnostics: Dict[str, Tuple[Any, List[str], threading.Thread]] = {}
+    pending_ids = set(target_ids)
 
-    for dev in target_devs:
-        d_id = dev.get("id", dev.get("serial", "device"))
+    def launch_device(dev: Dict[str, Any]) -> None:
+        d_id = str(dev.get("id") or dev.get("serial") or "device")
         expected_title = expected_titles.get(d_id, f"OmniPal Phone - {dev.get('name', d_id)}")
         # Skip if already running for this device
         existing_pid = current_device_pids.get(d_id)
         if existing_pid and _is_pid_alive(existing_pid, expected_title):
-            continue
+            pending_ids.discard(d_id)
+            return
 
-        serial = dev.get("serial", "").strip()
-        ip = dev.get("ip", "").strip()
+        serial = str(dev.get("serial", "")).strip()
+        ip = str(dev.get("ip", "")).strip()
         port = dev.get("port", 5555)
-        name = dev.get("name", d_id)
+        name = str(dev.get("name", d_id))
         geo = dev.get("geometry", {})
         bitrate = dev.get("bitrate", default_bitrate)
         dev_turn_off = dev.get("turn_screen_off", turn_screen_off)
@@ -395,14 +456,14 @@ def start_phone_mirror(device_id: Optional[str] = None) -> bool:
         target_selector: Optional[List[str]] = None
         if serial and connected_adb.get(serial) == "device":
             target_selector = ["-s", serial]
-        elif ip:
+        elif ip and auto_wifi:
             # 2. Wi-Fi fallback: check if port 5555 is open before connecting
             if _check_tcp_port(ip, port, timeout=0.6):
                 tcp_target = f"{ip}:{port}"
                 if connected_adb.get(tcp_target) != "device":
                     try:
                         subprocess.run(
-                            ["adb", "connect", tcp_target],
+                            [adb_bin, "connect", tcp_target],
                             capture_output=True,
                             text=True,
                             timeout=2.0,
@@ -414,11 +475,11 @@ def start_phone_mirror(device_id: Optional[str] = None) -> bool:
                 target_selector = ["-s", serial]
             else:
                 # Device is not reachable via USB or open Wi-Fi port
-                continue
+                return
         elif serial and connected_adb.get(serial) == "device":
             target_selector = ["-s", serial]
         else:
-            continue
+            return
 
         cmd = [scrcpy_bin]
         if target_selector:
@@ -448,21 +509,57 @@ def start_phone_mirror(device_id: Optional[str] = None) -> bool:
         if dev_no_audio:
             cmd.append("--no-audio")
 
+        stderr_buffer: List[str] = []
         try:
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
                 start_new_session=True,
             )
+
+            def drain_stderr() -> None:
+                try:
+                    if proc.stderr is not None:
+                        stderr_buffer.append(proc.stderr.read() or "")
+                except Exception:
+                    pass
+                finally:
+                    if proc.stderr is not None:
+                        proc.stderr.close()
+
+            stderr_thread = threading.Thread(target=drain_stderr, daemon=True)
+            stderr_thread.start()
+            launch_diagnostics[d_id] = (proc, stderr_buffer, stderr_thread)
             current_device_pids[d_id] = proc.pid
             current_device_meta[d_id] = {"title": expected_title, "started_at": int(time.time())}
-            launched_names.append(name)
+            if name not in launched_names:
+                launched_names.append(name)
         except Exception as e:
             print(f"⚠️ [phone_runner] Failed to spawn scrcpy for {name}: {e}", file=sys.stderr)
 
-    # Short grace interval to let processes initialize
-    time.sleep(0.5)
+    # Retry transient scrcpy/ADB startup failures while allowing time to initialize.
+    for attempt in range(3):
+        # Refresh on every attempt so newly attached devices and a restarted
+        # ADB server are observed before the next scrcpy launch.
+        connected_adb = _get_connected_adb_devices()
+        for dev in target_devs:
+            d_id = str(dev.get("id") or dev.get("serial") or "device")
+            if d_id in pending_ids:
+                launch_device(dev)
+
+        if not pending_ids:
+            break
+
+        time.sleep(0.5 * (attempt + 1))
+        for d_id in list(pending_ids):
+            pid = current_device_pids.get(d_id)
+            title = expected_titles.get(d_id) or current_device_meta.get(d_id, {}).get("title")
+            if pid and _is_pid_alive(pid, title):
+                pending_ids.discard(d_id)
 
     # Verify which scrcpy processes actually remained alive
     alive_device_pids: Dict[str, int] = {}
@@ -473,10 +570,29 @@ def start_phone_mirror(device_id: Optional[str] = None) -> bool:
 
     _write_pid_record(alive_device_pids, expected_titles, current_device_meta)
 
-    if not alive_device_pids:
+    missing_target_ids = sorted(target_ids - set(alive_device_pids))
+    if missing_target_ids:
+        if not alive_device_pids:
+            reason = "未检测到可用的在线手机或投屏进程未能维持运行"
+        else:
+            reason = f"目标设备未维持运行: {', '.join(missing_target_ids)}"
+        print(f"❌ Error: {reason}", file=sys.stderr)
+        for d_id in missing_target_ids:
+            diagnostic = launch_diagnostics.get(d_id)
+            if not diagnostic:
+                continue
+            proc, output, thread = diagnostic
+            if proc.poll() is not None:
+                thread.join(timeout=0.2)
+            details = "".join(output).strip().splitlines()
+            if details:
+                tail = " | ".join(details[-3:])
+                print(f"   [{d_id}] {tail}", file=sys.stderr)
         if do_notify:
-            notify_desktop("⚠️ 手机同屏未启动", "未检测到可用的在线手机或投屏进程未能维持运行", urgency="normal")
+            notify_desktop("⚠️ 手机同屏未完全启动", reason, urgency="normal")
         return False
+
+    _apply_hyprland_window_geometries(target_devs)
 
     if launched_names and do_notify:
         names_str = ", ".join(launched_names)
@@ -492,7 +608,8 @@ def stop_phone_mirror(device_id: Optional[str] = None) -> bool:
     """
     cfg = load_devices_config()
     do_notify = cfg.get("notify", True)
-    devices = cfg.get("devices", []) if isinstance(cfg.get("devices", []), list) else []
+    raw_devices = cfg.get("devices", [])
+    devices = [d for d in raw_devices if isinstance(d, dict)] if isinstance(raw_devices, list) else []
     expected_titles = {
         str(d.get("id") or d.get("serial") or "device"): f"OmniPal Phone - {d.get('name', d.get('id', 'device'))}"
         for d in devices
@@ -628,7 +745,8 @@ def diagnose_phone_environment() -> Dict[str, Any]:
 
     # 3. Devices check
     cfg = load_devices_config()
-    devices = cfg.get("devices", [])
+    raw_devices = cfg.get("devices", [])
+    devices = [d for d in raw_devices if isinstance(d, dict)] if isinstance(raw_devices, list) else []
     connected_adb = _get_connected_adb_devices()
 
     has_any_connected = False

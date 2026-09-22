@@ -30,7 +30,7 @@ OmniPal 是一个**纯运行时内存热切换**的肌肉记忆引擎，叠加�
    只有 Engine 可以修改 Hyprland 绑定。插件禁止直接调用 `hyprctl keyword bind/unbind` 或写配置文件。
 
 2. **零 Hyprland 配置污染与默认持久化隔离**  
-   切换模式与策略严禁写入 `~/.config/hypr/` 下的任何文件（H-1 铁律绝不妥协）。为保证关机与重启后体验一致（记忆关机前配置），OmniPal 默认将最后使用的配置（Profile 与 Window Policy）安全持久化于独立的 `~/.config/omnipal/persistence.json`，且支持用户显式执行 `omni-profile persist disable` 关闭并切换为纯内存零写入。
+   切换模式与策略严禁写入 `~/.config/hypr/` 下的任何文件（H-1 铁律绝不妥协）。为保证关机与重启后体验一致（记忆关机前配置），OmniPal 默认将最后使用的配置（Profile 与 Window Policy）安全持久化于独立的 `~/.config/omnipal/persistence.json`，且支持用户显式执行 `omni-profile persist disable` 关闭重启恢复；本地统计仍由独立的 `stats.json` 记录。
 
 3. **单一事实源**  
    所有快捷键与动作定义只存在于 `schema/actions.json` 与 `profiles/*`。  

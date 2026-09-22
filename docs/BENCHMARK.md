@@ -1,6 +1,6 @@
 # OmniPal 性能基准测试与测量报告 (Benchmark Report)
 
-本文档记录 OmniPal 核心运行时在真实 Omarchy (Arch Linux + Hyprland 0.56.2) 环境下的微秒级延迟测量结果与评测方法。
+本文档记录 OmniPal 核心运行时在真实 Omarchy (Arch Linux + Hyprland 0.56.2) 环境下的毫秒级延迟测量结果与评测方法。
 
 ---
 
