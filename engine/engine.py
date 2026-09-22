@@ -1535,6 +1535,7 @@ end
 
                 combo = format_combo(mod, key)
                 esc_name = _escape_lua_string(name)
+                lua_ops.append(f'hl.unbind("{combo}")')
                 if action_id in LUA_DISPATCHERS:
                     dispatcher_expr = LUA_DISPATCHERS[action_id]
                     lua_ops.append(f'o.bind("{combo}", "{esc_name}", {dispatcher_expr})')
