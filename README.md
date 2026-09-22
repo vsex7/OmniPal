@@ -109,16 +109,7 @@ omni-profile stats --reset
 
 # 瞬间还原至 Omarchy 原生快捷键
 omni-profile restore
-
-# 手机同屏协同（需安装 scrcpy 与 adb，并在 devices.json 中配置设备）
-omni-profile phone doctor
-omni-profile phone list
-omni-profile phone start [device-id]
-omni-profile phone stop [device-id]
-omni-profile phone toggle [device-id]
 ```
-
-手机同屏的配置字段、安全边界与验收状态详见 [docs/PHONE_MIRROR.md](docs/PHONE_MIRROR.md)。
 
 ### 3. Quickshell 交互呼出
 
@@ -153,8 +144,7 @@ OmniPal/
 │   ├── windows.json          # Windows 11 习惯模式（14 覆盖）
 │   └── mac.json              # macOS 习惯模式（19 覆盖）
 ├── engine/
-│   ├── engine.py             # 核心运行时引擎（Lua 批量求值、信号捕获与 tmpfs 广播）
-│   └── phone_runner.py       # 可选 scrcpy 多设备会话管理
+│   └── engine.py             # 核心运行时引擎（Lua 批量求值、信号捕获与 tmpfs 广播）
 ├── bin/
 │   └── omni-profile          # 用户主 CLI 工具
 ├── plugins/
@@ -200,6 +190,6 @@ bash scripts/uninstall.sh
 3. 移除 `~/.local/bin/omni-profile`
 4. 移除 `~/.config/omarchy/plugins/` 下的所有软链接
 5. 清理 `/run/user/$UID/omnipal` 运行时临时目录
-6. 停止受管 `scrcpy` 进程，并清理 `persistence.json` / `stats.json` / `devices.json`（配置目录为空时一并移除）
+6. 清理 `persistence.json` / `stats.json`（配置目录为空时一并移除）
 
 卸载会清理 OmniPal 受管的运行文件、链接与默认数据，并保留用户在 `~/.config/omnipal/profiles/` 中自定义的 Profile。

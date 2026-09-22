@@ -103,11 +103,6 @@
       "action": "task_view",
       "mod": "SUPER",
       "key": "Tab"
-    },
-    {
-      "action": "phone_mirror",
-      "mod": "SUPER",
-      "key": "P"
     }
   ]
 }

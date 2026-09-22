@@ -11,14 +11,7 @@
 - Window Policy reload 失败时回滚请求并返回非零状态，不再把未生效策略报告为成功。
 - 自动测试启用 `OMNIPAL_DRY_RUN`，隔离真实 Hyprland 绑定、吸附 HUD 和 Shell 刷新；benchmark 通过 `try/finally` 恢复原始模式与策略。
 - 发布门禁统一读取代码版本，检查 `git diff --check` 和干净工作树，并将含冷启动的单次切换/恢复预算收紧到 10ms。
-
-### 📱 手机同屏协同开发版
-- 新增 `omni-profile phone`、`Super+P`、顶栏入口与设置面板设备控制。
-- `devices.json` 默认不再写入个人设备序列号或局域网 IP，读取状态不会创建配置文件，保存采用 `0600` 原子写入。
-- PID 状态同时校验 `scrcpy` 命令行与 OmniPal 窗口标题，停止操作不再使用宽泛 `pkill`；卸载会先停止投屏并清理 `devices.json`。
-- 启动按目标核验存活 PID，使用递增退避刷新 ADB 并重试瞬时服务竞争；`auto_wifi: false` 会严格禁用 IP 回退。
-- QML 快捷键提示改为从 cheatsheet 单一事实源动态读取。
-- 单台 USB 真机已完成启动、状态、Hyprland 窗口和停止闭环；双设备并发、另一台设备及 Wi-Fi/断线恢复仍待目标确认后验收。
+- 保证 `Super + Space` 在 Windows 模式下正确分发并彻底杜绝底层重复快捷键叠加。
 
 ### 📚 文档对齐
 - README、功能文档、AGENTS 与代码统一为 v1.8.0、6 个插件、37 个吸附分区。

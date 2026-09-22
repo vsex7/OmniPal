@@ -276,9 +276,6 @@ def is_special_window(
     - skip_cascade is True if PiP, scratchpad, or micro-window (completely skip resizing and cascading).
     - is_dialog is True if dialog/prompt/popup (center window without resizing).
     """
-    cls_lower = str(cls_name or "").lower()
-    if cls_lower == "scrcpy" or "scrcpy" in cls_lower:
-        return True, False
     if is_pip_window(cls_name, title):
         return True, False
     if is_scratchpad_workspace(ws_name, ws_id):
@@ -396,8 +393,8 @@ class OmniPalEngine:
         self._load_baseline_cache()
         if not self.baseline_bindings and not self._get_active_overlay():
             self._snapshot_baseline_bindings()
-        # Ensure default signal handling for child processes so subprocesses (like scrcpy/adb)
-        # do not inherit SIG_IGN and fail on waitpid/start-server.
+        # Ensure default signal handling for child processes so subprocesses
+        # do not inherit SIG_IGN and fail on waitpid.
         if "unittest" not in sys.modules:
             try:
                 signal.signal(signal.SIGCHLD, signal.SIG_DFL)
@@ -1013,8 +1010,6 @@ end
                     ws_id=ws_id,
                     size=size
                 )
-                if cls_name.lower() == "scrcpy" or "scrcpy" in cls_name.lower():
-                    continue
                 # Do not unfloat special windows (PiP, scratchpad, micro-windows) or dialogs
                 if skip or is_dlg:
                     continue

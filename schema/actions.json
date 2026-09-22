@@ -258,14 +258,6 @@
       "description": "呼出多任务概览与窗口空间切换器",
       "dispatcher": "exec",
       "default_arg": "omarchy-shell shell toggle omni.overview"
-    },
-    {
-      "id": "phone_mirror",
-      "name": "手机同屏投屏",
-      "category": "tools",
-      "description": "一键启动或停止多手机协同投屏 (scrcpy)",
-      "dispatcher": "exec",
-      "default_arg": "omni-profile phone toggle"
     }
   ]
 }

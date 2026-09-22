@@ -777,16 +777,6 @@ BarWidget {
         }
       }
 
-      ActionRow {
-        iconText: "📱"
-        label: "手机同屏协同 (Phone Mirror)"
-        hint: root.actionHints["phone_mirror"] || ""
-        onTriggered: {
-          Quickshell.execDetached(["omni-profile", "phone", "toggle"])
-          root.closePanel()
-        }
-      }
-
       PanelSeparator {
         foreground: Color.foreground
       }

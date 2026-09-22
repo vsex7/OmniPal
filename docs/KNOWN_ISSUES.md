@@ -20,7 +20,7 @@
 
 ### 1. Hyprland 配置零写入（Zero Hyprland Config Pollution）
 - **设计原则**：严格遵守 Hard Stop H-1，OmniPal **永远不写入** `~/.config/hypr/` 中的任何文件。
-- **独立状态文件**：tmpfs 状态、默认持久化、本地统计和可选手机设备配置分别位于 `/run/user/$UID/omnipal/` 与 `~/.config/omnipal/`，卸载时清理 OmniPal 自有文件。
+- **独立状态文件**：tmpfs 状态、默认持久化与本地统计分别位于 `/run/user/$UID/omnipal/` 与 `~/.config/omnipal/`，卸载时清理 OmniPal 自有文件。
 - **冷启动与重启行为**：当 Hyprland 完全关闭或系统重启后，内存中的按键覆盖自然消失。
 - **自愈与保持**：建议启用 systemd 用户服务 `systemctl --user enable --now omnipal.service` 或运行 `omni-profile daemon`，通过 UNIX Socket 监听 Hyprland 重载事件并自动恢复生效模式。
 
@@ -33,11 +33,6 @@
 
 ### 3. 多显示器与缩放适配
 - 插件（任务视图、窗口吸附反馈 HUD、Dock）依赖 Quickshell 提供的屏幕几何信息，在极端动态热插拔或多显示器异构缩放（Mixed DPI）场景下，窗口层可能有一过性的位置重新吸附过程。
-
-### 4. 手机同屏协同
-- 该功能是可选的 `scrcpy`/ADB 集成，核心快捷键模式不依赖它。
-- 运行时 PID 具备进程名校验，杜绝误杀非 scrcpy 进程。
-- 已在 Redmi Note 10 Lite 实体设备上完成单设备 USB 启动、状态、Hyprland 窗口、停止与进程隔离闭环；双设备并发、第二台设备、Wi-Fi、音视频质量和断线恢复仍待验收。
 
 ---
 

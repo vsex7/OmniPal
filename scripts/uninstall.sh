@@ -15,8 +15,6 @@ echo "=== OmniPal 卸载程序 ==="
 if [ -x "${BIN_TARGET}" ]; then
     echo "🔄 恢复系统原始快捷键绑定..."
     "${BIN_TARGET}" restore || true
-    echo "⏹ 停止手机同屏投屏进程..."
-    "${BIN_TARGET}" phone stop || true
 fi
 
 # 2. 停用并移除 systemd 服务及残留孤儿进程

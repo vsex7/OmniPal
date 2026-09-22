@@ -54,7 +54,6 @@
 | 快捷键搜索 | 在 HUD (omni.cheat-sheet) 中支持全分类实时模糊检索 | v1.0.0 已交付 |
 | 配置持久化 | 默认记录最后使用的 Profile 与 Window Policy，仅写 `~/.config/omnipal/persistence.json`；`persist disable` 关闭重启恢复，卸载会清理该文件，本地统计仍由 `stats.json` 独立管理 | v1.4.0 引入，当前默认开启 |
 | 本地使用统计 | 纯本地聚合计数（模式切换 / 吸附区域 / 动作触发），仅写 `~/.config/omnipal/stats.json`，零按键内容、零网络上传，静默容错不影响切换延迟；CLI `stats [--json|--reset]` | v1.5.0 已交付 |
-| 手机同屏协同 | 可选 `scrcpy` 多设备投屏管理，支持 USB/Wi-Fi、单设备启停、状态与诊断；配置位于 `~/.config/omnipal/devices.json` | 当前开发版已实现，真机验收待完成 |
 
 ---
 
