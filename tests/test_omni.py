@@ -936,6 +936,10 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertNotEqual(p7.returncode, 0)
         self.assertIn("无效的窗口策略", p7.stderr)
 
+        # 8. Reset to clean tiled policy
+        p_reset = subprocess.run([bin_path, "window-policy", "set", "tiled"], capture_output=True, text=True)
+        self.assertEqual(p_reset.returncode, 0)
+
     def test_mode_indicator_model_helpers(self):
         """Validates that Model.js contains window policy options and helper functions."""
         model_file = PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "Model.js"
