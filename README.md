@@ -118,6 +118,8 @@ omni-profile phone stop [device-id]
 omni-profile phone toggle [device-id]
 ```
 
+手机同屏的配置字段、安全边界与验收状态详见 [docs/PHONE_MIRROR.md](docs/PHONE_MIRROR.md)。
+
 ### 3. Quickshell 交互呼出
 
 ```bash
