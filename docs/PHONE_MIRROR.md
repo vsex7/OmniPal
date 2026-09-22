@@ -30,7 +30,7 @@ sudo pacman -S scrcpy android-tools
 }
 ```
 
-`geometry` 完全可选。USB 已连接时优先使用序列号；否则仅在配置的 Wi-Fi 端口可达时回退到无线 ADB。
+`geometry` 完全可选。USB 已连接时优先使用序列号；仅当 `auto_wifi` 未关闭且配置的 Wi-Fi 端口可达时才回退到无线 ADB。
 
 ## 命令
 
@@ -55,4 +55,4 @@ omni-profile phone config
 
 ## 验收状态
 
-自动化测试覆盖空配置、只读状态、CLI 成功/失败退出码、离线设备、PID 身份校验以及 scrcpy 窗口保护。当前环境没有在线 Android 设备，因此 USB/Wi-Fi 实际投屏、音视频质量和断线恢复仍需连接真机后验收。
+自动化测试覆盖空配置、只读状态、CLI 成功/失败退出码、离线设备、启动重试、损坏配置降级、PID 身份校验以及 scrcpy 窗口保护。2026-09-22 已在 Redmi Note 10 Lite 上完成单设备 USB 启动、状态、Hyprland 窗口和停止闭环。当前另有设备在线；双设备并发、第二台设备、Wi-Fi 投屏、音视频质量与断线恢复仍需确认目标设备后验收。

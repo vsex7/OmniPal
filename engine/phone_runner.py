@@ -335,14 +335,35 @@ def _apply_hyprland_window_geometries(devices: List[Dict[str, Any]]) -> None:
     except Exception:
         return
 
+    def geometry_int(value: Any) -> Optional[int]:
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str) and re.fullmatch(r"-?\d+", value.strip()):
+            return int(value)
+        return None
+
+    def dispatch(lua_call: str) -> None:
+        try:
+            subprocess.run(
+                ["hyprctl", "dispatch", lua_call],
+                capture_output=True,
+                timeout=1.0,
+            )
+        except Exception:
+            pass
+
     for dev in devices:
         geo = dev.get("geometry", {})
-        if not geo:
+        if not isinstance(geo, dict) or not geo:
             continue
-        gx = geo.get("x")
-        gy = geo.get("y")
-        gw = geo.get("width")
-        gh = geo.get("height")
+        gx = geometry_int(geo.get("x"))
+        gy = geometry_int(geo.get("y"))
+        gw = geometry_int(geo.get("width"))
+        gh = geometry_int(geo.get("height"))
         if gx is None and gy is None and gw is None and gh is None:
             continue
 
@@ -353,26 +374,14 @@ def _apply_hyprland_window_geometries(devices: List[Dict[str, Any]]) -> None:
         for c in clients:
             if c.get("class") == "scrcpy" and (c.get("title") == target_title or name in c.get("title", "")):
                 addr = c.get("address", "")
-                if not addr:
+                if not isinstance(addr, str) or not re.fullmatch(r"0x[0-9a-fA-F]+", addr):
                     continue
                 if not c.get("floating", False):
-                    subprocess.run(
-                        ["hyprctl", "dispatch", f'hl.dsp.window.float({{ action = "enable", window = "address:{addr}" }})'],
-                        capture_output=True,
-                        timeout=1.0,
-                    )
+                    dispatch(f'hl.dsp.window.float({{ action = "enable", window = "address:{addr}" }})')
                 if gw is not None and gh is not None:
-                    subprocess.run(
-                        ["hyprctl", "dispatch", f'hl.dsp.window.resize({{ x = {int(gw)}, y = {int(gh)}, window = "address:{addr}" }})'],
-                        capture_output=True,
-                        timeout=1.0,
-                    )
+                    dispatch(f'hl.dsp.window.resize({{ x = {gw}, y = {gh}, window = "address:{addr}" }})')
                 if gx is not None and gy is not None:
-                    subprocess.run(
-                        ["hyprctl", "dispatch", f'hl.dsp.window.move({{ x = {int(gx)}, y = {int(gy)}, window = "address:{addr}" }})'],
-                        capture_output=True,
-                        timeout=1.0,
-                    )
+                    dispatch(f'hl.dsp.window.move({{ x = {gx}, y = {gy}, window = "address:{addr}" }})')
 
 
 def start_phone_mirror(device_id: Optional[str] = None) -> bool:

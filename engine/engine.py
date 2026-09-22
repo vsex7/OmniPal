@@ -1432,15 +1432,16 @@ end
                 if combo:
                     lua_lines.append(f'hl.unbind("{combo}")')
 
-            # Dynamic restore if snapshot exists, fallback to LUA_RESTORE_BASELINE
+            # Stage 2: Always restore Omarchy baseline bindings so standard shortcuts like Super+Space are guaranteed
+            lua_lines.append(LUA_RESTORE_BASELINE)
+
+            # Dynamic restore if snapshot exists
             if not self.baseline_bindings:
                 self._load_baseline_cache()
 
             dynamic_lua = self._build_dynamic_restore_lua()
             if dynamic_lua:
                 lua_lines.append(dynamic_lua)
-            else:
-                lua_lines.append(LUA_RESTORE_BASELINE)
 
             success = self._eval_lua("; ".join(lua_lines))
 
@@ -1450,20 +1451,23 @@ end
                 print("Warning: Restore evaluation failed; retaining active overlay for retry", file=sys.stderr)
                 return False
 
+            policy_restored = True
+            if self._get_applied_window_mode() == "floating":
+                policy_restored = self._reload_config_only()
+                if policy_restored:
+                    self._set_applied_window_mode("tiled")
+            if not policy_restored:
+                print("Warning: Restore window policy reload failed; retaining active overlay for retry", file=sys.stderr)
+                return False
+
             try:
                 if OVERLAY_FILE.exists():
                     OVERLAY_FILE.unlink()
             except Exception:
                 pass
 
-            policy_restored = True
-            if self._get_applied_window_mode() == "floating":
-                policy_restored = self._reload_config_only()
-                if policy_restored:
-                    self._set_applied_window_mode("tiled")
-
             self._write_state("omarchy", 0)
-            return policy_restored
+            return True
 
     def switch_mode(self, target_mode: str, record: bool = True) -> bool:
         """Atomically switches the in-memory keybindings to target_mode with rollback on error.
@@ -1503,11 +1507,10 @@ end
 
                 # Stage 2: Restore baseline bindings so non-overlapping native bindings
                 # (e.g. Omarchy menu Super+Space or default binds unmapped by previous profile) are restored
+                lua_ops.append(LUA_RESTORE_BASELINE)
                 dynamic_lua = self._build_dynamic_restore_lua()
                 if dynamic_lua:
                     lua_ops.append(dynamic_lua)
-                else:
-                    lua_ops.append(LUA_RESTORE_BASELINE)
 
 
             # Stage 3: Add bind commands for new profile
@@ -1856,7 +1859,7 @@ end"""
         return True
 
     def benchmark(self) -> Dict[str, Any]:
-        """Measures microsecond latency for schema loading, profile switching, and restore.
+        """Measures millisecond latency for schema loading, profile switching, and restore.
 
         Non-destructive: the session's active mode is restored at the end (unmeasured)
         and the benchmark switches never count toward local usage statistics."""

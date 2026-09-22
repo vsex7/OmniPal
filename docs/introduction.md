@@ -85,8 +85,7 @@ OmniPal 是一个专为从 Windows 或 macOS 迁移到 Omarchy 的用户设计�
 
 5. **完全卸载**
    ```bash
-   omni-profile uninstall
-   # 或运行项目提供的 uninstall.sh
+   ./scripts/uninstall.sh
    ```
 
 #### 常见问题
@@ -138,9 +137,6 @@ cd OmniPal
 #### 卸载
 
 ```bash
-omni-profile restore          # 先恢复绑定
-omni-profile uninstall        # 清理自身文件
-# 或直接运行
 ./scripts/uninstall.sh
 ```
 

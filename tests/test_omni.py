@@ -27,15 +27,19 @@ import engine.engine as engine_module
 from engine.engine import OmniPalEngine, format_combo
 from scripts.check_consistency import check_consistency
 
-def setUpModule():
+def _ensure_global_test_env():
     global _GLOBAL_TEST_CONFIG_DIR, _GLOBAL_TEST_RUN_DIR
     if _GLOBAL_TEST_CONFIG_DIR is None:
         _GLOBAL_TEST_CONFIG_DIR = tempfile.TemporaryDirectory()
-    os.environ["OMNIPAL_CONFIG_DIR"] = _GLOBAL_TEST_CONFIG_DIR.name
     if _GLOBAL_TEST_RUN_DIR is None:
         _GLOBAL_TEST_RUN_DIR = tempfile.TemporaryDirectory()
+    os.environ["OMNIPAL_CONFIG_DIR"] = _GLOBAL_TEST_CONFIG_DIR.name
     os.environ["OMNIPAL_RUN_DIR"] = _GLOBAL_TEST_RUN_DIR.name
+    os.environ["OMNIPAL_DRY_RUN"] = "1"
     engine_module._resolve_run_dir()
+
+def setUpModule():
+    _ensure_global_test_env()
 
 def tearDownModule():
     global _GLOBAL_TEST_CONFIG_DIR, _GLOBAL_TEST_RUN_DIR
@@ -49,11 +53,23 @@ def tearDownModule():
         _GLOBAL_TEST_RUN_DIR.cleanup()
         _GLOBAL_TEST_RUN_DIR = None
 
-class TestOmniPal(unittest.TestCase):
+class BaseOmniTestCase(unittest.TestCase):
+    """Base test case ensuring test isolation and preventing desktop environment leakage."""
     def setUp(self):
+        super().setUp()
+        _ensure_global_test_env()
+
+    def tearDown(self):
+        super().tearDown()
+        _ensure_global_test_env()
+
+class TestOmniPal(BaseOmniTestCase):
+    def setUp(self):
+        super().setUp()
         self.engine = OmniPalEngine(PROJECT_ROOT)
 
     def tearDown(self):
+        super().tearDown()
         if hasattr(self.engine, "_last_summon_proc") and self.engine._last_summon_proc:
             try:
                 self.engine._last_summon_proc.wait(timeout=0.2)
@@ -126,9 +142,7 @@ class TestOmniPal(unittest.TestCase):
             default_dir = _resolve_run_dir()
             self.assertTrue(str(default_dir).startswith("/run/user/"))
         finally:
-            if orig_run_dir is not None:
-                os.environ["OMNIPAL_RUN_DIR"] = orig_run_dir
-                _resolve_run_dir()
+            _ensure_global_test_env()
         self.assertTrue(str(RUN_DIR).startswith("/run/user/") or str(RUN_DIR).startswith(tempfile.gettempdir()) or "/tmp" in str(RUN_DIR))
         self.assertTrue(str(STATE_FILE).startswith("/run/user/") or str(STATE_FILE).startswith(tempfile.gettempdir()) or "/tmp" in str(STATE_FILE))
         self.assertTrue(str(OVERLAY_FILE).startswith("/run/user/") or str(OVERLAY_FILE).startswith(tempfile.gettempdir()) or "/tmp" in str(OVERLAY_FILE))
@@ -360,6 +374,34 @@ class TestOmniPal(unittest.TestCase):
         finally:
             self.engine._eval_lua = original_eval
 
+    def test_restore_reload_failure_retains_overlay_and_floating_state(self):
+        """A successful Lua restore must not report success until policy reload succeeds."""
+        from engine.engine import APPLIED_WINDOW_MODE_FILE, OVERLAY_FILE
+
+        overlay = [{"action": "window_close", "combo": "ALT + F4", "name": "Close Window"}]
+        self.engine._write_active_overlay(overlay)
+        self.engine._write_state("windows", len(overlay), policy="floating")
+        self.engine._set_applied_window_mode("floating")
+
+        original_eval = self.engine._eval_lua
+        original_reload = self.engine._reload_config_only
+        try:
+            self.engine._eval_lua = lambda code: True
+            self.engine._reload_config_only = lambda: False
+            self.assertFalse(self.engine.restore())
+            self.assertTrue(OVERLAY_FILE.exists())
+            self.assertEqual(APPLIED_WINDOW_MODE_FILE.read_text(encoding="utf-8"), "floating")
+            self.assertEqual(self.engine.get_state().get("mode"), "windows")
+
+            self.engine._reload_config_only = lambda: True
+            self.assertTrue(self.engine.restore())
+            self.assertFalse(OVERLAY_FILE.exists())
+            self.assertEqual(APPLIED_WINDOW_MODE_FILE.read_text(encoding="utf-8"), "tiled")
+            self.assertEqual(self.engine.get_state().get("mode"), "omarchy")
+        finally:
+            self.engine._eval_lua = original_eval
+            self.engine._reload_config_only = original_reload
+
     def test_compositor_mutation_dry_run(self):
         """Tests can execute Engine code without sending Lua to the live compositor."""
         from unittest.mock import patch
@@ -448,15 +490,11 @@ class TestOmniPal(unittest.TestCase):
             os.environ.pop("XDG_RUNTIME_DIR", None)
             self.assertEqual(str(_resolve_run_dir()), f"/run/user/{os.getuid()}/omnipal")
         finally:
-            if orig_run_dir is not None:
-                os.environ["OMNIPAL_RUN_DIR"] = orig_run_dir
-            else:
-                os.environ.pop("OMNIPAL_RUN_DIR", None)
             if orig_xdg is not None:
                 os.environ["XDG_RUNTIME_DIR"] = orig_xdg
             else:
                 os.environ.pop("XDG_RUNTIME_DIR", None)
-            _resolve_run_dir()
+            _ensure_global_test_env()
 
     def test_verify_overlay_bindings(self):
         """Verifies that verify_overlay_bindings correctly detects missing vs present bindings."""
@@ -496,12 +534,12 @@ class TestOmniPal(unittest.TestCase):
             subprocess.run = orig_run
             self.engine.restore()
 
-class TestPersistenceManager(unittest.TestCase):
+class TestPersistenceManager(BaseOmniTestCase):
     """Validates the opt-in profile persistence isolated via OMNIPAL_CONFIG_DIR."""
 
     def setUp(self):
+        super().setUp()
         self._tmp_dir = tempfile.TemporaryDirectory()
-        self._saved_env = os.environ.get("OMNIPAL_CONFIG_DIR")
         os.environ["OMNIPAL_CONFIG_DIR"] = self._tmp_dir.name
         self.engine = OmniPalEngine(PROJECT_ROOT)
         self.persist_path = Path(self._tmp_dir.name) / "persistence.json"
@@ -511,11 +549,8 @@ class TestPersistenceManager(unittest.TestCase):
 
     def tearDown(self):
         self.engine._eval_lua = self._orig_eval
-        if self._saved_env is None:
-            os.environ.pop("OMNIPAL_CONFIG_DIR", None)
-        else:
-            os.environ["OMNIPAL_CONFIG_DIR"] = self._saved_env
         self._tmp_dir.cleanup()
+        super().tearDown()
 
     def test_default_state_is_enabled(self):
         """Fresh environment defaults to enabled persistence to remember last configuration across reboots."""
@@ -642,12 +677,12 @@ class TestPersistenceManager(unittest.TestCase):
                     os.environ.pop("OMNIPAL_RUN_DIR", None)
                 engine_module._resolve_run_dir()
 
-class TestUsageStatistics(unittest.TestCase):
+class TestUsageStatistics(BaseOmniTestCase):
     """Validates fully local usage statistics: isolation, increments, reset, and zero-impact fault tolerance."""
 
     def setUp(self):
+        super().setUp()
         self._tmp_dir = tempfile.TemporaryDirectory()
-        self._saved_env = os.environ.get("OMNIPAL_CONFIG_DIR")
         os.environ["OMNIPAL_CONFIG_DIR"] = self._tmp_dir.name
         self.engine = OmniPalEngine(PROJECT_ROOT)
         self.stats_path = Path(self._tmp_dir.name) / "stats.json"
@@ -657,11 +692,8 @@ class TestUsageStatistics(unittest.TestCase):
 
     def tearDown(self):
         self.engine._eval_lua = self._orig_eval
-        if self._saved_env is None:
-            os.environ.pop("OMNIPAL_CONFIG_DIR", None)
-        else:
-            os.environ["OMNIPAL_CONFIG_DIR"] = self._saved_env
         self._tmp_dir.cleanup()
+        super().tearDown()
 
     def test_initial_state_is_empty(self):
         """Fresh environment reports the canonical empty structure without creating any file."""
@@ -740,10 +772,11 @@ class TestUsageStatistics(unittest.TestCase):
         self.assertEqual(stats["switches"], {"windows": 1})
         self.assertEqual(stats["snaps"], {})
 
-class TestWindowPolicyAndModeIndicator(unittest.TestCase):
+class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
     """Validates window policy management, state synchronization, and Mode Indicator UI architecture."""
 
     def setUp(self):
+        super().setUp()
         self.engine = OmniPalEngine(PROJECT_ROOT)
         # Neutralize live Hyprland eval side effects
         self._orig_eval = self.engine._eval_lua
@@ -753,6 +786,7 @@ class TestWindowPolicyAndModeIndicator(unittest.TestCase):
         self.engine._eval_lua = self._orig_eval
         # Reset policy to tiled for clean baseline
         self.engine.set_window_policy("tiled")
+        super().tearDown()
 
     def test_window_policy_default_and_set(self):
         """Verifies default policy is tiled and set_window_policy updates state accurately."""
@@ -1490,7 +1524,7 @@ class TestWindowPolicyAndModeIndicator(unittest.TestCase):
             self.assertIn("local reg = debug.getregistry()", executed_lua)
             self.assertIn('hl.bind("SUPER + SPACE", fn_9999', executed_lua)
             self.assertIn('o.bind("ALT + F4", "Custom Kill", "custom-kill")', executed_lua)
-            self.assertNotIn(LUA_RESTORE_BASELINE, executed_lua)
+            self.assertIn(LUA_RESTORE_BASELINE, executed_lua)
 
         # 2. Test fallback when baseline snapshot is absent
         eval_history.clear()
@@ -1525,21 +1559,22 @@ class TestWindowPolicyAndModeIndicator(unittest.TestCase):
             self.assertTrue(any("fn_7777" in lua for lua in eval_history))
 
 
-class TestPhoneMirrorIntegration(unittest.TestCase):
+class TestPhoneMirrorIntegration(BaseOmniTestCase):
     """Tests for scrcpy-both phone mirror integration, protection, and CLI."""
 
     def setUp(self):
+        super().setUp()
         self.temp_dir = tempfile.mkdtemp()
         self.config_dir = Path(self.temp_dir) / "config"
         self.run_dir = Path(self.temp_dir) / "run"
         os.environ["OMNIPAL_CONFIG_DIR"] = str(self.config_dir)
         os.environ["OMNIPAL_RUN_DIR"] = str(self.run_dir)
+        engine_module._resolve_run_dir()
         self.engine = OmniPalEngine(PROJECT_ROOT)
 
     def tearDown(self):
-        os.environ.pop("OMNIPAL_CONFIG_DIR", None)
-        os.environ.pop("OMNIPAL_RUN_DIR", None)
         shutil.rmtree(self.temp_dir, ignore_errors=True)
+        super().tearDown()
 
     def test_phone_runner_config_and_status(self):
         """Tests read-only device defaults and status reporting."""
@@ -1820,6 +1855,33 @@ class TestPhoneMirrorIntegration(unittest.TestCase):
         """An unrelated process must never satisfy the managed scrcpy identity check."""
         from engine.phone_runner import _is_pid_alive
         self.assertFalse(_is_pid_alive(os.getpid(), "OmniPal Phone - unrelated"))
+
+    def test_hyprland_geometry_ignores_invalid_values(self):
+        """Malformed geometry and addresses must not crash or emit arbitrary dispatch code."""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from engine.phone_runner import _apply_hyprland_window_geometries
+
+        clients = [{
+            "class": "scrcpy",
+            "title": "OmniPal Phone - invalid-geometry",
+            "address": "not-an-address",
+            "floating": True,
+        }]
+        devices = [{
+            "id": "invalid-geometry",
+            "name": "invalid-geometry",
+            "geometry": {"x": "12px", "y": 20, "width": "405", "height": 900},
+        }]
+
+        def fake_run(cmd, **kwargs):
+            if cmd == ["hyprctl", "-j", "clients"]:
+                return SimpleNamespace(returncode=0, stdout=json.dumps(clients))
+            raise AssertionError(f"unexpected dispatch: {cmd}")
+
+        with patch.dict(os.environ, {"HYPRLAND_INSTANCE_SIGNATURE": "test"}), \
+             patch("engine.phone_runner.subprocess.run", side_effect=fake_run):
+            _apply_hyprland_window_geometries(devices)
 
 
 if __name__ == "__main__":
