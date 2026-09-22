@@ -33,6 +33,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 VERSION = "1.8.0"
 
+
+def compositor_mutation_disabled() -> bool:
+    """Returns True when tests or maintenance tools request a non-mutating dry run."""
+    return os.environ.get("OMNIPAL_DRY_RUN", "").strip().lower() in ("1", "true", "yes")
+
 def _resolve_run_dir() -> Path:
     custom = os.environ.get("OMNIPAL_RUN_DIR")
     if custom:
@@ -271,6 +276,9 @@ def is_special_window(
     - skip_cascade is True if PiP, scratchpad, or micro-window (completely skip resizing and cascading).
     - is_dialog is True if dialog/prompt/popup (center window without resizing).
     """
+    cls_lower = str(cls_name or "").lower()
+    if cls_lower == "scrcpy" or "scrcpy" in cls_lower:
+        return True, False
     if is_pip_window(cls_name, title):
         return True, False
     if is_scratchpad_workspace(ws_name, ws_id):
@@ -673,6 +681,8 @@ class OmniPalEngine:
         """Executes Lua expressions in Omarchy Hyprland compositor with strict error checking."""
         if not lua_code.strip():
             return True
+        if compositor_mutation_disabled():
+            return True
         _ensure_hyprland_instance()
         try:
             res = subprocess.run(
@@ -680,7 +690,8 @@ class OmniPalEngine:
                 capture_output=True,
                 text=True,
                 check=False,
-                env=os.environ
+                env=os.environ,
+                timeout=3.0
             )
             if res.returncode != 0:
                 print(f"Hyprland eval failed (exit {res.returncode}): {res.stdout.strip()}", file=sys.stderr)
@@ -692,6 +703,25 @@ class OmniPalEngine:
             return True
         except Exception as e:
             print(f"Hyprland eval exception: {e}", file=sys.stderr)
+            return False
+
+    def _reload_config_only(self, timeout: float = 3.0) -> bool:
+        """Reloads compositor config and reports whether the mutation completed."""
+        if compositor_mutation_disabled():
+            return True
+        try:
+            res = subprocess.run(
+                ["hyprctl", "reload", "config-only"],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=os.environ,
+                timeout=timeout,
+            )
+            output = f"{res.stdout}\n{res.stderr}".lower()
+            return res.returncode == 0 and "error" not in output
+        except Exception as e:
+            print(f"Hyprland config reload failed: {e}", file=sys.stderr)
             return False
 
     def _get_applied_window_mode(self) -> str:
@@ -981,6 +1011,8 @@ end
                     ws_id=ws_id,
                     size=size
                 )
+                if cls_name.lower() == "scrcpy" or "scrcpy" in cls_name.lower():
+                    continue
                 # Do not unfloat special windows (PiP, scratchpad, micro-windows) or dialogs
                 if skip or is_dlg:
                     continue
@@ -1048,16 +1080,8 @@ end
             # target_mode == "tiled"
             if not force and cur_applied != "floating":
                 return True
-            try:
-                subprocess.run(
-                    ["hyprctl", "reload", "config-only"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    env=os.environ
-                )
-            except Exception:
-                pass
+            if not self._reload_config_only():
+                return False
             self._unfloat_existing_windows()
             self._set_applied_window_mode("tiled")
 
@@ -1097,17 +1121,24 @@ end
             norm = normalize_window_policy(policy)
             if not norm:
                 return False
+            previous_policy = self.get_window_policy()
             self.window_policy = norm
             cur_state = self.get_state()
             cur_mode = cur_state.get("mode", "omarchy")
             count = cur_state.get("active_bindings_count", 0)
             self._write_state(cur_mode, count, policy=norm)
+            try:
+                applied = self._apply_window_policy(force=True)
+            except Exception as e:
+                print(f"Warning: Failed to apply window policy '{norm}': {e}", file=sys.stderr)
+                applied = False
+            if not applied:
+                self.window_policy = previous_policy
+                self._write_state(cur_mode, count, policy=previous_policy)
+                print(f"Warning: Compositor rejected window policy '{norm}'; previous policy restored", file=sys.stderr)
+                return False
             if self.get_persistence_status()["enabled"]:
                 self.set_persistence(True, window_policy=norm)
-            try:
-                self._apply_window_policy(force=True)
-            except Exception:
-                pass
             return True
 
     def get_state(self) -> Dict[str, Any]:
@@ -1192,14 +1223,15 @@ end
             "compositor_connected": compositor_connected,
         }
         write_state_json(STATE_FILE, state_data)
-        try:
-            subprocess.Popen(
-                ["omarchy-shell", "-q", "omni.mode-indicator", "refresh"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
+        if not compositor_mutation_disabled():
+            try:
+                subprocess.Popen(
+                    ["omarchy-shell", "-q", "omni.mode-indicator", "refresh"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
 
 
     def _get_active_overlay(self) -> List[Dict[str, str]]:
@@ -1412,27 +1444,26 @@ end
 
             success = self._eval_lua("; ".join(lua_lines))
 
+            # Never discard the active overlay while the compositor still reports a failure.
+            # Keeping it allows a later daemon reconnect or explicit retry to finish Restore.
+            if not success:
+                print("Warning: Restore evaluation failed; retaining active overlay for retry", file=sys.stderr)
+                return False
+
             try:
                 if OVERLAY_FILE.exists():
                     OVERLAY_FILE.unlink()
             except Exception:
                 pass
 
+            policy_restored = True
             if self._get_applied_window_mode() == "floating":
-                try:
-                    subprocess.run(
-                        ["hyprctl", "reload", "config-only"],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        env=os.environ
-                    )
-                except Exception:
-                    pass
-                self._set_applied_window_mode("tiled")
+                policy_restored = self._reload_config_only()
+                if policy_restored:
+                    self._set_applied_window_mode("tiled")
 
             self._write_state("omarchy", 0)
-            return success
+            return policy_restored
 
     def switch_mode(self, target_mode: str, record: bool = True) -> bool:
         """Atomically switches the in-memory keybindings to target_mode with rollback on error.
@@ -1587,6 +1618,7 @@ end
             action_meta = self.actions_catalog.get(action_id, {})
             combo = format_combo(b.get("mod", ""), b.get("key", ""))
             sheet.append({
+                "action": action_id,
                 "key": combo,
                 "name": action_meta.get("name", action_id),
                 "category": action_meta.get("category", "other"),
@@ -1714,7 +1746,7 @@ end
             }
             atomic_write_json(SNAP_FILE, snap_data)
 
-            if not no_hud:
+            if not no_hud and not compositor_mutation_disabled():
                 try:
                     payload = {"interactive": True}
                     if target_addr:
@@ -1744,7 +1776,7 @@ end
         atomic_write_json(SNAP_FILE, snap_data)
 
         # 3. Summon via omarchy-shell asynchronously if not suppressed
-        if not no_hud:
+        if not no_hud and not compositor_mutation_disabled():
             try:
                 summon_payload = {"zone": zone, "interactive": False}
                 if clean_target_address:
@@ -1828,39 +1860,52 @@ end"""
 
         Non-destructive: the session's active mode is restored at the end (unmeasured)
         and the benchmark switches never count toward local usage statistics."""
-        results = {}
-        prev_mode = self.get_state().get("mode", "omarchy")
+        results: Dict[str, Any] = {}
+        initial_state = self.get_state()
+        prev_mode = initial_state.get("mode", "omarchy")
+        prev_policy = initial_state.get("window_policy", self.get_window_policy())
+        results["initial_mode"] = prev_mode
 
-        # 1. Schema & profile parse time
-        t0 = time.perf_counter()
-        self._load_catalog()
-        results["parse_ms"] = round((time.perf_counter() - t0) * 1000, 3)
+        try:
+            # 1. Schema & profile parse time
+            t0 = time.perf_counter()
+            self._load_catalog()
+            results["parse_ms"] = round((time.perf_counter() - t0) * 1000, 3)
 
-        # 2. Windows profile switch latency
-        t0 = time.perf_counter()
-        self.switch_mode("windows", record=False)
-        results["switch_windows_ms"] = round((time.perf_counter() - t0) * 1000, 3)
+            # 2. Windows profile switch latency
+            t0 = time.perf_counter()
+            self.switch_mode("windows", record=False)
+            results["switch_windows_ms"] = round((time.perf_counter() - t0) * 1000, 3)
 
-        # 3. macOS profile switch latency
-        t0 = time.perf_counter()
-        self.switch_mode("mac", record=False)
-        results["switch_mac_ms"] = round((time.perf_counter() - t0) * 1000, 3)
+            # 3. macOS profile switch latency
+            t0 = time.perf_counter()
+            self.switch_mode("mac", record=False)
+            results["switch_mac_ms"] = round((time.perf_counter() - t0) * 1000, 3)
 
-        # 4. Restore latency
-        t0 = time.perf_counter()
-        self.restore()
-        results["restore_ms"] = round((time.perf_counter() - t0) * 1000, 3)
+            # 4. Restore latency
+            t0 = time.perf_counter()
+            results["restore_ok"] = self.restore()
+            results["restore_ms"] = round((time.perf_counter() - t0) * 1000, 3)
 
-        # 5. State write latency
-        t0 = time.perf_counter()
-        self._write_state("omarchy", 0)
-        results["state_write_ms"] = round((time.perf_counter() - t0) * 1000, 3)
+            # 5. State write latency
+            t0 = time.perf_counter()
+            self._write_state("omarchy", 0)
+            results["state_write_ms"] = round((time.perf_counter() - t0) * 1000, 3)
+        finally:
+            # Restore both pieces of session state, even when a benchmark step fails.
+            results["mode_restored"] = False
+            if prev_mode != "omarchy" and prev_mode in self.profiles:
+                results["mode_restored"] = self.switch_mode(prev_mode, record=False)
+            elif prev_mode == "omarchy":
+                self._write_state("omarchy", 0, policy=prev_policy)
 
-        # 6. Restore the user's active mode without affecting the measured numbers.
-        results["mode_restored"] = False
-        if prev_mode != "omarchy" and prev_mode in self.profiles:
-            self.switch_mode(prev_mode, record=False)
-            results["mode_restored"] = True
+            current_policy = self.get_window_policy()
+            results["policy_restored"] = True
+            if prev_mode == "omarchy" and prev_policy == "floating":
+                results["policy_restored"] = self.set_window_policy(prev_policy)
+            elif prev_policy != current_policy:
+                results["policy_restored"] = self.set_window_policy(prev_policy)
+
         return results
 
     def doctor(self) -> Dict[str, Any]:
@@ -1967,6 +2012,7 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
             s.settimeout(2.0)
             buffer = ""
             cascade_counter = 0
+            last_reload_time = 0.0
 
             # Settle & verify keybindings upon socket connection (cold boot or compositor recovery)
             curr_mode = engine.get_state().get("mode", "omarchy")
@@ -1991,6 +2037,10 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                         line, buffer = buffer.split("\n", 1)
                         line = line.strip()
                         if line == "configreloaded>>":
+                            now = time.monotonic()
+                            if now - last_reload_time < 1.0:
+                                continue
+                            last_reload_time = now
                             time.sleep(0.1)  # Debounce settle time
                             curr_mode = engine.get_state().get("mode", "omarchy")
                             if curr_mode != "omarchy":
@@ -2113,7 +2163,10 @@ def run_daemon():
                     PID_FILE.unlink()
             except Exception:
                 pass
-            engine.restore()
+            curr = engine.get_state().get("mode", "omarchy")
+            cur_app = engine._get_applied_window_mode()
+            if curr != "omarchy" or cur_app == "floating" or engine._get_active_overlay():
+                engine.restore()
 
     def sig_handler(signum, frame):
         print(f"\n🛑 Received signal {signum}. Restoring Hyprland keybindings...", flush=True)

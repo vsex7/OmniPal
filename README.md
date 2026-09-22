@@ -1,9 +1,9 @@
 # OmniPal
 
-> **肌肉记忆无缝漫游，零配置污染的跨系统快捷键适配框架**  
-> 专为 **Omarchy / Hyprland** 深度定制 · 正式版本 **v1.5.0**
+> **肌肉记忆无缝漫游，零 Hyprland 配置污染的跨系统快捷键适配框架**
+> 专为 **Omarchy / Hyprland** 深度定制 · 正式版本 **v1.8.0**
 
-OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯的用户，在 Omarchy (Arch Linux + Hyprland + Quickshell) 上提供瞬时、无感、零污染的肌肉记忆还原方案。
+OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯的用户，在 Omarchy (Arch Linux + Hyprland + Quickshell) 上提供瞬时、无感、零 Hyprland 配置污染的肌肉记忆还原方案。
 
 ---
 
@@ -11,7 +11,7 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
 
 - **纯内存热加载（Zero Config Pollution）**：
   - 基于 Omarchy Hyprland Lua 引擎（`hyprctl eval`）进行底层按键绑定与解绑。
-  - 极速切换延迟 **< 5ms**，无屏幕闪烁，无需 reload 配置。
+  - 热态切换典型延迟 **< 5ms**，发布门禁允许含首次冷启动的单次路径最高 10ms，无屏幕闪烁。
   - **绝不写入任何文件** 至 `~/.config/hypr/`，退出或还原时 100% 恢复基线状态（Hard Stop H-1/H-8 保证）。
 - **三大内置习惯模式 + 自定义配置支持**：
   - **Windows 11 习惯模式 (`windows`)**：Alt+F4 关闭窗口、Win+方向键智能吸附、Win+E 文件管理器、Win+Tab 任务视图、Win+V 剪贴板、Win+I 设置中心等。
@@ -23,7 +23,7 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
   - 基于 Compositor 级 Lua 几何运算，自动扣除 Omarchy 顶栏 `reserved` 区域，执行延迟低于 1ms。
 - **可视化吸附布局选择器（Snap Layouts Picker）**：
   - **Windows 11 Snap Layouts 风格两级交互**：`Win+Z`（Windows 模式）/ `Super+Alt+Z`（macOS 模式）呼出布局菜单，数字键 `1-6` 选模板、方向键聚焦分区、回车吸附、`Esc` 取消。
-  - 单一事实源 `schema/snap_layouts.json`：30 个规范分区 + 6 套布局模板，经 tmpfs 缓存由插件响应式渲染，QML 零硬编码。
+  - 单一事实源 `schema/snap_layouts.json`：37 个规范分区 + 6 套布局模板，经 tmpfs 缓存由插件响应式渲染，QML 零硬编码。
 - **内存级状态广播（tmpfs）**：
   - 运行时状态存储于 `/run/user/$UID/omnipal/state.json`。
   - Quickshell 插件通过 `Quickshell.Io.FileView` 响应更新，无需后台密集轮询。
@@ -39,6 +39,7 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
   3. `omni.settings`：图形化控制中心，可视化切换模式，预览按键覆盖并提供快捷动作。
   4. `omni.snap-feedback`：分屏动效反馈 HUD，触发窗口吸附时在屏幕边缘渲染平滑高亮过渡动画。
   5. `omni.mac-dock`：macOS 风格底部浮动 Dock 栏，实时展示运行中应用图标、运行指示圆点与平滑悬停动效。
+  6. `omni.overview`：零截图的多工作区空间概览，仅使用 Hyprland 窗口元数据。
 
 ---
 
@@ -55,7 +56,7 @@ bash scripts/install.sh
 安装程序会自动执行：
 - 校验 JSON Schema、按键定义与所有 Quickshell 插件完整性
 - 创建 CLI 软链接至 `~/.local/bin/omni-profile`
-- 挂载全套 5 个 Quickshell 插件至 `~/.config/omarchy/plugins/`
+- 挂载全套 6 个 Quickshell 插件至 `~/.config/omarchy/plugins/`
 - 配置可选的 systemd 用户常驻单元 `omnipal.service`
 
 ### 2. 命令行使用
@@ -108,6 +109,13 @@ omni-profile stats --reset
 
 # 瞬间还原至 Omarchy 原生快捷键
 omni-profile restore
+
+# 手机同屏协同（需安装 scrcpy 与 adb，并在 devices.json 中配置设备）
+omni-profile phone doctor
+omni-profile phone list
+omni-profile phone start [device-id]
+omni-profile phone stop [device-id]
+omni-profile phone toggle [device-id]
 ```
 
 ### 3. Quickshell 交互呼出
@@ -143,7 +151,8 @@ OmniPal/
 │   ├── windows.json          # Windows 11 习惯模式（14 覆盖）
 │   └── mac.json              # macOS 习惯模式（19 覆盖）
 ├── engine/
-│   └── engine.py             # 核心运行时引擎（Lua 批量求值、信号捕获与 tmpfs 广播）
+│   ├── engine.py             # 核心运行时引擎（Lua 批量求值、信号捕获与 tmpfs 广播）
+│   └── phone_runner.py       # 可选 scrcpy 多设备会话管理
 ├── bin/
 │   └── omni-profile          # 用户主 CLI 工具
 ├── plugins/
@@ -189,6 +198,6 @@ bash scripts/uninstall.sh
 3. 移除 `~/.local/bin/omni-profile`
 4. 移除 `~/.config/omarchy/plugins/` 下的所有软链接
 5. 清理 `/run/user/$UID/omnipal` 运行时临时目录
-6. 清理可选持久化与本地使用统计配置 `~/.config/omnipal/persistence.json` / `stats.json`（配置目录为空时一并移除）
+6. 停止受管 `scrcpy` 进程，并清理 `persistence.json` / `stats.json` / `devices.json`（配置目录为空时一并移除）
 
 保证系统零文件残留，还原至完全初始状态。

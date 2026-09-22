@@ -6,6 +6,7 @@ Tests schema consistency, state management, profile parsing, and plugin complian
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,7 @@ _GLOBAL_TEST_CONFIG_DIR = tempfile.TemporaryDirectory()
 os.environ["OMNIPAL_CONFIG_DIR"] = _GLOBAL_TEST_CONFIG_DIR.name
 _GLOBAL_TEST_RUN_DIR = tempfile.TemporaryDirectory()
 os.environ["OMNIPAL_RUN_DIR"] = _GLOBAL_TEST_RUN_DIR.name
+os.environ["OMNIPAL_DRY_RUN"] = "1"
 
 import engine.engine as engine_module
 from engine.engine import OmniPalEngine, format_combo
@@ -39,6 +41,7 @@ def tearDownModule():
     global _GLOBAL_TEST_CONFIG_DIR, _GLOBAL_TEST_RUN_DIR
     os.environ.pop("OMNIPAL_CONFIG_DIR", None)
     os.environ.pop("OMNIPAL_RUN_DIR", None)
+    os.environ.pop("OMNIPAL_DRY_RUN", None)
     if _GLOBAL_TEST_CONFIG_DIR:
         _GLOBAL_TEST_CONFIG_DIR.cleanup()
         _GLOBAL_TEST_CONFIG_DIR = None
@@ -336,6 +339,32 @@ class TestOmniPal(unittest.TestCase):
             self.assertEqual(state["active_bindings_count"], 0)
         finally:
             self.engine._eval_lua = original_eval
+
+    def test_restore_failure_retains_overlay_and_state(self):
+        """A failed compositor restore must remain retryable without losing tracking."""
+        from engine.engine import OVERLAY_FILE
+        overlay = [{"action": "window_close", "combo": "ALT + F4", "name": "Close Window"}]
+        self.engine._write_active_overlay(overlay)
+        self.engine._write_state("windows", len(overlay))
+        original_eval = self.engine._eval_lua
+        try:
+            self.engine._eval_lua = lambda code: False
+            self.assertFalse(self.engine.restore())
+            self.assertTrue(OVERLAY_FILE.exists())
+            self.assertEqual(self.engine.get_state().get("mode"), "windows")
+
+            self.engine._eval_lua = lambda code: True
+            self.assertTrue(self.engine.restore())
+            self.assertFalse(OVERLAY_FILE.exists())
+            self.assertEqual(self.engine.get_state().get("mode"), "omarchy")
+        finally:
+            self.engine._eval_lua = original_eval
+
+    def test_compositor_mutation_dry_run(self):
+        """Tests can execute Engine code without sending Lua to the live compositor."""
+        from unittest.mock import patch
+        with patch("engine.engine.subprocess.run", side_effect=AssertionError("live eval attempted")):
+            self.assertTrue(self.engine._eval_lua("hl.unbind('SUPER + X')"))
 
     def test_snap_model_and_dimensions(self):
         """Validates that SnapFeedback Model and QML define two-stage navigation and dimension calculations."""
@@ -755,6 +784,22 @@ class TestWindowPolicyAndModeIndicator(unittest.TestCase):
         # Rejection of empty / null
         self.assertFalse(self.engine.set_window_policy(""))
 
+    def test_window_policy_reload_failure_rolls_back(self):
+        """A requested policy must not be reported successful when reload fails."""
+        from engine.engine import APPLIED_WINDOW_MODE_FILE
+        self.engine._write_state("windows", 1, policy="floating")
+        APPLIED_WINDOW_MODE_FILE.write_text("floating", encoding="utf-8")
+        original_reload = self.engine._reload_config_only
+        try:
+            self.engine._reload_config_only = lambda timeout=3.0: False
+            self.assertFalse(self.engine.set_window_policy("tiled"))
+            self.assertEqual(self.engine.get_window_policy(), "floating")
+            self.assertEqual(APPLIED_WINDOW_MODE_FILE.read_text(encoding="utf-8"), "floating")
+        finally:
+            self.engine._reload_config_only = original_reload
+            self.engine._write_state("omarchy", 0, policy="tiled")
+            APPLIED_WINDOW_MODE_FILE.write_text("tiled", encoding="utf-8")
+
     def test_window_policy_alias_normalization(self):
         """Verifies that common aliases (tile, float, follow) normalize to standard policy IDs."""
         self.assertTrue(self.engine.set_window_policy("tile"))
@@ -1143,19 +1188,25 @@ class TestWindowPolicyAndModeIndicator(unittest.TestCase):
         self.assertNotIn("0xfff", code)
 
     def test_qml_syntax_via_qmllint(self):
-        """Verifies that BarWidget.qml passes Qt6 qmllint syntax checking."""
+        """Verifies all locally modified QML entry points with Qt6 qmllint."""
         qmllint_bin = "/usr/lib/qt6/bin/qmllint"
         if not os.path.exists(qmllint_bin):
             self.skipTest("qmllint not installed on system")
 
-        qml_path = str(PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "BarWidget.qml")
-        p = subprocess.run([
-            qmllint_bin,
-            "-I", "/usr/share/omarchy/shell",
-            "-I", str(PROJECT_ROOT / "plugins" / "omni.mode-indicator"),
-            qml_path
-        ], capture_output=True, text=True)
-        self.assertEqual(p.returncode, 0, f"qmllint failed: {p.stderr}")
+        targets = [
+            ("omni.mode-indicator", "BarWidget.qml"),
+            ("omni.settings", "SettingsPanel.qml"),
+        ]
+        for plugin, filename in targets:
+            with self.subTest(plugin=plugin):
+                plugin_dir = PROJECT_ROOT / "plugins" / plugin
+                p = subprocess.run([
+                    qmllint_bin,
+                    "-I", "/usr/share/omarchy/shell",
+                    "-I", str(plugin_dir),
+                    str(plugin_dir / filename)
+                ], capture_output=True, text=True)
+                self.assertEqual(p.returncode, 0, f"qmllint failed: {p.stderr}")
 
     def test_normalize_policy_safeguards_in_node(self):
         """Verifies that Model.js normalizePolicy safely defaults to tiled for corrupted/unknown inputs."""
@@ -1474,8 +1525,189 @@ class TestWindowPolicyAndModeIndicator(unittest.TestCase):
             self.assertTrue(any("fn_7777" in lua for lua in eval_history))
 
 
+class TestPhoneMirrorIntegration(unittest.TestCase):
+    """Tests for scrcpy-both phone mirror integration, protection, and CLI."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.config_dir = Path(self.temp_dir) / "config"
+        self.run_dir = Path(self.temp_dir) / "run"
+        os.environ["OMNIPAL_CONFIG_DIR"] = str(self.config_dir)
+        os.environ["OMNIPAL_RUN_DIR"] = str(self.run_dir)
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+
+    def tearDown(self):
+        os.environ.pop("OMNIPAL_CONFIG_DIR", None)
+        os.environ.pop("OMNIPAL_RUN_DIR", None)
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_phone_runner_config_and_status(self):
+        """Tests read-only device defaults and status reporting."""
+        from engine.phone_runner import load_devices_config, get_phone_status, get_devices_config_path
+        cfg = load_devices_config()
+        self.assertFalse(get_devices_config_path().exists(), "status/config reads must not create files")
+        self.assertTrue(cfg.get("auto_wifi"))
+        self.assertEqual(cfg.get("default_bitrate"), "4M")
+        devs = cfg.get("devices", [])
+        self.assertEqual(devs, [])
+
+        status = get_phone_status()
+        self.assertFalse(status["running"])
+        self.assertEqual(status["pids"], [])
+        self.assertEqual(status["devices"], [])
+
+    def test_scrcpy_special_window_protection(self):
+        """Tests that scrcpy windows are recognized as special floating windows."""
+        from engine.engine import is_special_window
+        skip, is_dlg = is_special_window(cls_name="scrcpy")
+        self.assertTrue(skip)
+        self.assertFalse(is_dlg)
+
+        skip2, is_dlg2 = is_special_window(cls_name="scrcpy-mobile-mirror")
+        self.assertTrue(skip2)
+        self.assertFalse(is_dlg2)
+
+    def test_unfloat_skips_scrcpy(self):
+        """Tests that _unfloat_existing_windows never unfloats scrcpy windows."""
+        from unittest.mock import patch
+        mock_windows = [
+            {
+                "address": "0x1111",
+                "class": "scrcpy",
+                "title": "OmniPal Phone - Redmi Note 12T Pro",
+                "floating": True,
+                "mapped": True,
+                "hidden": False,
+                "workspace": {"id": 1, "name": "1"},
+            },
+            {
+                "address": "0x2222",
+                "class": "kitty",
+                "title": "Terminal",
+                "floating": True,
+                "mapped": True,
+                "hidden": False,
+                "workspace": {"id": 1, "name": "1"},
+            },
+        ]
+        dispatched_lua = []
+        with patch.object(self.engine, "get_windows", return_value=mock_windows), \
+             patch("subprocess.check_output", return_value=json.dumps([{"activeWorkspace": {"id": 1}}])), \
+             patch.object(self.engine, "_eval_lua", side_effect=lambda lua: dispatched_lua.append(lua) or True):
+            self.engine._unfloat_existing_windows()
+            self.assertTrue(len(dispatched_lua) > 0)
+            combined_lua = " ".join(dispatched_lua)
+            # kitty window should be unfloated
+            self.assertIn("0x2222", combined_lua)
+            # scrcpy window must NEVER be unfloated
+            self.assertNotIn("0x1111", combined_lua)
+
+    def test_schema_and_profiles_registration(self):
+        """Tests that phone_mirror is registered in actions and mapped in profiles."""
+        with open(PROJECT_ROOT / "schema" / "actions.json") as f:
+            actions = json.load(f)["actions"]
+        phone_action = next((a for a in actions if a["id"] == "phone_mirror"), None)
+        self.assertIsNotNone(phone_action)
+        self.assertEqual(phone_action["category"], "tools")
+
+        with open(PROJECT_ROOT / "profiles" / "windows.json") as f:
+            win_prof = json.load(f)
+        win_binding = next((b for b in win_prof["bindings"] if b.get("action") == "phone_mirror"), None)
+        self.assertIsNotNone(win_binding)
+        self.assertEqual(win_binding["mod"], "SUPER")
+        self.assertEqual(win_binding["key"], "P")
+
+        with open(PROJECT_ROOT / "profiles" / "mac.json") as f:
+            mac_prof = json.load(f)
+        mac_binding = next((b for b in mac_prof["bindings"] if b.get("action") == "phone_mirror"), None)
+        self.assertIsNotNone(mac_binding)
+        self.assertEqual(mac_binding["mod"], "SUPER")
+        self.assertEqual(mac_binding["key"], "P")
+
+    def test_cli_phone_subcommand(self):
+        """Tests that bin/omni-profile phone commands execute cleanly with JSON output."""
+        res_status = subprocess.run(
+            [str(PROJECT_ROOT / "bin" / "omni-profile"), "phone", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            env={**os.environ, "OMNIPAL_CONFIG_DIR": str(self.config_dir), "OMNIPAL_RUN_DIR": str(self.run_dir)},
+        )
+        self.assertEqual(res_status.returncode, 0)
+        data_status = json.loads(res_status.stdout)
+        self.assertFalse(data_status["running"])
+        self.assertEqual(data_status["devices"], [])
+
+        res_list = subprocess.run(
+            [str(PROJECT_ROOT / "bin" / "omni-profile"), "phone", "list", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            env={**os.environ, "OMNIPAL_CONFIG_DIR": str(self.config_dir), "OMNIPAL_RUN_DIR": str(self.run_dir)},
+        )
+        self.assertEqual(res_list.returncode, 0)
+        data_list = json.loads(res_list.stdout)
+        self.assertEqual(data_list, [])
+
+        res_doctor = subprocess.run(
+            [str(PROJECT_ROOT / "bin" / "omni-profile"), "phone", "doctor", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            env={**os.environ, "OMNIPAL_CONFIG_DIR": str(self.config_dir), "OMNIPAL_RUN_DIR": str(self.run_dir)},
+        )
+        self.assertEqual(res_doctor.returncode, 0)
+        data_doc = json.loads(res_doctor.stdout)
+        self.assertIn("scrcpy", data_doc)
+        self.assertIn("adb", data_doc)
+        self.assertIn("devices", data_doc)
+        self.assertIn(data_doc["verdict"], ["ready", "degraded", "error"])
+
+        res_config = subprocess.run(
+            [str(PROJECT_ROOT / "bin" / "omni-profile"), "phone", "config", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            env={**os.environ, "OMNIPAL_CONFIG_DIR": str(self.config_dir), "OMNIPAL_RUN_DIR": str(self.run_dir)},
+        )
+        self.assertEqual(res_config.returncode, 0)
+        data_cfg = json.loads(res_config.stdout)
+        self.assertEqual(data_cfg["devices"], [])
+
+        res_toggle = subprocess.run(
+            [str(PROJECT_ROOT / "bin" / "omni-profile"), "phone", "toggle"],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            env={**os.environ, "OMNIPAL_CONFIG_DIR": str(self.config_dir), "OMNIPAL_RUN_DIR": str(self.run_dir)},
+        )
+        self.assertNotEqual(res_toggle.returncode, 0)
+        self.assertIn("失败", res_toggle.stderr)
+
+    def test_phone_per_device_control(self):
+        """Tests per-device targeting in phone_runner functions."""
+        from engine.phone_runner import (
+            load_devices_config,
+            start_phone_mirror,
+            stop_phone_mirror,
+            toggle_phone_mirror,
+            diagnose_phone_environment,
+        )
+        # Verify doctor returns structure
+        diag = diagnose_phone_environment()
+        self.assertIsInstance(diag, dict)
+        self.assertIn("verdict", diag)
+        self.assertIn("devices", diag)
+
+        # Non-existent device targeting fails cleanly
+        self.assertFalse(start_phone_mirror(device_id="non_existent_phone_123"))
+        self.assertFalse(stop_phone_mirror(device_id="non_existent_phone_123"))
+
+    def test_pid_reuse_is_not_treated_as_scrcpy(self):
+        """An unrelated process must never satisfy the managed scrcpy identity check."""
+        from engine.phone_runner import _is_pid_alive
+        self.assertFalse(_is_pid_alive(os.getpid(), "OmniPal Phone - unrelated"))
+
+
 if __name__ == "__main__":
     unittest.main()
-
-
-

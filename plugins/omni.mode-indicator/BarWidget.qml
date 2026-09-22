@@ -34,9 +34,25 @@ BarWidget {
   property string windowPolicy: "tiled"
   property string effectiveWindowMode: "tiled"
   property bool compositorConnected: false
+  property var actionHints: ({})
 
   property var profiles: Model.fallbackProfiles()
   property var policyOptions: Model.windowPolicies()
+
+  function loadActionHints(rawText) {
+    try {
+      var rows = JSON.parse(rawText)
+      var hints = {}
+      if (Array.isArray(rows)) {
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i] && rows[i].action) hints[rows[i].action] = rows[i].key || ""
+        }
+      }
+      root.actionHints = hints
+    } catch (e) {
+      root.actionHints = ({})
+    }
+  }
 
   function loadState(rawText) {
     if (!rawText || rawText.trim() === "") {
@@ -58,6 +74,7 @@ BarWidget {
         ? Boolean(data.compositor_connected)
         : (Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") !== "" && Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") !== undefined)
       root.engineRunning = true
+      if (!hintsProcess.running) hintsProcess.running = true
     } catch (e) {
       root.engineRunning = false
     }
@@ -110,8 +127,20 @@ BarWidget {
     }
   }
 
+  Process {
+    id: hintsProcess
+    command: ["omni-profile", "cheatsheet", "--json"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: function(raw) {
+        if (raw && raw.trim() !== "") root.loadActionHints(raw)
+      }
+    }
+  }
+
   Component.onCompleted: {
     listProcess.running = true
+    hintsProcess.running = true
   }
 
   function runCmd(cmd) {
@@ -125,6 +154,7 @@ BarWidget {
   function openPanel() {
     root.panelOpen = true
     if (!listProcess.running) listProcess.running = true
+    if (!hintsProcess.running) hintsProcess.running = true
     if (root.bar && typeof root.bar.requestPopout === "function") {
       root.bar.requestPopout(root)
     }
@@ -218,6 +248,7 @@ BarWidget {
     function refresh(): void {
       stateFile.reload()
       listProcess.running = true
+      hintsProcess.running = true
     }
     function openPanel(): void { root.openPanel() }
     function closePanel(): void { root.closePanel() }
@@ -709,7 +740,7 @@ BarWidget {
       ActionRow {
         iconText: "📖"
         label: "快捷键速查表 (Cheat Sheet)"
-        hint: "Super + /"
+        hint: root.actionHints["cheat_sheet"] || ""
         onTriggered: {
           root.openCheatSheet()
           root.closePanel()
@@ -719,7 +750,7 @@ BarWidget {
       ActionRow {
         iconText: "⚙️"
         label: "OmniPal 控制中心 (Settings)"
-        hint: "Super + ,"
+        hint: root.actionHints["omni_settings"] || ""
         onTriggered: {
           root.openSettings()
           root.closePanel()
@@ -729,7 +760,7 @@ BarWidget {
       ActionRow {
         iconText: "🪟"
         label: "触发布局吸附 (Snap Layout)"
-        hint: "Super + Z"
+        hint: root.actionHints["snap_layouts"] || ""
         onTriggered: {
           root.triggerSnap()
           root.closePanel()
@@ -739,9 +770,19 @@ BarWidget {
       ActionRow {
         iconText: "🗂️"
         label: "多任务空间概览 (Overview)"
-        hint: "Super + Tab"
+        hint: root.actionHints["task_view"] || ""
         onTriggered: {
           root.openOverview()
+          root.closePanel()
+        }
+      }
+
+      ActionRow {
+        iconText: "📱"
+        label: "手机同屏协同 (Phone Mirror)"
+        hint: root.actionHints["phone_mirror"] || ""
+        onTriggered: {
+          Quickshell.execDetached(["omni-profile", "phone", "toggle"])
           root.closePanel()
         }
       }

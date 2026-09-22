@@ -15,6 +15,35 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from engine.engine import OmniPalEngine, run_daemon, stats_file_path
 
+try:
+    from engine.phone_runner import (
+        load_devices_config,
+        save_devices_config,
+        get_phone_status,
+        start_phone_mirror,
+        stop_phone_mirror,
+        toggle_phone_mirror,
+        diagnose_phone_environment,
+        get_devices_config_path,
+    )
+except ImportError:
+    def load_devices_config():
+        return {"auto_wifi": True, "default_bitrate": "4M", "devices": []}
+    def save_devices_config(cfg):
+        return False
+    def get_phone_status():
+        return {"running": False, "devices": [], "pids": []}
+    def start_phone_mirror(device_id=None):
+        return False
+    def stop_phone_mirror(device_id=None):
+        return False
+    def toggle_phone_mirror(device_id=None):
+        return False
+    def diagnose_phone_environment():
+        return {"verdict": "error", "suggestions": ["phone_runner 模块未就绪"]}
+    def get_devices_config_path():
+        return Path.home() / ".config" / "omnipal" / "devices.json"
+
 def cmd_status(engine: OmniPalEngine, args):
     state = engine.get_state()
     if args.json:
@@ -282,6 +311,126 @@ def cmd_stats(engine: OmniPalEngine, args):
     _print_stat_rank("🧲 吸附区域使用 Top 榜:", stats["snaps"])
     _print_stat_rank("⚡ 动作触发统计排行:", stats["actions"])
 
+def cmd_phone(engine: OmniPalEngine, args):
+    action = getattr(args, "phone_action", None) or "status"
+    target = getattr(args, "device", None)
+
+    if action == "status":
+        st = get_phone_status()
+        if getattr(args, "json", False):
+            print(json.dumps(st, indent=2, ensure_ascii=False))
+            return
+        running = st.get("running", False)
+        print(f"📱 手机同屏协同 (scrcpy) 状态: {'投屏中 (运行)' if running else '未运行'}")
+        pids = st.get("pids", [])
+        if pids:
+            print(f"  • 活动进程 PID: {', '.join(map(str, pids))}")
+        devs = st.get("devices", [])
+        if devs:
+            print(f"  • 协同设备 ({len(devs)} 台):")
+            for d in devs:
+                dev_run = " [● 投屏中]" if d.get("running") else ""
+                geom = d.get("geometry", {})
+                geom_str = f"{geom.get('width', 0)}x{geom.get('height', 0)}+{geom.get('x', 0)}+{geom.get('y', 0)}" if geom else "自动"
+                print(f"    - [{d.get('id', 'device')}] {d.get('name', 'Device')}{dev_run} (Serial: {d.get('serial', 'N/A')}, IP: {d.get('ip', 'N/A')}, 窗口: {geom_str})")
+        else:
+            print("  • 协同设备: （暂无配置设备）")
+    elif action == "list":
+        cfg = load_devices_config()
+        devs = cfg.get("devices", []) if isinstance(cfg, dict) else []
+        if getattr(args, "json", False):
+            print(json.dumps(devs, indent=2, ensure_ascii=False))
+            return
+        print(f"📱 已配置协同设备列表 ({len(devs)} 台):")
+        if not devs:
+            print("  （暂无配置设备）")
+        for d in devs:
+            geom = d.get("geometry", {})
+            geom_str = f"{geom.get('width', 0)}x{geom.get('height', 0)}+{geom.get('x', 0)}+{geom.get('y', 0)}" if geom else "自动"
+            print(f"  • [{d.get('id', 'device')}] {d.get('name', 'Device')}")
+            print(f"      Serial: {d.get('serial', 'N/A')} | IP: {d.get('ip', 'N/A')} | 窗口几何: {geom_str}")
+    elif action == "doctor":
+        diag = diagnose_phone_environment()
+        if getattr(args, "json", False):
+            print(json.dumps(diag, indent=2, ensure_ascii=False))
+            return
+        verdict_icons = {"ready": "✅ 良好", "degraded": "⚠️ 注意", "error": "❌ 异常"}
+        v_icon = verdict_icons.get(diag.get("verdict", "error"), "❓ 未知")
+        print(f"🩺 手机协同环境与连通性诊断: {v_icon}")
+        scrcpy_info = diag.get("scrcpy", {})
+        print(f"  • scrcpy: {'✅ 已安装' if scrcpy_info.get('installed') else '❌ 未安装'} ({scrcpy_info.get('version') or 'N/A'})")
+        adb_info = diag.get("adb", {})
+        print(f"  • adb 服务: {'✅ 正常运行' if adb_info.get('server_ok') else '❌ 服务异常'}")
+        devs = diag.get("devices", [])
+        if devs:
+            print(f"  • 设备连接状态检测 ({len(devs)} 台):")
+            for d in devs:
+                usb_str = f"USB: {d.get('usb_state')}"
+                wifi_str = f"Wi-Fi(5555): {'连通' if d.get('wifi_port_5555') else '不可达'}"
+                st_icon = "✅ 在线" if d.get("status") == "ready" else "○ 离线"
+                print(f"    - [{d.get('id')}] {d.get('name')}: {st_icon} ({usb_str}, {wifi_str})")
+        if diag.get("suggestions"):
+            print("  • 修复建议:")
+            for s in diag["suggestions"]:
+                print(f"    💡 {s}")
+    elif action == "config":
+        p = get_devices_config_path()
+        if getattr(args, "json", False):
+            print(json.dumps(load_devices_config(), indent=2, ensure_ascii=False))
+        else:
+            print(f"⚙️ 手机协同设备配置文件路径: {p}")
+            if p.exists():
+                print(p.read_text(encoding="utf-8"))
+    elif action == "start":
+        res = start_phone_mirror(target)
+        tgt_label = f"[{target}] " if target else ""
+        if res:
+            print(f"✅ {tgt_label}手机同屏协同已启动")
+        else:
+            print(f"❌ {tgt_label}启动手机同屏协同失败 (请运行 omni-profile phone doctor 排查)", file=sys.stderr)
+            sys.exit(1)
+    elif action == "stop":
+        res = stop_phone_mirror(target)
+        tgt_label = f"[{target}] " if target else ""
+        if res:
+            print(f"✅ {tgt_label}手机同屏协同已停止")
+        else:
+            print(f"❌ {tgt_label}停止手机同屏协同失败", file=sys.stderr)
+            sys.exit(1)
+    elif action == "toggle":
+        st_before = get_phone_status()
+        was_running = st_before.get("running") if not target else any(
+            d.get("running") for d in st_before.get("devices", [])
+            if d.get("id") == target or d.get("serial") == target
+        )
+        res = toggle_phone_mirror(target)
+        st = get_phone_status()
+        tgt_label = f"[{target}] " if target else ""
+        if target:
+            d = next(
+                (x for x in st.get("devices", []) if x.get("id") == target or x.get("serial") == target),
+                None,
+            )
+            is_run = d.get("running") if d else st.get("running")
+        else:
+            is_run = st.get("running")
+
+        if was_running:
+            if res and not is_run:
+                print(f"✅ {tgt_label}手机同屏协同已停止")
+            else:
+                print(f"❌ {tgt_label}停止手机同屏协同失败", file=sys.stderr)
+                sys.exit(1)
+        else:
+            if res and is_run:
+                print(f"✅ {tgt_label}手机同屏协同已启动")
+            else:
+                print(f"❌ {tgt_label}启动手机同屏协同失败 (请运行 omni-profile phone doctor 排查)", file=sys.stderr)
+                sys.exit(1)
+    else:
+        print(f"❌ 未知的手机协同子命令: {action}。可用: status, start, stop, toggle, list, doctor, config", file=sys.stderr)
+        sys.exit(1)
+
 def main():
     engine = OmniPalEngine(PROJECT_ROOT)
 
@@ -386,6 +535,40 @@ def main():
             wp_direct = wp_sub.add_parser(direct_p, help=f"快速切换至策略: {direct_p}")
             wp_direct.add_argument("--json", action="store_true", help="以 JSON 格式输出结果")
             wp_direct.set_defaults(func=cmd_window_policy, policy_action="set", target_policy=direct_p)
+
+    # phone
+    p_phone = subparsers.add_parser("phone", help="管理手机同屏协同 (scrcpy 多设备投屏)")
+    p_phone.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_phone.set_defaults(func=cmd_phone, phone_action="status")
+    phone_sub = p_phone.add_subparsers(dest="phone_action", help="手机协同操作")
+
+    ph_status = phone_sub.add_parser("status", help="查看手机同屏运行状态与设备")
+    ph_status.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    ph_status.set_defaults(func=cmd_phone)
+
+    ph_start = phone_sub.add_parser("start", help="启动手机同屏投屏")
+    ph_start.add_argument("device", nargs="?", default=None, help="目标设备 ID（如 redmi-12t），留空则启动全部")
+    ph_start.set_defaults(func=cmd_phone)
+
+    ph_stop = phone_sub.add_parser("stop", help="停止手机同屏投屏")
+    ph_stop.add_argument("device", nargs="?", default=None, help="目标设备 ID（如 redmi-12t），留空则停止全部")
+    ph_stop.set_defaults(func=cmd_phone)
+
+    ph_toggle = phone_sub.add_parser("toggle", help="切换启动/停止手机同屏投屏")
+    ph_toggle.add_argument("device", nargs="?", default=None, help="目标设备 ID（如 redmi-12t），留空则切换全部")
+    ph_toggle.set_defaults(func=cmd_phone)
+
+    ph_list = phone_sub.add_parser("list", help="列出已配置的协同设备")
+    ph_list.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    ph_list.set_defaults(func=cmd_phone)
+
+    ph_doctor = phone_sub.add_parser("doctor", help="诊断 scrcpy、adb 与手机网络/USB 连通性")
+    ph_doctor.add_argument("--json", action="store_true", help="以 JSON 格式输出诊断报告")
+    ph_doctor.set_defaults(func=cmd_phone)
+
+    ph_config = phone_sub.add_parser("config", help="查看或输出设备配置文件路径")
+    ph_config.add_argument("--json", action="store_true", help="以 JSON 格式输出配置内容")
+    ph_config.set_defaults(func=cmd_phone)
 
     args = parser.parse_args()
     if not args.command:

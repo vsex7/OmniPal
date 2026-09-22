@@ -7,7 +7,7 @@ set -euo pipefail
 BIN_TARGET="${HOME}/.local/bin/omni-profile"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 SERVICE_FILE="${SYSTEMD_USER_DIR}/omnipal.service"
-RUN_DIR="/run/user/$(id -u)/omnipal"
+RUN_DIR="${OMNIPAL_RUN_DIR:-/run/user/$(id -u)/omnipal}"
 
 echo "=== OmniPal 卸载程序 ==="
 
@@ -15,6 +15,8 @@ echo "=== OmniPal 卸载程序 ==="
 if [ -x "${BIN_TARGET}" ]; then
     echo "🔄 恢复系统原始快捷键绑定..."
     "${BIN_TARGET}" restore || true
+    echo "⏹ 停止手机同屏投屏进程..."
+    "${BIN_TARGET}" phone stop || true
 fi
 
 # 2. 停用并移除 systemd 服务及残留孤儿进程
@@ -63,7 +65,7 @@ fi
 
 # 6. 清理可选持久化与本地使用统计（仅存在于用户配置目录，绝不涉及 ~/.config/hypr）
 OMNIPAL_CONFIG_DIR_PATH="${OMNIPAL_CONFIG_DIR:-${HOME}/.config/omnipal}"
-for user_file in persistence.json stats.json; do
+for user_file in persistence.json stats.json devices.json; do
     if [ -f "${OMNIPAL_CONFIG_DIR_PATH}/${user_file}" ]; then
         rm -f "${OMNIPAL_CONFIG_DIR_PATH}/${user_file}"
         echo "🗑️ 已移除: ${OMNIPAL_CONFIG_DIR_PATH}/${user_file}"
@@ -74,4 +76,4 @@ if [ -d "${OMNIPAL_CONFIG_DIR_PATH}" ] && [ -z "$(ls -A "${OMNIPAL_CONFIG_DIR_PA
     rmdir "${OMNIPAL_CONFIG_DIR_PATH}" && echo "🧹 已移除空配置目录: ${OMNIPAL_CONFIG_DIR_PATH}"
 fi
 
-echo "✅ 卸载完毕！系统快捷键与配置已完整恢复至原始状态，零文件残留。"
+echo "✅ 卸载完毕！系统快捷键、投屏进程与 OmniPal 所有受管文件已清理；用户自定义 Profile 会按设计保留。"
