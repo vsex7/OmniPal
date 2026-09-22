@@ -396,9 +396,11 @@ class OmniPalEngine:
         self._load_baseline_cache()
         if not self.baseline_bindings and not self._get_active_overlay():
             self._snapshot_baseline_bindings()
+        # Ensure default signal handling for child processes so subprocesses (like scrcpy/adb)
+        # do not inherit SIG_IGN and fail on waitpid/start-server.
         if "unittest" not in sys.modules:
             try:
-                signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+                signal.signal(signal.SIGCHLD, signal.SIG_DFL)
             except (ValueError, AttributeError, OSError):
                 pass
 
@@ -2100,7 +2102,7 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
 def run_daemon():
     """Runs OmniPal Engine as a foreground daemon with socket2 listener and signal traps."""
     try:
-        signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+        signal.signal(signal.SIGCHLD, signal.SIG_DFL)
     except (ValueError, AttributeError, OSError):
         pass
 

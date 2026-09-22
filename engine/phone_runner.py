@@ -321,18 +321,11 @@ def _check_tcp_port(ip: str, port: int = 5555, timeout: float = 0.5) -> bool:
         return False
 
 
-def _apply_hyprland_window_geometries(devices: List[Dict[str, Any]]) -> None:
+def _apply_hyprland_window_geometries(devices: List[Dict[str, Any]], attempts: int = 4, delay: float = 0.3) -> None:
     """Under Hyprland/Wayland, client apps cannot position their own windows via --window-x/y.
     Query hyprctl clients and reposition scrcpy windows to their configured geometry.
     """
     if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
-        return
-    try:
-        res = subprocess.run(["hyprctl", "-j", "clients"], capture_output=True, text=True, timeout=2.0)
-        if res.returncode != 0 or not res.stdout.strip():
-            return
-        clients = json.loads(res.stdout)
-    except Exception:
         return
 
     def geometry_int(value: Any) -> Optional[int]:
@@ -356,32 +349,55 @@ def _apply_hyprland_window_geometries(devices: List[Dict[str, Any]]) -> None:
         except Exception:
             pass
 
-    for dev in devices:
-        geo = dev.get("geometry", {})
-        if not isinstance(geo, dict) or not geo:
-            continue
-        gx = geometry_int(geo.get("x"))
-        gy = geometry_int(geo.get("y"))
-        gw = geometry_int(geo.get("width"))
-        gh = geometry_int(geo.get("height"))
-        if gx is None and gy is None and gw is None and gh is None:
+    for attempt in range(attempts):
+        try:
+            res = subprocess.run(["hyprctl", "-j", "clients"], capture_output=True, text=True, timeout=2.0)
+            if res.returncode != 0 or not res.stdout.strip():
+                if attempt < attempts - 1:
+                    time.sleep(delay)
+                continue
+            clients = json.loads(res.stdout)
+        except Exception:
+            if attempt < attempts - 1:
+                time.sleep(delay)
             continue
 
-        d_id = str(dev.get("id") or dev.get("serial") or "")
-        name = str(dev.get("name", d_id))
-        target_title = f"OmniPal Phone - {name}"
+        all_positioned = True
+        for dev in devices:
+            geo = dev.get("geometry", {})
+            if not isinstance(geo, dict) or not geo:
+                continue
+            gx = geometry_int(geo.get("x"))
+            gy = geometry_int(geo.get("y"))
+            gw = geometry_int(geo.get("width"))
+            gh = geometry_int(geo.get("height"))
+            if gx is None and gy is None and gw is None and gh is None:
+                continue
 
-        for c in clients:
-            if c.get("class") == "scrcpy" and (c.get("title") == target_title or name in c.get("title", "")):
-                addr = c.get("address", "")
-                if not isinstance(addr, str) or not re.fullmatch(r"0x[0-9a-fA-F]+", addr):
-                    continue
-                if not c.get("floating", False):
-                    dispatch(f'hl.dsp.window.float({{ action = "enable", window = "address:{addr}" }})')
-                if gw is not None and gh is not None:
-                    dispatch(f'hl.dsp.window.resize({{ x = {gw}, y = {gh}, window = "address:{addr}" }})')
-                if gx is not None and gy is not None:
-                    dispatch(f'hl.dsp.window.move({{ x = {gx}, y = {gy}, window = "address:{addr}" }})')
+            d_id = str(dev.get("id") or dev.get("serial") or "")
+            name = str(dev.get("name", d_id))
+            target_title = f"OmniPal Phone - {name}"
+
+            found = False
+            for c in clients:
+                if c.get("class") == "scrcpy" and (c.get("title") == target_title or name in c.get("title", "")):
+                    found = True
+                    addr = c.get("address", "")
+                    if not isinstance(addr, str) or not re.fullmatch(r"0x[0-9a-fA-F]+", addr):
+                        continue
+                    if not c.get("floating", False):
+                        dispatch(f'hl.dsp.window.float({{ action = "enable", window = "address:{addr}" }})')
+                    if gw is not None and gh is not None:
+                        dispatch(f'hl.dsp.window.resize({{ x = {gw}, y = {gh}, window = "address:{addr}" }})')
+                    if gx is not None and gy is not None:
+                        dispatch(f'hl.dsp.window.move({{ x = {gx}, y = {gy}, window = "address:{addr}" }})')
+            if not found:
+                all_positioned = False
+
+        if all_positioned:
+            break
+        if attempt < attempts - 1:
+            time.sleep(delay)
 
 
 def start_phone_mirror(device_id: Optional[str] = None) -> bool:
@@ -520,6 +536,12 @@ def start_phone_mirror(device_id: Optional[str] = None) -> bool:
 
         stderr_buffer: List[str] = []
         try:
+            def _child_preexec():
+                try:
+                    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+                except Exception:
+                    pass
+
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
@@ -528,6 +550,7 @@ def start_phone_mirror(device_id: Optional[str] = None) -> bool:
                 encoding="utf-8",
                 errors="replace",
                 start_new_session=True,
+                preexec_fn=_child_preexec,
             )
 
             def drain_stderr() -> None:
