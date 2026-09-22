@@ -10,6 +10,11 @@
   },
   "bindings": [
     {
+      "action": "app_launcher",
+      "mod": "SUPER",
+      "key": "space"
+    },
+    {
       "action": "close_window",
       "mod": "ALT",
       "key": "F4"

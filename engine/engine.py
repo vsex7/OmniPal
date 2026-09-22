@@ -1380,8 +1380,9 @@ end
 
         return self.baseline_bindings
 
-    def _build_dynamic_restore_lua(self) -> Optional[str]:
-        """Builds Lua statements to restore the exact captured baseline bindings."""
+    def _build_dynamic_restore_lua(self, filter_combos: Optional[Set[str]] = None) -> Optional[str]:
+        """Builds Lua statements to restore the exact captured baseline bindings.
+        If filter_combos is specified, only restores bindings for those combos."""
         if not self.baseline_bindings:
             return None
 
@@ -1389,6 +1390,8 @@ end
         lua_ops.append('local reg = debug.getregistry()')
 
         for combo, b in self.baseline_bindings.items():
+            if filter_combos is not None and combo not in filter_combos:
+                continue
             disp = b.get("dispatcher", "")
             arg = str(b.get("arg", "")).strip()
             desc = _escape_lua_string(b.get("description", ""))
@@ -1432,16 +1435,15 @@ end
                 if combo:
                     lua_lines.append(f'hl.unbind("{combo}")')
 
-            # Stage 2: Always restore Omarchy baseline bindings so standard shortcuts like Super+Space are guaranteed
-            lua_lines.append(LUA_RESTORE_BASELINE)
-
-            # Dynamic restore if snapshot exists
+            # Dynamic restore if snapshot exists, fallback to LUA_RESTORE_BASELINE
             if not self.baseline_bindings:
                 self._load_baseline_cache()
 
             dynamic_lua = self._build_dynamic_restore_lua()
             if dynamic_lua:
                 lua_lines.append(dynamic_lua)
+            else:
+                lua_lines.append(LUA_RESTORE_BASELINE)
 
             success = self._eval_lua("; ".join(lua_lines))
 
@@ -1500,17 +1502,24 @@ end
             current_overlay = self._get_active_overlay()
             lua_ops = []
             if current_overlay:
+                current_combos = set()
                 for b in current_overlay:
                     combo = b.get("combo")
                     if combo:
+                        current_combos.add(combo)
                         lua_ops.append(f'hl.unbind("{combo}")')
 
-                # Stage 2: Restore baseline bindings so non-overlapping native bindings
-                # (e.g. Omarchy menu Super+Space or default binds unmapped by previous profile) are restored
-                lua_ops.append(LUA_RESTORE_BASELINE)
-                dynamic_lua = self._build_dynamic_restore_lua()
-                if dynamic_lua:
-                    lua_ops.append(dynamic_lua)
+                # Stage 2: Restore baseline bindings only for combos released by previous profile
+                target_combos = {
+                    format_combo(b.get("mod", "").strip(), b.get("key", "").strip())
+                    for b in target_bindings
+                    if b.get("key", "").strip()
+                }
+                released_combos = current_combos - target_combos
+                if released_combos:
+                    dynamic_lua = self._build_dynamic_restore_lua(filter_combos=released_combos)
+                    if dynamic_lua:
+                        lua_ops.append(dynamic_lua)
 
 
             # Stage 3: Add bind commands for new profile

@@ -1524,7 +1524,7 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
             self.assertIn("local reg = debug.getregistry()", executed_lua)
             self.assertIn('hl.bind("SUPER + SPACE", fn_9999', executed_lua)
             self.assertIn('o.bind("ALT + F4", "Custom Kill", "custom-kill")', executed_lua)
-            self.assertIn(LUA_RESTORE_BASELINE, executed_lua)
+            self.assertNotIn(LUA_RESTORE_BASELINE, executed_lua)
 
         # 2. Test fallback when baseline snapshot is absent
         eval_history.clear()
