@@ -464,10 +464,61 @@ def find_socket2_path() -> Optional[Path]:
             return res_sock
     return None
 
-def _ensure_hyprland_instance():
-    """Ensures HYPRLAND_INSTANCE_SIGNATURE is populated in os.environ for hyprctl."""
-    if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
-        find_socket2_path()
+def derive_hyprland_instance_signature() -> Optional[str]:
+    """Derives the Hyprland instance signature from $XDG_RUNTIME_DIR/hypr/<sig>/.
+
+    Picks the newest instance directory that holds a live control socket
+    (.socket.sock) or event socket (.socket2.sock)."""
+    xdg_runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    hypr_dir = xdg_runtime / "hypr"
+    if not hypr_dir.is_dir():
+        return None
+    candidates = []
+    try:
+        for d in hypr_dir.iterdir():
+            if not d.is_dir():
+                continue
+            socks = [d / ".socket.sock", d / ".socket2.sock"]
+            mtimes = []
+            for sk in socks:
+                try:
+                    if sk.exists():
+                        mtimes.append(sk.stat().st_mtime)
+                except OSError:
+                    pass
+            if mtimes:
+                candidates.append((max(mtimes), d.name))
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+def _ensure_hyprland_instance() -> Optional[str]:
+    """Central pre-hyprctl hook: makes sure HYPRLAND_INSTANCE_SIGNATURE is set in os.environ.
+
+    Under uwsm the systemd user service can start before uwsm exports the signature into the
+    user manager environment, so the daemon process never inherits it and every hyprctl call
+    fails with "HYPRLAND_INSTANCE_SIGNATURE not set". We derive it from the runtime socket dir
+    (also replacing a stale signature whose directory no longer exists) so subprocesses inherit it."""
+    cur = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")
+    if cur:
+        xdg_runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+        inst = xdg_runtime / "hypr" / cur
+        if not (xdg_runtime / "hypr").is_dir() or inst.is_dir():
+            return cur
+    sig = derive_hyprland_instance_signature()
+    if sig:
+        if sig != cur:
+            print(f"ℹ️ Derived HYPRLAND_INSTANCE_SIGNATURE={sig} from runtime dir", file=sys.stderr, flush=True)
+        os.environ["HYPRLAND_INSTANCE_SIGNATURE"] = sig
+        return sig
+    return cur or None
+
+def hyprland_socket_ready() -> bool:
+    """True when a Hyprland instance socket exists (signature env is populated as a side effect)."""
+    return bool(derive_hyprland_instance_signature()) and bool(_ensure_hyprland_instance())
 
 class OmniPalEngine:
     def __init__(self, root_dir: Optional[Path] = None, user_profiles_dir: Optional[Path] = None):
@@ -548,6 +599,7 @@ class OmniPalEngine:
 
     def _get_hypr_gap(self) -> int:
         try:
+            _ensure_hyprland_instance()
             res = subprocess.run(["hyprctl", "getoption", "general:gaps_out", "-j"], capture_output=True, text=True, timeout=0.3)
             data = json.loads(res.stdout)
             css = data.get("css", "10").split()
@@ -797,6 +849,7 @@ class OmniPalEngine:
             return True
         _ensure_hyprland_instance()
         try:
+            _ensure_hyprland_instance()
             res = subprocess.run(
                 ["hyprctl", "eval", lua_code],
                 capture_output=True,
@@ -822,6 +875,7 @@ class OmniPalEngine:
         if compositor_mutation_disabled():
             return True
         try:
+            _ensure_hyprland_instance()
             res = subprocess.run(
                 ["hyprctl", "reload", "config-only"],
                 capture_output=True,
@@ -1094,6 +1148,7 @@ end
 
             active_ws_ids = set()
             try:
+                _ensure_hyprland_instance()
                 mon_out = subprocess.check_output(["hyprctl", "monitors", "-j"], text=True, timeout=0.5)
                 monitors = json.loads(mon_out)
                 for m in monitors:
@@ -1105,6 +1160,7 @@ end
 
             if not active_ws_ids:
                 try:
+                    _ensure_hyprland_instance()
                     act_out = subprocess.check_output(["hyprctl", "activeworkspace", "-j"], text=True, timeout=0.5)
                     act = json.loads(act_out)
                     if "id" in act:
@@ -1161,6 +1217,7 @@ end
             if not ok:
                 for addr in to_unfloat:
                     try:
+                        _ensure_hyprland_instance()
                         subprocess.run(
                             ["hyprctl", "dispatch", "togglefloating", f"address:{addr}"],
                             capture_output=True,
@@ -1408,6 +1465,7 @@ end
 
         _ensure_hyprland_instance()
         try:
+            _ensure_hyprland_instance()
             res = subprocess.run(
                 ["hyprctl", "binds", "-j"],
                 capture_output=True,
@@ -1605,6 +1663,7 @@ end
         if compositor_mutation_disabled():
             return True
         try:
+            _ensure_hyprland_instance()
             res = subprocess.run(["hyprctl", "reload"], capture_output=True, text=True, check=False)
             return res.returncode == 0
         except Exception as e:
@@ -1616,6 +1675,7 @@ end
         if window_class is None:
             window_class = ""
             try:
+                _ensure_hyprland_instance()
                 res = subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, check=False)
                 window_class = (json.loads(res.stdout or "{}") or {}).get("class", "") or ""
             except Exception as e:
@@ -1626,6 +1686,7 @@ end
             print(f"Invalid shortcut: {e}", file=sys.stderr)
             return False
         arg = f"{' '.join(mods)}, {key}, activewindow"
+        _ensure_hyprland_instance()
         res = subprocess.run(["hyprctl", "dispatch", "sendshortcut", arg], capture_output=True, text=True, check=False)
         return res.returncode == 0 and "error" not in (res.stdout or "").lower()
 
@@ -1732,6 +1793,7 @@ end
         if not overlay:
             return False
         try:
+            _ensure_hyprland_instance()
             res = subprocess.run(["hyprctl", "binds", "-j"], capture_output=True, text=True, check=True, timeout=1.5)
             live_binds = json.loads(res.stdout)
             live_descriptions = {b.get("description") for b in live_binds if b.get("description")}
@@ -1892,6 +1954,7 @@ end
     def get_windows(self) -> List[Dict[str, Any]]:
         """Queries all clients/windows from Hyprland via `hyprctl clients -j` safely."""
         try:
+            _ensure_hyprland_instance()
             cli_out = subprocess.check_output(["hyprctl", "clients", "-j"], text=True, timeout=0.5).strip()
             if not cli_out:
                 return []
@@ -1903,11 +1966,13 @@ end
     def get_window_under_cursor(self) -> Optional[Dict[str, Any]]:
         """Finds the visible window on the active workspace under the cursor, or None."""
         try:
+            _ensure_hyprland_instance()
             cur_out = subprocess.check_output(["hyprctl", "cursorpos"], text=True, timeout=0.5).strip()
             if not cur_out or "," not in cur_out:
                 return None
             cx, cy = [float(p.strip()) for p in cur_out.split(",")]
 
+            _ensure_hyprland_instance()
             mon_out = subprocess.check_output(["hyprctl", "monitors", "-j"], text=True, timeout=0.5)
             monitors = json.loads(mon_out)
             active_ws_ids = {m.get("activeWorkspace", {}).get("id") for m in monitors if "activeWorkspace" in m}
@@ -1938,6 +2003,7 @@ end
     def get_active_window(self) -> Optional[Dict[str, Any]]:
         """Queries the active window in Hyprland, returning its client dict or None."""
         try:
+            _ensure_hyprland_instance()
             out = subprocess.check_output(["hyprctl", "activewindow", "-j"], text=True, timeout=0.5).strip()
             if not out:
                 return None
@@ -2294,6 +2360,7 @@ end"""
         report["overlay"]["count"] = len(overlay)
         if overlay:
             try:
+                _ensure_hyprland_instance()
                 res = subprocess.run(["hyprctl", "binds", "-j"], capture_output=True, text=True, check=True)
                 live_binds = json.loads(res.stdout)
                 live_descriptions = {b.get("description") for b in live_binds if b.get("description")}
@@ -2346,6 +2413,55 @@ end"""
 
         return report
 
+def wait_for_hyprland(timeout: float = 30.0, interval: float = 0.5, stop_event: Optional[threading.Event] = None) -> bool:
+    """Bounded wait for a Hyprland instance socket to appear under $XDG_RUNTIME_DIR/hypr/."""
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        if hyprland_socket_ready():
+            return True
+        if time.monotonic() >= deadline or (stop_event is not None and stop_event.is_set()):
+            return False
+        time.sleep(interval)
+
+def resolve_reapply_mode(engine: "OmniPalEngine") -> str:
+    """Mode the daemon should (re-)apply: the live state written by a successful switch in this
+    session, else the persisted profile. A missing state file (fresh tmpfs after reboot, or a
+    failed startup restore) must not hide the persisted profile."""
+    if STATE_FILE.exists():
+        mode = engine.get_state().get("mode", "omarchy")
+        if mode in engine.profiles:
+            return mode
+    persisted = engine.get_persisted_profile()
+    if persisted and persisted in engine.profiles:
+        return persisted
+    return "omarchy"
+
+def restore_persisted_profile(engine: "OmniPalEngine", attempts: int = 4, base_delay: float = 1.0,
+                              wait_timeout: float = 30.0, sleep=time.sleep) -> bool:
+    """Waits for Hyprland, then applies the persisted profile with retry + exponential backoff."""
+    mode = engine.get_persisted_profile()
+    if not mode or mode == "omarchy":
+        return True
+    if not wait_for_hyprland(timeout=wait_timeout):
+        print(f"⚠️ Hyprland socket not found after {wait_timeout:.0f}s; will restore '{mode}' when the socket appears.", file=sys.stderr, flush=True)
+        return False
+    print(f"🔌 Hyprland ready (HYPRLAND_INSTANCE_SIGNATURE={os.environ.get('HYPRLAND_INSTANCE_SIGNATURE')}).", flush=True)
+    delay = base_delay
+    for attempt in range(1, attempts + 1):
+        print(f"📦 Restoring persisted profile on startup: {mode} (attempt {attempt}/{attempts})", flush=True)
+        try:
+            if engine.switch_mode(mode):
+                print(f"✅ Restored persisted profile '{mode}'.", flush=True)
+                return True
+        except Exception as e:
+            print(f"Warning: Failed to restore persisted profile '{mode}': {e}", file=sys.stderr, flush=True)
+        if attempt < attempts:
+            print(f"Warning: restore of '{mode}' failed; retrying in {delay:.1f}s", file=sys.stderr, flush=True)
+            sleep(delay)
+            delay *= 2
+    print(f"❌ Giving up restoring persisted profile '{mode}' after {attempts} attempts.", file=sys.stderr, flush=True)
+    return False
+
 def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
     """Watches Hyprland socket2 for config reload events to automatically re-apply active profile."""
     while not stop_event.is_set():
@@ -2364,9 +2480,9 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
             last_reload_time = 0.0
 
             # Settle & verify keybindings upon socket connection (cold boot or compositor recovery)
-            curr_mode = engine.get_state().get("mode", "omarchy")
+            curr_mode = resolve_reapply_mode(engine)
             if curr_mode != "omarchy":
-                if not engine.verify_overlay_bindings():
+                if engine.get_state().get("mode") != curr_mode or not engine.verify_overlay_bindings():
                     print(f"🔄 Socket connected: verified overlay bindings missing for '{curr_mode}'. Re-applying...", flush=True)
                     engine.switch_mode(curr_mode)
                     eff_mode = engine.get_effective_window_mode()
@@ -2398,7 +2514,7 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                                 continue
                             last_reload_time = now
                             time.sleep(0.1)  # Debounce settle time
-                            curr_mode = engine.get_state().get("mode", "omarchy")
+                            curr_mode = resolve_reapply_mode(engine)
                             if curr_mode != "omarchy":
                                 print(f"🔄 Hyprland config reload detected. Re-applying {curr_mode} overlay...", flush=True)
                                 engine.switch_mode(curr_mode)
@@ -2484,13 +2600,7 @@ def run_daemon():
         engine.set_persistence(True, window_policy=engine.get_window_policy())
 
     if persisted_mode and persisted_mode != "omarchy":
-        # Settle briefly so compositor finishes its startup Lua scripts before we apply overlay
-        time.sleep(0.5)
-        print(f"📦 Restoring persisted profile on startup: {persisted_mode}", flush=True)
-        try:
-            engine.switch_mode(persisted_mode)
-        except Exception as e:
-            print(f"Warning: Failed to restore persisted profile '{persisted_mode}': {e}", file=sys.stderr)
+        restore_persisted_profile(engine)
     elif persisted_mode == "omarchy":
         engine._write_state("omarchy", 0, policy=engine.get_window_policy())
     elif persisted_status.get("enabled"):
