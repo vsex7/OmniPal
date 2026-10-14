@@ -38,9 +38,11 @@ def onboarding_status(config_dir: Optional[Path] = None) -> Dict[str, Any]:
     info: Dict[str, Any] = {"shown": p.exists(), "path": str(p)}
     if p.exists():
         try:
-            info.update(json.loads(p.read_text(encoding="utf-8")))
+            data = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            pass
+            data = None
+        if isinstance(data, dict):
+            info.update(data)
         info["shown"] = True
     return info
 
@@ -65,10 +67,11 @@ def onboarding_claim(config_dir: Optional[Path] = None) -> bool:
 
 def onboarding_reset(config_dir: Optional[Path] = None) -> bool:
     p = onboarding_path(config_dir)
-    if p.exists():
+    try:
         p.unlink()
-        return True
-    return False
+    except FileNotFoundError:
+        return False
+    return True
 
 
 # --------------------------------------------------------------------- menu
@@ -184,6 +187,15 @@ def _state_path(config_dir: Optional[Path]) -> Path:
     return (config_dir or _config_dir()) / MENU_STATE_FILE
 
 
+def _read_state(sp: Path) -> Dict[str, Any]:
+    """menu.json as a dict; missing, unreadable, corrupt or non-object -> {}."""
+    try:
+        data = json.loads(sp.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def menu_install(profiles: List[Dict[str, Any]], cli: str, path: Optional[Path] = None,
                  config_dir: Optional[Path] = None) -> Dict[str, Any]:
     path = path or menu_extension_path()
@@ -202,12 +214,7 @@ def menu_install(profiles: List[Dict[str, Any]], cli: str, path: Optional[Path] 
     path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write(path, new)
     sp = _state_path(config_dir)
-    prior = {}
-    if sp.exists():
-        try:
-            prior = json.loads(sp.read_text(encoding="utf-8"))
-        except ValueError:
-            prior = {}
+    prior = _read_state(sp)
     created = prior.get("created_file", False) if prior.get("path") == str(path) else not existed
     sp.parent.mkdir(parents=True, exist_ok=True)
     sp.write_text(json.dumps({"path": str(path), "created_file": created}) + "\n", encoding="utf-8")
@@ -225,12 +232,7 @@ def menu_installed(path: Optional[Path] = None) -> bool:
 
 def menu_uninstall(path: Optional[Path] = None, config_dir: Optional[Path] = None) -> Dict[str, Any]:
     sp = _state_path(config_dir)
-    state: Dict[str, Any] = {}
-    if sp.exists():
-        try:
-            state = json.loads(sp.read_text(encoding="utf-8"))
-        except ValueError:
-            state = {}
+    state = _read_state(sp)
     path = path or (Path(state["path"]) if state.get("path") else menu_extension_path())
     result = {"path": str(path), "removed_block": False, "removed_file": False}
     if path.exists():
@@ -244,6 +246,8 @@ def menu_uninstall(path: Optional[Path] = None, config_dir: Optional[Path] = Non
                 result["removed_file"] = True
             else:
                 _atomic_write(path, new)
-    if sp.exists():
+    try:
         sp.unlink()
+    except FileNotFoundError:
+        pass
     return result
