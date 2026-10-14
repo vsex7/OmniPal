@@ -45,6 +45,12 @@ Item {
   property string hoveredZone: ""
 
   readonly property color snapColor: (Color && Color.accent) ? Color.accent : root.theme.accent
+  // Omarchy native chrome: rounding mirrors Hyprland decoration:rounding (Style.cornerRadius, default 0),
+  // popup border = active-border (accent) at border_size 2, solid theme background, no glows/shadows.
+  readonly property int hudRadius: (Style && Style.cornerRadius) ? Style.cornerRadius : Tokens.radius.none
+  readonly property int hudBorder: Tokens.popup.border
+  readonly property color hudBg: (Color && Color.popups && Color.popups.background) ? Color.popups.background : root.theme.bg
+  readonly property color hudBorderColor: (Color && Color.popups && Color.popups.border) ? Color.popups.border : root.snapColor
 
   // 键盘与焦点导航状态
   property int focusedTemplateIndex: -1  // -1 表示未选模板，0~5 表示当前选中的模板
@@ -242,7 +248,7 @@ Item {
     Rectangle {
       anchors.fill: parent
       visible: root.interactive
-      color: Util.alpha(Color.menu.scrim || root.theme.black, 0.55)
+      color: (Color && Color.menu && Color.menu.scrim) ? Color.menu.scrim : Tokens.alpha(root.theme.bg, Tokens.popup.scrimAlpha)
       opacity: root.interactive ? 1.0 : 0.0
       Behavior on opacity { NumberAnimation { duration: Tokens.motion.fast } }
 
@@ -482,11 +488,11 @@ Item {
           y: slotGeom.y
           width: slotGeom.width
           height: slotGeom.height
-          radius: Style.cornerRadius ? Style.cornerRadius * 1.5 : 12
+          radius: root.hudRadius
 
-          color: Tokens.alpha(root.theme.text, 0.03)
-          border.width: 1
-          border.color: Util.alpha(root.snapColor, 0.22)
+          color: "transparent"
+          border.width: Tokens.border.hair
+          border.color: root.theme.line
 
           Behavior on x { NumberAnimation { duration: Tokens.motion.fast } }
           Behavior on y { NumberAnimation { duration: Tokens.motion.fast } }
@@ -503,26 +509,17 @@ Item {
         y: previewContainer.boxGeom.y
         width: previewContainer.boxGeom.width
         height: previewContainer.boxGeom.height
-        radius: Style.cornerRadius ? Style.cornerRadius * 1.5 : 12
+        radius: root.hudRadius
 
-        color: Util.alpha(root.snapColor, root.interactive ? 0.14 : 0.18)
-        border.width: 2
-        border.color: Util.alpha(root.snapColor, root.interactive ? 0.75 : 0.85)
+        color: Util.alpha(root.snapColor, 0.12)
+        border.width: root.hudBorder
+        border.color: root.snapColor
 
         Behavior on x { NumberAnimation { duration: Tokens.motion.fast } }
         Behavior on y { NumberAnimation { duration: Tokens.motion.fast } }
         Behavior on width { NumberAnimation { duration: Tokens.motion.fast } }
         Behavior on height { NumberAnimation { duration: Tokens.motion.fast } }
 
-        // 柔和外发光边框
-        Rectangle {
-          anchors.fill: parent
-          anchors.margins: -2
-          radius: parent.radius
-          color: "transparent"
-          border.width: 1
-          border.color: Util.alpha(root.snapColor, 0.35)
-        }
 
         // 浮动指示徽章（展示区域图标、中文说明与物理像素分辨率）
         Rectangle {
@@ -530,20 +527,11 @@ Item {
           anchors.centerIn: parent
           implicitWidth: pillRow.implicitWidth + Style.space(24)
           implicitHeight: pillRow.implicitHeight + Style.space(16)
-          radius: height / 2
-          color: Tokens.alpha(root.theme.surface, 0.90)
-          border.color: Util.alpha(root.snapColor, 0.65)
-          border.width: 1
+          radius: root.hudRadius
+          color: root.hudBg
+          border.color: root.hudBorderColor
+          border.width: root.hudBorder
 
-          // 徽章外发光
-          Rectangle {
-            anchors.fill: parent
-            anchors.margins: -1
-            radius: parent.radius
-            color: "transparent"
-            border.width: 1
-            border.color: Util.alpha(root.snapColor, 0.30)
-          }
 
           Row {
             id: pillRow
@@ -551,9 +539,10 @@ Item {
             spacing: Style.space(10)
 
             Text {
+              font.family: Style.font.family
               anchors.verticalCenter: parent.verticalCenter
               text: previewContainer.boxGeom.icon || "◧"
-              font.pixelSize: 18
+              font.pixelSize: Style.font.iconLarge || 18
               color: root.snapColor
             }
 
@@ -586,7 +575,7 @@ Item {
                     anchors.centerIn: parent
                     text: previewContainer.boxGeom.dim || ""
                     font.family: Style.font.family
-                    font.pixelSize: 9
+                    font.pixelSize: Style.font.caption
                     font.bold: true
                     color: Util.alpha(Color.foreground, 0.85)
                   }
@@ -597,7 +586,7 @@ Item {
                 visible: root.interactive
                 text: "按回车、点击或按对应数字直接吸附"
                 font.family: Style.font.family
-                font.pixelSize: 8
+                font.pixelSize: Style.font.caption
                 color: Util.alpha(Color.foreground, 0.6)
               }
             }
@@ -637,42 +626,22 @@ Item {
       width: Math.min(Style.space(560), parent.width - Style.space(32))
       height: Math.min(Style.space(370), parent.height - Style.space(32))
 
-      scale: root.interactive ? 1.0 : 0.95
+      scale: 1.0
       opacity: root.interactive ? 1.0 : 0.0
-      Behavior on scale { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutBack; easing.overshoot: 1.08 } }
-      Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutCubic } }
+            Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutCubic } }
 
-      readonly property real cardRadius: Math.max(14, Style.cornerRadius ? Style.cornerRadius * 1.5 : 14)
+      readonly property real cardRadius: root.hudRadius
 
-      // 1. 深邃环境微光与漫反射阴影
-      Rectangle {
-        anchors.fill: parent
-        anchors.margins: -10
-        radius: flyoutWrapper.cardRadius + 10
-        color: "transparent"
-        border.color: Tokens.alpha(root.theme.black, 0.45)
-        border.width: 10
-      }
 
-      // 2. 交互激活微光光环
-      Rectangle {
-        anchors.fill: parent
-        anchors.margins: -1
-        radius: flyoutWrapper.cardRadius + 1
-        color: "transparent"
-        border.color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.42) : Tokens.alpha(root.theme.text, 0.08)
-        border.width: 1
-        Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
-      }
 
-      // 3. 卡片主体 (Obsidian Acrylic Glass)
+      // 卡片主体：Omarchy popup（实色主题背景 + 2px active-border，无阴影/玻璃）
       Rectangle {
         id: flyoutCard
         anchors.fill: parent
         radius: flyoutWrapper.cardRadius
-        color: Tokens.alpha(root.theme.surface, 0.96)
-        border.color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.48) : Tokens.alpha(root.theme.text, 0.14)
-        border.width: 1
+        color: root.hudBg
+        border.color: root.hudBorderColor
+        border.width: root.hudBorder
         clip: true
         Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
 
@@ -681,14 +650,6 @@ Item {
           anchors.fill: parent
         }
 
-        // 顶端极光微反光线 (Specular Hairline)
-        Rectangle {
-          anchors.top: parent.top
-          anchors.left: parent.left
-          anchors.right: parent.right
-          height: 1
-          color: Tokens.alpha(root.theme.text, 0.14)
-        }
 
         // ============================================================
         // 头部极简上下文栏 (Hero Header: ~36px)
@@ -718,9 +679,10 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
 
               Text {
+                font.family: Style.font.family
                 anchors.centerIn: parent
                 text: "⊞"
-                font.pixelSize: 13
+                font.pixelSize: Style.font.body
                 font.bold: true
                 color: root.snapColor
               }
@@ -762,7 +724,7 @@ Item {
                 Text {
                   text: root.targetWindowTitle || root.targetWindowClass || root.targetWindowAddress
                   font.family: Style.font.family
-                  font.pixelSize: 9
+                  font.pixelSize: Style.font.caption
                   font.bold: true
                   color: Util.alpha(Color.foreground, 0.85)
                   elide: Text.ElideRight
@@ -784,7 +746,7 @@ Item {
             Rectangle {
               height: Style.space(20)
               radius: Tokens.radius.chip
-              color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.18) : Tokens.alpha(root.theme.black, 0.45)
+              color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.18) : root.theme.chipFill
               border.color: root.focusedTemplateIndex !== -1 ? root.snapColor : Tokens.alpha(root.theme.text, 0.12)
               border.width: 1
               anchors.verticalCenter: parent.verticalCenter
@@ -798,7 +760,7 @@ Item {
                 Text {
                   text: root.focusedTemplateIndex === -1 ? "1~6 模板" : ("模板 [" + (root.focusedTemplateIndex + 1) + "] 就绪")
                   font.family: Style.font.family
-                  font.pixelSize: 8
+                  font.pixelSize: Style.font.caption
                   font.bold: true
                   color: root.focusedTemplateIndex !== -1 ? root.snapColor : Util.alpha(Color.foreground, 0.70)
                   anchors.verticalCenter: parent.verticalCenter
@@ -818,11 +780,12 @@ Item {
               Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
 
               Text {
+                font.family: Style.font.family
                 anchors.centerIn: parent
                 text: "✕"
-                font.pixelSize: 10
+                font.pixelSize: Style.font.caption
                 font.bold: true
-                color: closeMouse.containsMouse ? root.theme.white : Util.alpha(Color.foreground, 0.60)
+                color: closeMouse.containsMouse ? root.theme.onDanger : Util.alpha(Color.foreground, 0.60)
               }
 
               MouseArea {
@@ -864,11 +827,9 @@ Item {
               width: (templatesGrid.width - templatesGrid.spacing * 2) / 3
               height: (templatesGrid.height - templatesGrid.spacing) / 2
               radius: Tokens.radius.chip
-              color: isSelectedTpl
-                ? Tokens.alpha(root.theme.surfaceAlt, 0.92)
-                : (isCardHovered ? Tokens.alpha(root.theme.surfaceAlt, 0.82) : Tokens.alpha(root.theme.surface, 0.65))
-              border.color: isSelectedTpl ? root.snapColor : (isCardHovered ? Tokens.alpha(root.theme.text, 0.30) : Tokens.alpha(root.theme.text, 0.10))
-              border.width: isSelectedTpl ? 2 : 1
+              color: isSelectedTpl ? Tokens.alpha(root.theme.text, 0.08) : (isCardHovered ? root.theme.hoverFill : "transparent")
+              border.color: isSelectedTpl ? root.snapColor : (isCardHovered ? root.theme.lineStrong : root.theme.line)
+              border.width: isSelectedTpl ? root.hudBorder : Tokens.border.hair
               opacity: isDimmed ? 0.45 : 1.0
 
               Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
@@ -876,16 +837,6 @@ Item {
               Behavior on border.width { NumberAnimation { duration: Tokens.motion.fast } }
               Behavior on opacity { NumberAnimation { duration: Tokens.motion.fast } }
 
-              // 选中外圈光晕
-              Rectangle {
-                anchors.fill: parent
-                anchors.margins: -2
-                radius: parent.radius
-                color: "transparent"
-                border.width: 1
-                border.color: Util.alpha(root.snapColor, 0.45)
-                visible: tplCard.isSelectedTpl
-              }
 
               MouseArea {
                 id: cardMouse
@@ -918,16 +869,16 @@ Item {
                     Text {
                       text: tplCard.modelData.title
                       font.family: Style.font.family
-                      font.pixelSize: 9
+                      font.pixelSize: Style.font.caption
                       font.bold: true
-                      color: tplCard.isSelectedTpl ? root.theme.white : (tplCard.isCardHovered ? root.theme.white : Util.alpha(Color.foreground, 0.85))
+                      color: tplCard.isSelectedTpl ? root.snapColor : root.theme.text
                       anchors.verticalCenter: parent.verticalCenter
                     }
 
                     Text {
                       text: tplCard.modelData.hint ? ("· " + tplCard.modelData.hint) : ""
                       font.family: Style.font.family
-                      font.pixelSize: 8
+                      font.pixelSize: Style.font.caption
                       color: Util.alpha(Color.foreground, 0.40)
                       anchors.verticalCenter: parent.verticalCenter
                       elide: Text.ElideRight
@@ -942,16 +893,17 @@ Item {
                     width: 16
                     height: 14
                     radius: Tokens.radius.chip
-                    color: tplCard.isSelectedTpl ? root.snapColor : Tokens.alpha(root.theme.black, 0.45)
-                    border.color: tplCard.isSelectedTpl ? root.theme.textStrong : Tokens.alpha(root.theme.text, 0.15)
+                    color: tplCard.isSelectedTpl ? root.snapColor : root.theme.chipFill
+                    border.color: tplCard.isSelectedTpl ? root.snapColor : Tokens.alpha(root.theme.text, 0.15)
                     border.width: 1
 
                     Text {
+                      font.family: Style.font.family
                       anchors.centerIn: parent
                       text: tplCard.modelData.key || String(tplCard.index + 1)
-                      font.pixelSize: 8
+                      font.pixelSize: Style.font.caption
                       font.bold: true
-                      color: tplCard.isSelectedTpl ? root.theme.black : Util.alpha(Color.foreground, 0.75)
+                      color: tplCard.isSelectedTpl ? root.theme.onAccent : Util.alpha(Color.foreground, 0.75)
                     }
                   }
                 }
@@ -962,7 +914,7 @@ Item {
                   width: parent.width
                   height: parent.height - 21
                   radius: Tokens.radius.chip
-                  color: Tokens.alpha(root.theme.black, 0.30)
+                  color: root.theme.sunken
                   border.color: Tokens.alpha(root.theme.text, 0.06)
                   border.width: 1
                   clip: true
@@ -993,7 +945,7 @@ Item {
 
                       color: isHovered ? Util.alpha(root.snapColor, 0.40) : Tokens.alpha(root.theme.text, 0.08)
                       border.color: isHovered ? root.snapColor : Tokens.alpha(root.theme.text, 0.16)
-                      border.width: isHovered ? 1.5 : 1
+                      border.width: Tokens.border.hair
 
                       Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
                       Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
@@ -1005,14 +957,15 @@ Item {
                         width: 16
                         height: 16
                         radius: Tokens.radius.chip
-                        color: slotRect.isSlotFocused ? root.snapColor : Tokens.alpha(root.theme.black, 0.7)
-                        border.color: slotRect.isSlotFocused ? root.theme.white : Util.alpha(root.snapColor, 0.5)
+                        color: slotRect.isSlotFocused ? root.snapColor : root.theme.sunken
+                        border.color: slotRect.isSlotFocused ? root.snapColor : Util.alpha(root.snapColor, 0.5)
                         border.width: 1
 
                         Text {
+                          font.family: Style.font.family
                           anchors.centerIn: parent
                           text: String(slotRect.index + 1)
-                          font.pixelSize: 9
+                          font.pixelSize: Style.font.caption
                           font.bold: true
                           color: slotRect.isSlotFocused ? root.theme.onAccent : root.theme.textStrong
                         }
@@ -1024,7 +977,7 @@ Item {
                         anchors.centerIn: parent
                         text: modelData.label
                         font.family: Style.font.family
-                        font.pixelSize: 8
+                        font.pixelSize: Style.font.caption
                         font.bold: true
                         color: root.theme.textStrong
                       }
@@ -1108,7 +1061,7 @@ Item {
                 return "按 1–6 快捷跳选 · 悬停桌面高亮轮廓 · Esc 退出"
               }
               font.family: Style.font.family
-              font.pixelSize: 8
+              font.pixelSize: Style.font.caption
               font.bold: root.hoveredZone !== ""
               color: root.hoveredZone !== "" ? root.snapColor : Util.alpha(Color.foreground, 0.60)
               anchors.verticalCenter: parent.verticalCenter
@@ -1132,7 +1085,7 @@ Item {
                 required property var modelData
                 height: 16
                 radius: Tokens.radius.chip
-                color: Tokens.alpha(root.theme.black, 0.45)
+                color: root.theme.chipFill
                 border.color: Tokens.alpha(root.theme.text, 0.12)
                 border.width: 1
                 implicitWidth: kbdRow.implicitWidth + 6
@@ -1145,7 +1098,7 @@ Item {
                   Text {
                     text: modelData.key
                     font.family: Style.font.family
-                    font.pixelSize: 8
+                    font.pixelSize: Style.font.caption
                     font.bold: true
                     color: root.theme.textStrong
                     anchors.verticalCenter: parent.verticalCenter
@@ -1154,7 +1107,7 @@ Item {
                   Text {
                     text: modelData.desc
                     font.family: Style.font.family
-                    font.pixelSize: 7
+                    font.pixelSize: Style.font.caption
                     color: Util.alpha(Color.foreground, 0.45)
                     anchors.verticalCenter: parent.verticalCenter
                   }

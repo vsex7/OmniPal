@@ -64,6 +64,9 @@ var radius = { none: 0, sm: 0, md: 0, chip: 2 };      // Omarchy: rounding = 0
 var border = { hair: 1, normal: 2, focus: 2 };        // Hyprland border_size = 2
 var space = { xxs: 2, xs: 4, sm: 6, md: 10, lg: 14, xl: 20, xxl: 28 };
 var type = { caption: 10, small: 11, body: 13, title: 15, display: 20 };
+// Omarchy shell.toml [popups]/[menu]: border = hyprland active-border (accent), border_size 2,
+// solid background (alpha 1.0), scrim = background @ 0.5, popup-padding 14.
+var popup = { border: 2, padding: 14, scrimAlpha: 0.5 };
 var motion = { fast: 90, normal: 140, slow: 200 };
 var font = { mono: "JetBrainsMono Nerd Font", fallback: "monospace" };
 
