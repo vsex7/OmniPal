@@ -63,7 +63,6 @@ Item {
   readonly property var previewModes: [
     { id: "windows", label: "windows" },
     { id: "mac", label: "macos" },
-    { id: "kde", label: "kde" },
     { id: "omarchy", label: "omarchy" }
   ]
 
@@ -270,7 +269,7 @@ Item {
 
   readonly property var guideSteps: [
     { title: "选模式", body: "打开设置" + (root.fixedCombo("omni_settings") ? "（" + root.fixedCombo("omni_settings") + "）" : "")
-        + "，选一个和你习惯一样的模式：Windows、macOS 或 KDE。也可以在 Omarchy 菜单 Setup → 快捷键模式 里切换。" },
+        + "，选一个和你习惯一样的模式：Windows、macOS 或 Omarchy 原生。也可以在 Omarchy 菜单 Setup → 快捷键模式 里切换。" },
     { title: "记住三个固定快捷键", body: "下面三个键在所有模式里都一样：" },
     { title: "按应用自动切换", body: "每个模式自带平铺或浮动；在设置里添加应用规则，切到某个应用时自动换模式。" }
   ]

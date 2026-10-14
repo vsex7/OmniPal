@@ -2,7 +2,7 @@
 
 # OmniPal
 
-在 Omarchy（Hyprland）上一条命令切换 Windows、macOS 或 KDE Plasma 的快捷键习惯。只在内存里生效，不改你现有的配置文件，随时切回原生键位。
+在 Omarchy（Hyprland）上一条命令切换 Windows 或 macOS 的快捷键习惯。只在内存里生效，不改你现有的配置文件，随时切回原生键位。
 
 <p align="center"><img src="docs/assets/demo.gif" alt="演示：切换模式与窗口吸附（示意动画）" width="80%"></p>
 
@@ -22,7 +22,6 @@ cd OmniPal && bash scripts/install.sh
 ```bash
 omni-profile switch windows   # Windows 11 习惯
 omni-profile switch mac       # macOS 习惯
-omni-profile switch kde       # KDE Plasma 习惯
 omni-profile restore          # 回到 Omarchy 原生键位
 omni-profile cheatsheet       # 当前模式的快捷键
 omni-profile doctor           # 出问题时先跑这个
@@ -49,7 +48,7 @@ omni-profile window-policy    # 查看各模式的平铺/浮动（窗口策略�
 
 ## 包含什么
 
-- **三套习惯模式**：Windows（Alt+F4、Win+方向键吸附、Win+E）、macOS（Super+Q、Super+Space、Super+Shift+3/4）、KDE Plasma（Meta+方向键贴边、Alt+Space 搜索、Meta+W 概览）。
+- **三套习惯模式**：Windows（Alt+F4、Win+方向键吸附、Win+E）、macOS（Super+Q、Super+Space、Super+Shift+3/4）、Omarchy 原生模式（还原系统原生键位）。
 - **窗口吸附**：半屏、三分之一、三分之二、居中，`Win+Z` 呼出布局选择器。
 - **Quickshell 插件**：顶栏模式指示器、快捷键速查表、设置中心、吸附反馈、任务视图、Dock。
 - **自定义模式**：在 `~/.config/omnipal/profiles/` 放 JSON，或用 `omni-profile import` 导入别人分享的。

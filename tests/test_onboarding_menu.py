@@ -165,9 +165,9 @@ class TakeoverParsingTest(unittest.TestCase):
              "native": [{"description": "Launch apps", "dispatcher": "exec", "arg": "walker"}]},
             {"combo": "SUPER + ALT + I", "name": "控制中心", "fixed": True,
              "native": [{"description": "", "dispatcher": "exec", "arg": "foo"}]}]},
-        "kde": {"mode": "kde", "source": "none", "count": 0, "takeovers": []},
         "windows": {"mode": "windows", "error": "boom"},
-        "omarchy": {"mode": "omarchy", "source": "baseline", "count": 0, "takeovers": []}}}
+        "omarchy": {"mode": "omarchy", "source": "baseline", "count": 0, "takeovers": []},
+        "custom": {"mode": "custom", "source": "none", "count": 0, "takeovers": []}}}
 
     def test_parse_ok(self):
         r = self.run_js("forMode(%s, 'mac')" % json.dumps(self.DOCTOR))
@@ -180,7 +180,7 @@ class TakeoverParsingTest(unittest.TestCase):
 
     def test_source_none_and_errors(self):
         d = json.dumps(self.DOCTOR)
-        none = self.run_js("forMode(%s, 'kde')" % d)
+        none = self.run_js("forMode(%s, 'custom')" % d)
         self.assertEqual(none["status"], "none")
         self.assertIn("读不到", none["hint"])
         self.assertEqual(self.run_js("forMode(%s, 'windows')" % d)["status"], "error")

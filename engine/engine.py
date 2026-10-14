@@ -295,6 +295,8 @@ def _debug(msg) -> None:
         print(f"[omnipal debug] {caller.name}:{caller.lineno}: {msg!r}", file=sys.stderr)
 
 
+RETIRED_MODES = ("kde",)  # removed built-in modes; saved references migrate to MIGRATION_FALLBACK_MODE
+MIGRATION_FALLBACK_MODE = "windows"
 LEGACY_WINDOW_POLICY_KEY = "window_policy"  # removed global tiled/floating override; stripped on startup
 
 DIALOG_KEYWORDS = (
@@ -801,6 +803,74 @@ class OmniPalEngine:
             except Exception as _e:
                 _debug(_e)
         return migrated
+
+    def migrate_retired_modes(self) -> List[str]:
+        """Retired built-in modes (kde) fall back to windows: rewrites state.json (mode / auto),
+        persistence.json (profile) and app_rules.json (default_mode; rules targeting a retired
+        mode are dropped). Returns human-readable log lines, one per rewritten file."""
+        fb = MIGRATION_FALLBACK_MODE
+        logs: List[str] = []
+
+        def _load(path: Path) -> Any:
+            if not path.exists():
+                return None
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+
+        try:
+            data = _load(STATE_FILE)
+            if isinstance(data, dict):
+                changed = False
+                auto = data.get("auto")
+                if isinstance(auto, dict):
+                    if auto.get("mode") in RETIRED_MODES:
+                        data.pop("auto", None); changed = True
+                    elif auto.get("return_to") in RETIRED_MODES:
+                        auto["return_to"] = fb; changed = True
+                old = data.get("mode")
+                old_ret = auto.get("return_to") if isinstance(auto, dict) else None
+                if old in RETIRED_MODES:
+                    prof = self.profiles.get(fb, {})
+                    data["mode"] = fb
+                    data["name"] = prof.get("name", fb)
+                    data["display"] = prof.get("display", {})
+                    data.pop("auto", None)
+                    changed = True
+                if changed and write_state_json(STATE_FILE, data):
+                    retired = old if old in RETIRED_MODES else (auto.get("mode") if isinstance(auto, dict) and auto.get("mode") in RETIRED_MODES else old_ret)
+                    logs.append(f"{STATE_FILE}: retired mode '{retired}' -> '{fb}'")
+        except Exception as _e:
+            _debug(_e)
+        try:
+            path = persistence_file_path()
+            data = _load(path)
+            if isinstance(data, dict) and data.get("profile") in RETIRED_MODES:
+                old = data["profile"]
+                data["profile"] = fb
+                if atomic_write_json(path, data):
+                    logs.append(f"{path}: persisted profile '{old}' -> '{fb}'")
+        except Exception as _e:
+            _debug(_e)
+        try:
+            path = app_rules_file_path()
+            data = _load(path)
+            if isinstance(data, dict):
+                rules = data.get("rules") if isinstance(data.get("rules"), list) else []
+                kept = [r for r in rules if not (isinstance(r, dict) and r.get("mode") in RETIRED_MODES)]
+                dropped = len(rules) - len(kept)
+                dm_old = data.get("default_mode")
+                if dropped or dm_old in RETIRED_MODES:
+                    data["rules"] = kept
+                    if dm_old in RETIRED_MODES:
+                        data["default_mode"] = fb
+                    if atomic_write_json(path, data):
+                        msg = f"{path}: dropped {dropped} rule(s) targeting retired modes"
+                        if dm_old in RETIRED_MODES:
+                            msg += f", default_mode '{dm_old}' -> '{fb}'"
+                        logs.append(msg)
+        except Exception as _e:
+            _debug(_e)
+        return logs
 
     def _eval_lua(self, lua_code: str) -> bool:
         """Executes Lua expressions in Omarchy Hyprland compositor with strict error checking."""
@@ -1849,6 +1919,9 @@ end
         """Atomically switches the in-memory keybindings to target_mode with rollback on error."""
         with engine_lock():
             target_mode = target_mode.lower().strip()
+            if target_mode in RETIRED_MODES and target_mode not in self.profiles:
+                valid_modes = ", ".join(self.profiles.keys())
+                raise ValueError(f"Mode '{target_mode}' has been removed. Valid modes: {valid_modes}")
             if target_mode not in self.profiles:
                 valid_modes = ", ".join(self.profiles.keys())
                 raise ValueError(f"Unknown mode '{target_mode}'. Available modes: {valid_modes}")
@@ -1960,8 +2033,8 @@ end
             return False
 
     def cycle_mode(self, reverse: bool = False) -> str:
-        """Cycles to the next mode in sequence: omarchy -> windows -> mac -> kde -> user profiles -> omarchy."""
-        curated = ["omarchy", "windows", "mac", "kde"]
+        """Cycles to the next mode in sequence: omarchy -> windows -> mac -> user profiles -> omarchy."""
+        curated = ["omarchy", "windows", "mac"]
         user_modes = sorted([m for m in self.profiles if m not in curated])
         modes = [m for m in curated if m in self.profiles] + user_modes
         if not modes:
@@ -2828,6 +2901,9 @@ def run_daemon():
     # Migrate away any stored global window-policy override (removed): follow each mode's window_mode.
     for migrated in engine.migrate_legacy_window_policy():
         print(f"📦 Dropped legacy global window policy override from {migrated}", flush=True)
+    # Retired modes (kde) fall back to windows; rules targeting them are dropped.
+    for line in engine.migrate_retired_modes():
+        print(f"📦 Migrated retired mode: {line}", flush=True)
 
     # Restore persisted profile on startup
     persisted_status = engine.get_persistence_status()

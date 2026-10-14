@@ -116,8 +116,8 @@ class TestStartupRestore(_EnvCase):
 
     def test_reapply_mode_uses_persisted_when_no_state(self):
         self.assertEqual(engine_module.resolve_reapply_mode(self.engine), "windows")
-        self.engine.switch_mode("kde")
-        self.assertEqual(engine_module.resolve_reapply_mode(self.engine), "kde")
+        self.engine.switch_mode("mac")
+        self.assertEqual(engine_module.resolve_reapply_mode(self.engine), "mac")
 
 
 if __name__ == "__main__":

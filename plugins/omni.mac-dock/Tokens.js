@@ -115,7 +115,7 @@ function build(Color, palette) {
 // Mode identity colours, derived from the palette so they re-skin with the theme.
 function modeColors(palette) {
   var p = palette || fallback;
-  return { windows: p.blue, mac: p.light_foreground, omarchy: p.green, kde: p.cyan,
+  return { windows: p.blue, mac: p.light_foreground, omarchy: p.green,
            custom: [p.magenta, p.yellow, p.cyan, p.orange, p.blue] };
 }
 var mode = modeColors(fallback);

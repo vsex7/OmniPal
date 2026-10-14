@@ -1,6 +1,6 @@
 # 编写和分享自定义 profile
 
-profile 是一个 JSON 文件，描述一套快捷键习惯。内置的 `windows`、`mac`、`kde`、`omarchy` 在仓库的 `profiles/` 里，自己写的放在 `~/.config/omnipal/profiles/`（可用 `OMNIPAL_USER_PROFILES_DIR` 改位置）。和内置模式同 id 的自定义 profile 会覆盖内置的。
+profile 是一个 JSON 文件，描述一套快捷键习惯。内置的 `windows`、`mac`、`omarchy` 在仓库的 `profiles/` 里，自己写的放在 `~/.config/omnipal/profiles/`（可用 `OMNIPAL_USER_PROFILES_DIR` 改位置）。和内置模式同 id 的自定义 profile 会覆盖内置的。
 
 ## 最快的起步：从内置模式改
 

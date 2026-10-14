@@ -9,7 +9,6 @@
 var glyph = {
   windows: "󰖳",
   mac: "󰀵",
-  kde: "",
   omarchy: "󰕰",
   custom: "󰌌",
   cheat: "󰌌",
@@ -49,7 +48,7 @@ var glyph = {
 
 function mode(id) {
   var k = String(id || "").toLowerCase()
-  if (k === "windows" || k === "mac" || k === "kde" || k === "omarchy") return glyph[k]
+  if (k === "windows" || k === "mac" || k === "omarchy") return glyph[k]
   return glyph.custom
 }
 

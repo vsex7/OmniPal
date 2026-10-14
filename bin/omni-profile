@@ -199,6 +199,20 @@ def _resync_menu():
         print(f"⚠️ 菜单未更新: {e}", file=sys.stderr)
 
 
+def _drop_retired_menu_entries():
+    """已注册的 Omarchy 菜单若仍含已移除模式（kde）的子项，按当前模式列表重写一次。"""
+    from engine import onboarding
+    from engine.engine import RETIRED_MODES
+    try:
+        raw = onboarding.menu_extension_path().read_text(encoding="utf-8")
+    except OSError:
+        return
+    if onboarding.BLOCK_BEGIN in raw and any(f"switch {m}\"" in raw for m in RETIRED_MODES):
+        _resync_menu()
+        _refresh_omarchy_menu()
+        print("📦 已从 Omarchy 菜单移除已下线的模式", file=sys.stderr)
+
+
 def _refresh_omarchy_menu():
     import shutil, subprocess
     if shutil.which("omarchy-menu"):
@@ -571,6 +585,10 @@ def cmd_rules(engine: OmniPalEngine, args):
 
 def main():
     engine = OmniPalEngine(PROJECT_ROOT)
+    # Retired modes (kde) fall back to windows; rules targeting them are dropped.
+    for line in engine.migrate_retired_modes():
+        print(f"📦 已迁移已移除的模式 (fallback windows): {line}", file=sys.stderr)
+    _drop_retired_menu_entries()
 
     parser = argparse.ArgumentParser(
         prog="omni-profile",
@@ -651,7 +669,7 @@ def main():
 
     # diff
     p_diff = subparsers.add_parser("diff", help="列出某个模式会接管哪些 Omarchy 原生快捷键")
-    p_diff.add_argument("mode", help="模式 id，如 windows / mac / kde")
+    p_diff.add_argument("mode", help="模式 id，如 windows / mac / omarchy")
     p_diff.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_diff.set_defaults(func=cmd_diff)
 

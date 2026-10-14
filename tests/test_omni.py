@@ -269,8 +269,8 @@ class TestOmniPal(BaseOmniTestCase):
             gnome_file = user_dir / "gnome.json"
             gnome_data = {
                 "id": "gnome",
-                "name": "KDE Plasma 模式",
-                "description": "User custom KDE bindings",
+                "name": "GNOME 模式",
+                "description": "User custom GNOME bindings",
                 "bindings": [
                     {"action": "file_manager", "mod": "CTRL ALT", "key": "e"}
                 ]
@@ -303,11 +303,10 @@ class TestOmniPal(BaseOmniTestCase):
             self.assertTrue(profiles_meta["windows"]["override"])
             self.assertEqual(user_engine.profiles["windows"]["name"], "Windows (Custom Overridden)")
 
-            # Test dynamic cycling order: omarchy -> windows -> mac -> kde -> gnome -> omarchy
+            # Test dynamic cycling order: omarchy -> windows -> mac -> gnome -> omarchy
             user_engine.switch_mode("omarchy")
             self.assertEqual(user_engine.cycle_mode(), "windows")
             self.assertEqual(user_engine.cycle_mode(), "mac")
-            self.assertEqual(user_engine.cycle_mode(), "kde")
             self.assertEqual(user_engine.cycle_mode(), "gnome")
             self.assertEqual(user_engine.cycle_mode(), "omarchy")
 
@@ -338,17 +337,15 @@ class TestOmniPal(BaseOmniTestCase):
 
         self.assertIn("omarchy", profiles)
         self.assertEqual(profiles["omarchy"]["display"].get("icon"), "⊡")
-        self.assertIn("kde", profiles)
-        self.assertEqual(profiles["kde"]["display"].get("brief"), "KDE")
+        self.assertEqual(set(profiles), {"windows", "mac", "omarchy"})
 
         # Test state includes display
         self.engine.switch_mode("windows")
         state = self.engine.get_state()
         self.assertEqual(state.get("display", {}).get("icon"), "⊞")
 
-        # Test reverse cycle: windows -> omarchy -> kde -> mac -> windows
+        # Test reverse cycle: windows -> omarchy -> mac -> windows
         self.assertEqual(self.engine.cycle_mode(reverse=True), "omarchy")
-        self.assertEqual(self.engine.cycle_mode(reverse=True), "kde")
         self.assertEqual(self.engine.cycle_mode(reverse=True), "mac")
         self.assertEqual(self.engine.cycle_mode(reverse=True), "windows")
 
@@ -1246,7 +1243,7 @@ class TestSettingsCounts(unittest.TestCase):
         qml = (PROJECT_ROOT / "plugins" / "omni.settings" / "SettingsPanel.qml").read_text(encoding="utf-8")
         self.assertRegex(qml, r"property var modeItems:\s*\[\s*\]")
         self.assertIn('"omni-profile", "list", "--json"', qml)
-        for mid in ("windows", "mac", "kde"):
+        for mid in ("windows", "mac"):
             prof = json.loads((PROJECT_ROOT / "profiles" / f"{mid}.json").read_text(encoding="utf-8"))
             self.assertNotIn(prof["name"], qml, mid)
 
@@ -1278,13 +1275,13 @@ class TestAppRules(unittest.TestCase):
     def test_match_kinds_and_case(self):
         rules = {"enabled": True, "rules": [
             {"class": "Code", "mode": "mac"},
-            {"class": "org.kde.", "match": "prefix", "mode": "kde"},
+            {"class": "org.gnome.", "match": "prefix", "mode": "omarchy"},
             {"class": "^jetbrains-", "match": "regex", "mode": "windows"},
             {"class": "firefox", "mode": "mac", "enabled": False},
         ]}
         m = self.engine.match_app_rule
         self.assertEqual(m("code", rules)["mode"], "mac")
-        self.assertEqual(m("org.kde.dolphin", rules)["mode"], "kde")
+        self.assertEqual(m("org.gnome.Nautilus", rules)["mode"], "omarchy")
         self.assertEqual(m("jetbrains-idea", rules)["mode"], "windows")
         self.assertIsNone(m("firefox", rules))
         self.assertIsNone(m("code", {"enabled": False, "rules": rules["rules"]}))
@@ -1307,9 +1304,35 @@ class TestAppRules(unittest.TestCase):
         self.engine.save_app_rules({"enabled": True, "rules": [{"class": "code", "mode": "mac"}]})
         self.assertTrue(self.engine.switch_mode("windows"))
         self.assertEqual(self.engine.apply_app_rule("code"), "mac")
-        self.assertTrue(self.engine.switch_mode("kde"))  # user overrides by hand inside VS Code
-        self.assertIsNone(self.engine.apply_app_rule("kitty"))  # stays on kde, not back to windows
-        self.assertEqual(self.engine.get_state().get("mode"), "kde")
+        self.assertTrue(self.engine.switch_mode("omarchy"))  # user overrides by hand inside VS Code
+        self.assertIsNone(self.engine.apply_app_rule("kitty"))  # stays on omarchy, not back to windows
+        self.assertEqual(self.engine.get_state().get("mode"), "omarchy")
+
+    def test_switch_retired_mode_lists_valid_modes(self):
+        with self.assertRaises(ValueError) as cm:
+            self.engine.switch_mode("kde")
+        msg = str(cm.exception)
+        self.assertIn("removed", msg)
+        for mid in ("windows", "mac", "omarchy"):
+            self.assertIn(mid, msg)
+
+    def test_migrate_retired_mode_falls_back_to_windows(self):
+        import engine.engine as em
+        em.write_state_json(em.STATE_FILE, {"mode": "kde", "name": "KDE", "display": {},
+                                            "auto": {"mode": "kde", "return_to": "mac"}})
+        em.atomic_write_json(em.persistence_file_path(), {"enabled": True, "profile": "kde"})
+        em.atomic_write_json(em.app_rules_file_path(), {"enabled": True, "default_mode": "kde", "rules": [
+            {"class": "dolphin", "mode": "kde"}, {"class": "code", "mode": "mac"}]})
+        logs = self.engine.migrate_retired_modes()
+        self.assertEqual(len(logs), 3)
+        state = json.loads(em.STATE_FILE.read_text())
+        self.assertEqual(state["mode"], "windows")
+        self.assertNotIn("auto", state)
+        self.assertEqual(self.engine.get_persistence_status()["profile"], "windows")
+        rules = self.engine.load_app_rules()
+        self.assertEqual(rules["default_mode"], "windows")
+        self.assertEqual([r["class"] for r in rules["rules"]], ["code"])
+        self.assertEqual(self.engine.migrate_retired_modes(), [])  # idempotent
 
 
 class TestRulesAddCurrent(unittest.TestCase):
@@ -1934,7 +1957,7 @@ class TestFixedEntryPoints(unittest.TestCase):
             self.assertNotIn(combo_signature(combo), native, combo)
 
     def test_injected_in_every_mode(self):
-        for mode in ("windows", "mac", "kde", "omarchy"):
+        for mode in ("windows", "mac", "omarchy"):
             self.evals.clear()
             self.assertTrue(self.engine.switch_mode(mode), mode)
             code = "; ".join(self.evals)
@@ -2006,14 +2029,14 @@ class TestAutoSwitchState(unittest.TestCase):
         self.engine.apply_app_rule("code")
         prev = self.engine.cancel_auto()           # what the CLI does before a manual switch
         self.assertEqual(prev["return_to"], "windows")
-        self.assertTrue(self.engine.switch_mode("kde"))
-        self.engine.notify_manual_override(prev, "kde")
+        self.assertTrue(self.engine.switch_mode("omarchy"))
+        self.engine.notify_manual_override(prev, "omarchy")
         self.assertIn("已取消自动返回", self.notes[-1][1])
         self.assertIsNone(self.engine.get_state().get("auto"))
-        self.assertIsNone(self.engine.apply_app_rule("kitty"))   # stays on kde (new base)
-        self.assertEqual(self.engine.get_state().get("mode"), "kde")
+        self.assertIsNone(self.engine.apply_app_rule("kitty"))   # stays on omarchy (new base)
+        self.assertEqual(self.engine.get_state().get("mode"), "omarchy")
         self.assertEqual(self.engine.apply_app_rule("code"), "mac")
-        self.assertEqual(self.engine.get_state()["auto"]["return_to"], "kde")
+        self.assertEqual(self.engine.get_state()["auto"]["return_to"], "omarchy")
 
     def test_manual_switch_to_same_mode_still_cancels(self):
         self.assertTrue(self.engine.switch_mode("windows"))
