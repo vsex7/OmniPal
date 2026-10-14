@@ -5,6 +5,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "CheatSheetData.js" as SheetData
+import "Tokens.js" as Tokens
 
 // OmniPal 快捷键 HUD（omni.cheat-sheet）
 //
@@ -49,6 +50,7 @@ Item {
   readonly property var previewModes: [
     { id: "windows", label: "🪟 Windows 11" },
     { id: "mac", label: "🍎 macOS" },
+    { id: "kde", label: "❖ KDE Plasma" },
     { id: "omarchy", label: "⊡ Omarchy 原生" }
   ]
 
@@ -167,6 +169,21 @@ Item {
     : String(root.engineState.status || "") === "active" ? "Engine 运行中 · 覆盖生效"
     : String(root.engineState.status || "") === "native" ? "Engine 运行中 · 原生模式"
     : "Engine 未运行"
+  // 按应用自动切换：当前应用命中的规则（来自运行目录下的 app_rule.json）
+  property var appRule: null
+  readonly property string appRuleLabel: root.appRule && root.appRule.rule
+    ? ("应用规则 · " + String(root.appRule.window_class) + " → " + String(root.appRule.rule.mode)) : ""
+  readonly property string engineStatusText: root.appRuleLabel !== ""
+    ? (root.engineStatusLabel + " · " + root.appRuleLabel) : root.engineStatusLabel
+
+  FileView {
+    path: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/omnipal/app_rule.json"
+    watchChanges: true
+    printErrors: false
+    onLoaded: { try { root.appRule = JSON.parse(text()) } catch (e) { root.appRule = null } }
+    onLoadFailed: root.appRule = null
+    onFileChanged: reload()
+  }
 
   // -------------------------------------------------------- data plumbing
 
@@ -483,7 +500,7 @@ Item {
                   width: Style.space(5)
                   height: Style.space(5)
                   radius: 3
-                  color: "#a3be8c"
+                  color: Tokens.semantic.ok
                   anchors.verticalCenter: parent.verticalCenter
                 }
               }
@@ -517,7 +534,7 @@ Item {
 
           Text {
             textFormat: Text.PlainText
-            text: root.engineStatusLabel + " · 共 " + root.bindingCount + " 项"
+            text: root.engineStatusText + " · 共 " + root.bindingCount + " 项"
             color: root.foreground
             opacity: 0.5
             font.family: root.fontFamily
@@ -849,8 +866,10 @@ Item {
                       anchors.leftMargin: Style.space(12)
                       anchors.verticalCenter: parent.verticalCenter
                       width: root.nameColumnWidth
-                      textFormat: Text.PlainText
-                      text: binding.modelData.name
+                      textFormat: root.filterText.trim() !== "" ? Text.StyledText : Text.PlainText
+                      text: root.filterText.trim() !== ""
+                        ? SheetData.highlightMatches(binding.modelData.name, root.filterText, String(root.accent))
+                        : binding.modelData.name
                       color: root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
@@ -863,8 +882,10 @@ Item {
                       anchors.leftMargin: Style.space(12)
                       anchors.right: parent.right
                       anchors.verticalCenter: parent.verticalCenter
-                      textFormat: Text.PlainText
-                      text: binding.modelData.description
+                      textFormat: root.filterText.trim() !== "" ? Text.StyledText : Text.PlainText
+                      text: root.filterText.trim() !== ""
+                        ? SheetData.highlightMatches(binding.modelData.description, root.filterText, String(root.accent))
+                        : binding.modelData.description
                       color: root.foreground
                       opacity: 0.5
                       font.family: root.fontFamily

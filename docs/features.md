@@ -1,6 +1,6 @@
 # OmniPal 功能清单
 
-**文档版本**：v1.5.0
+**文档版本**：v1.7.1
 **最后更新**：2026-09-15  
 **对应开发文档**：OmniPal 完整开发文档
 
@@ -53,7 +53,7 @@
 | 吸附布局一致性校验 | `check_consistency.py` 全面校验 `snap_layouts.json`：分区几何越界、图标/标签、模板唯一性与槽位合法性 | v1.3.0 已交付 |
 | 快捷键搜索 | 在 HUD (omni.cheat-sheet) 中支持全分类实时模糊检索 | v1.0.0 已交付 |
 | 可选配置持久化 | 用户显式开启（`omni-profile persist enable`）后，才将当前模式写入 `~/.config/omnipal/persistence.json`；`switch_mode` 自动同步，非法模式拒绝，`persist disable` 与卸载彻底清理 | v1.4.0 已交付 |
-| 本地使用统计 | 纯本地聚合计数（模式切换 / 吸附区域 / 动作触发），仅写 `~/.config/omnipal/stats.json`，零按键内容、零网络上传，静默容错不影响切换延迟；CLI `stats [--json|--reset]` | v1.5.0 已交付 |
+| 本地使用统计 | 纯本地聚合计数（模式切换 / 吸附区域 / 动作触发），仅写 `~/.config/omnipal/stats.json`，零按键内容、零网络上传，静默容错不影响切换延迟；CLI `stats [--json|--reset]` | v1.7.1 已交付 |
 
 ---
 

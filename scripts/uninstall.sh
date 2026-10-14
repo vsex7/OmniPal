@@ -7,7 +7,7 @@ set -euo pipefail
 BIN_TARGET="${HOME}/.local/bin/omni-profile"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 SERVICE_FILE="${SYSTEMD_USER_DIR}/omnipal.service"
-RUN_DIR="/run/user/$(id -u)/omnipal"
+RUN_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omnipal"
 
 echo "=== OmniPal 卸载程序 ==="
 
@@ -60,6 +60,18 @@ done
 # 配置目录为空时安全移除（含用户自定义 profiles 时保留）
 if [ -d "${OMNIPAL_CONFIG_DIR_PATH}" ] && [ -z "$(ls -A "${OMNIPAL_CONFIG_DIR_PATH}" 2>/dev/null)" ]; then
     rmdir "${OMNIPAL_CONFIG_DIR_PATH}" && echo "🧹 已移除空配置目录: ${OMNIPAL_CONFIG_DIR_PATH}"
+fi
+
+# 7. 移除安装时新建、现在已为空的目录（原本就存在的目录不动）
+CREATED_DIRS_FILE="${HOME}/.local/share/omnipal/created-dirs"
+if [ -f "${CREATED_DIRS_FILE}" ]; then
+    DIRS_LIST="$(tac "${CREATED_DIRS_FILE}")"
+    rm -f "${CREATED_DIRS_FILE}"
+    while IFS= read -r d; do
+        if [ -n "${d}" ] && [ -d "${d}" ] && [ -z "$(ls -A "${d}")" ]; then
+            rmdir "${d}" && echo "🧹 已移除空目录: ${d}"
+        fi
+    done <<< "${DIRS_LIST}"
 fi
 
 echo "✅ 卸载完毕！系统快捷键与配置已完整恢复至原始状态，零文件残留。"

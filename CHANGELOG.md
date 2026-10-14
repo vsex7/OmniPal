@@ -4,6 +4,71 @@
 
 ---
 
+## [v1.9.0] - 未发布（草稿）
+
+### ✨ 新功能
+- **mac 模式快捷键转发**：Super+W、T、Shift+T、F、Z、Shift+Z、A、S、L、R 和 1–9 会转成对应的 Ctrl 组合发给当前应用，比如 Cmd+W 在浏览器里只关标签页，Cmd+1 切到第一个标签。终端里改发 Ctrl+Shift，Ctrl+W 删单词、Ctrl+C 中断不受影响。
+- **mac 模式应用切换**：Super+Tab 和 Super+Shift+Tab 在当前工作区的窗口之间切换，不切走工作区。
+- 转发完全在 Hyprland 的 Lua 里完成，不启动外部进程，连按不发黏。
+- 可在 `~/.config/omnipal/terminals.json` 自定义终端名单，末尾 `*` 表示前缀匹配。
+- 新命令 `omni-profile send <MOD> <KEY> [--class <类名>]`，手动把快捷键发给当前窗口。
+
+### 🔧 变更
+- mac 模式开启时会暂时停用 Omarchy 原生的 Super+W、Super+数字绑定；还原或切到别的模式时会执行 `hyprctl reload` 把它们找回来。
+- mac 模式不再用 Super+数字切换工作区，改用 Super+Ctrl+←/→。
+
+### 🚧 发版前待办
+- 在真机 Hyprland 上验证 v1.8.0 / v1.9.0 的界面和转发。
+
+---
+
+## [v1.8.0] - 2026-10-14
+
+### ✨ 新功能
+- **按应用自动切换**：为窗口类名配置规则，聚焦到对应应用时自动切换模式，离开后恢复；手动切换的模式会成为新的基础模式。
+- `omni-profile rules add/test --current [--delay N]`：倒计时后直接取当前窗口建规则；`rules list --json`、`rules toggle <class>`。
+- `omni-profile rules export / import`：导出导入应用规则，默认按类名合并，`--replace` 整体替换，指向缺失模式的规则会跳过。
+- `omni-profile export / import`：导出导入自定义 profile。
+- 新增 KDE 模式。
+- `omni-profile doctor`：一键自检环境、引擎状态和配置。
+- 设置面板新增“应用规则”页：全局开关、默认模式、规则启停和删除、“填入当前应用”。
+- 速查表搜索结果高亮匹配文字，状态行显示当前命中的应用规则。
+- Windows 模式补充 Win+Ctrl+←/→ 切工作区、Win+S 启动器、Print 全屏截图；Mac 模式补充 Cmd+Opt+Space 文件管理器、Ctrl+Cmd+Space 表情面板。
+
+### 🎨 设计
+- 全新视觉：炭黑、米白加琥珀强调色，统一由 `plugins/shared/Tokens.js` 管理，各插件同步副本（`scripts/sync_tokens.py`），去掉 QML 里的硬编码颜色。
+- 新 Logo、横幅和演示动图，README 精简，新增 `docs/PROFILE_GUIDE.md`、`docs/APP_RULES.md`、`docs/REFERENCE.md`。
+
+### 🧪 工程
+- 测试增至 69 个。
+
+---
+
+## [v1.7.1] - 2026-10-14
+
+### 🔒 安全
+- 拼进 `hyprctl eval` 的字符串（绑定名、命令参数、窗口地址）统一经过 `lua_str()` 转义，命令里带引号、反斜杠或换行不会再弄坏整批绑定，也无法注入 Lua。
+
+### 🐛 修复
+- 运行目录改为优先读取 `XDG_RUNTIME_DIR`，引擎、卸载脚本和模式指示器插件保持一致（指示器原来写死了 `/run/user/1000`）。
+- 切换失败时回滚到切换前的模式，而不是掉回原生键位，并防止回滚递归。
+- systemd 服务加上 `ConditionPathExists` 和重启次数上限；仓库放在临时目录时安装会给出警告。
+- 原先静默吞掉的异常改为在 `OMNIPAL_DEBUG=1` 时输出到 stderr。
+- 卸载会删除安装时新建、且已为空的目录。
+- 缺少 `hyprctl` 时，安装脚本说明 OmniPal 只支持 Omarchy / Hyprland。
+- `omni-profile doctor` 显示的版本号改为与发布版本一致。
+
+### 🎨 界面
+- 新的炭黑、米白、琥珀视觉：新 Logo 和横幅（`docs/assets/`）。
+- 插件颜色统一走设计 token：`plugins/shared/Tokens.js` 为唯一源头，用 `scripts/sync_tokens.py` 同步到各插件，一致性校验检查副本是否同步。
+
+### 🧪 工程
+- 新增 GitHub Actions，在 Python 3.11 / 3.12 / 3.13 上跑测试；没有 Hyprland 时测试自动使用 `hyprctl` 替身。
+- 新增转义和回滚测试，共 53 个测试。
+- 新增 `docs/FAQ.md`。
+
+---
+
 ## [v1.7.0] - 2026-09-15
 
 ### ⌨️ omni.cheat-sheet 交互与视觉大升级 — Milestone 5

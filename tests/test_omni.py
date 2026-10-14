@@ -15,6 +15,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import shutil as _shutil
+if not _shutil.which("hyprctl") or os.environ.get("OMNIPAL_FAKE_HYPRCTL") == "1":
+    os.environ["PATH"] = str(Path(__file__).resolve().parent / "fakebin") + os.pathsep + os.environ.get("PATH", "")
+if not os.environ.get("XDG_RUNTIME_DIR") or not os.path.isdir(os.environ["XDG_RUNTIME_DIR"]):
+    os.environ["XDG_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="omnipal-test-")
+
 from engine.engine import OmniPalEngine, format_combo
 from scripts.check_consistency import check_consistency
 
@@ -88,9 +94,10 @@ class TestOmniPal(unittest.TestCase):
     def test_hard_stop_compliance(self):
         """Ensures that engine runtime state files are strictly confined to tmpfs (/run/user/)."""
         from engine.engine import STATE_FILE, OVERLAY_FILE, RUN_DIR
-        self.assertTrue(str(RUN_DIR).startswith("/run/user/"))
-        self.assertTrue(str(STATE_FILE).startswith("/run/user/"))
-        self.assertTrue(str(OVERLAY_FILE).startswith("/run/user/"))
+        expected_base = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+        self.assertTrue(str(RUN_DIR).startswith(expected_base))
+        self.assertTrue(str(STATE_FILE).startswith(str(RUN_DIR)))
+        self.assertTrue(str(OVERLAY_FILE).startswith(str(RUN_DIR)))
         # Ensure no configuration directories are referenced as write targets
         self.assertNotIn(".config/hypr", str(STATE_FILE))
         self.assertNotIn("shell.json", str(STATE_FILE))
@@ -201,18 +208,18 @@ class TestOmniPal(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp_dir:
             user_dir = Path(tmp_dir)
-            # 1. Create a brand new custom profile 'kde'
-            kde_file = user_dir / "kde.json"
-            kde_data = {
-                "id": "kde",
+            # 1. Create a brand new custom profile 'gnome'
+            gnome_file = user_dir / "gnome.json"
+            gnome_data = {
+                "id": "gnome",
                 "name": "KDE Plasma 模式",
                 "description": "User custom KDE bindings",
                 "bindings": [
                     {"action": "file_manager", "mod": "CTRL ALT", "key": "e"}
                 ]
             }
-            with open(kde_file, "w", encoding="utf-8") as f:
-                json.dump(kde_data, f)
+            with open(gnome_file, "w", encoding="utf-8") as f:
+                json.dump(gnome_data, f)
 
             # 2. Create an override profile for 'windows'
             win_override_file = user_dir / "windows.json"
@@ -230,20 +237,21 @@ class TestOmniPal(unittest.TestCase):
             user_engine = OmniPalEngine(PROJECT_ROOT, user_profiles_dir=user_dir)
             profiles_meta = {p["id"]: p for p in user_engine.list_profiles()}
 
-            self.assertIn("kde", user_engine.profiles)
-            self.assertEqual(profiles_meta["kde"]["source"], "user")
-            self.assertFalse(profiles_meta["kde"]["override"])
+            self.assertIn("gnome", user_engine.profiles)
+            self.assertEqual(profiles_meta["gnome"]["source"], "user")
+            self.assertFalse(profiles_meta["gnome"]["override"])
 
             self.assertIn("windows", user_engine.profiles)
             self.assertEqual(profiles_meta["windows"]["source"], "user")
             self.assertTrue(profiles_meta["windows"]["override"])
             self.assertEqual(user_engine.profiles["windows"]["name"], "Windows (Custom Overridden)")
 
-            # Test dynamic cycling order: omarchy -> windows -> mac -> kde -> omarchy
+            # Test dynamic cycling order: omarchy -> windows -> mac -> kde -> gnome -> omarchy
             user_engine.switch_mode("omarchy")
             self.assertEqual(user_engine.cycle_mode(), "windows")
             self.assertEqual(user_engine.cycle_mode(), "mac")
             self.assertEqual(user_engine.cycle_mode(), "kde")
+            self.assertEqual(user_engine.cycle_mode(), "gnome")
             self.assertEqual(user_engine.cycle_mode(), "omarchy")
 
             # Test consistency checker passes on valid user profiles
@@ -273,14 +281,17 @@ class TestOmniPal(unittest.TestCase):
 
         self.assertIn("omarchy", profiles)
         self.assertEqual(profiles["omarchy"]["display"].get("icon"), "⊡")
+        self.assertIn("kde", profiles)
+        self.assertEqual(profiles["kde"]["display"].get("brief"), "KDE")
 
         # Test state includes display
         self.engine.switch_mode("windows")
         state = self.engine.get_state()
         self.assertEqual(state.get("display", {}).get("icon"), "⊞")
 
-        # Test reverse cycle: windows -> omarchy -> mac -> windows
+        # Test reverse cycle: windows -> omarchy -> kde -> mac -> windows
         self.assertEqual(self.engine.cycle_mode(reverse=True), "omarchy")
+        self.assertEqual(self.engine.cycle_mode(reverse=True), "kde")
         self.assertEqual(self.engine.cycle_mode(reverse=True), "mac")
         self.assertEqual(self.engine.cycle_mode(reverse=True), "windows")
 
@@ -924,7 +935,378 @@ class TestWindowPolicyAndModeIndicator(unittest.TestCase):
             self.assertIsInstance(res, dict)
             self.assertIn("address", res)
 
+
+
+
+
+class TestLuaEscaping(unittest.TestCase):
+    def test_lua_str_escapes_quotes_backslashes_and_newlines(self):
+        from engine.engine import lua_str
+        self.assertEqual(lua_str('notify-send "hi"'), '"notify-send \\"hi\\""')
+        self.assertEqual(lua_str("a\\b"), '"a\\\\b"')
+        self.assertEqual(lua_str("x\ny"), '"x\\ny"')
+        self.assertEqual(lua_str("\x01"), '"\\001"')
+        self.assertEqual(lua_str("中文"), '"中文"')
+
+    def test_switch_mode_escapes_user_command(self):
+        from engine.engine import OmniPalEngine
+        engine = OmniPalEngine()
+        captured = []
+        engine._eval_lua = lambda code: captured.append(code) or True
+        payload = 'notify-send "hi"\nend os.execute("rm -rf ~") --'
+        engine.profiles["evil"] = {"bindings": [{"action": "custom_cmd_x", "mod": "SUPER", "key": "Q", "arg": payload}]}
+        self.assertTrue(engine.switch_mode("evil"))
+        code = captured[-1]
+        self.assertIn('notify-send \\"hi\\"\\nend os.execute(\\"rm -rf ~\\") --', code)
+        self.assertNotIn('"hi"\n', code)
+        engine.restore()
+
+
+
+class TestSwitchRollback(unittest.TestCase):
+    """A failed switch must land the user back in the mode they had before, not the native baseline."""
+
+    def setUp(self):
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.engine.record_switch = lambda mode_id: None
+
+    def test_failed_switch_restores_previous_mode(self):
+        self.engine._eval_lua = lambda code: True
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertEqual(self.engine.get_state().get("mode"), "windows")
+
+        calls = []
+
+        def flaky_eval(code):
+            calls.append(code)
+            # Fail only the first batch (the switch to mac); restore and re-apply succeed.
+            return len(calls) > 1
+
+        self.engine._eval_lua = flaky_eval
+        self.assertFalse(self.engine.switch_mode("mac"))
+        self.assertEqual(self.engine.get_state().get("mode"), "windows")
+        combos = {r["combo"] for r in self.engine._get_active_overlay()}
+        expected = {format_combo(b.get("mod", "").strip(), b["key"].strip())
+                    for b in self.engine.profiles["windows"]["bindings"] if b.get("key", "").strip()}
+        self.assertEqual(combos, expected)
+
+    def test_failed_rollback_does_not_recurse(self):
+        self.engine._eval_lua = lambda code: True
+        self.engine.switch_mode("windows")
+        calls = []
+        self.engine._eval_lua = lambda code: calls.append(code) or False
+        self.assertFalse(self.engine.switch_mode("mac"))
+        self.assertLess(len(calls), 6)
+
+
+class TestProfileExportImport(unittest.TestCase):
+    """omni-profile export/import round-trip, validation and safety guards."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.env = dict(os.environ, OMNIPAL_USER_PROFILES_DIR=str(Path(self._tmp.name) / "profiles"))
+        self.cli = [sys.executable, str(PROJECT_ROOT / "bin" / "omni-profile")]
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args, stdin=None):
+        return subprocess.run(self.cli + list(args), input=stdin, capture_output=True, text=True, env=self.env)
+
+    def test_round_trip_with_new_id(self):
+        out = Path(self._tmp.name) / "win.json"
+        self.assertEqual(self.run_cli("export", "windows", "-o", str(out)).returncode, 0)
+        data = json.loads(out.read_text(encoding="utf-8"))
+        self.assertFalse(any(k.startswith("_") for k in data))
+        r = self.run_cli("import", str(out), "--id", "my-win")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        saved = json.loads((Path(self.env["OMNIPAL_USER_PROFILES_DIR"]) / "my-win.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["id"], "my-win")
+        self.assertEqual(saved["bindings"], data["bindings"])
+
+    def test_refuses_builtin_name_bad_id_and_invalid_action(self):
+        out = Path(self._tmp.name) / "win.json"
+        self.run_cli("export", "windows", "-o", str(out))
+        self.assertNotEqual(self.run_cli("import", str(out)).returncode, 0)
+        self.assertNotEqual(self.run_cli("import", "-", stdin='{"id":"Bad ID","bindings":[]}').returncode, 0)
+        bad = '{"id":"b","bindings":[{"action":"no_such_action","key":"A"}]}'
+        self.assertNotEqual(self.run_cli("import", "-", stdin=bad).returncode, 0)
+        self.assertFalse(Path(self.env["OMNIPAL_USER_PROFILES_DIR"]).joinpath("b.json").exists())
+
+    def test_custom_command_requires_confirmation(self):
+        prof = '{"id":"cmdp","bindings":[{"action":"snap_left","mod":"SUPER","key":"F9","arg":"echo hi"}]}'
+        r = self.run_cli("import", "-", stdin=prof)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("echo hi", r.stdout)
+        self.assertEqual(self.run_cli("import", "-", "--yes", stdin=prof).returncode, 0)
+
+
+class TestDoctorInstallCheck(unittest.TestCase):
+    """doctor's installation self-check: CLI/plugin links, systemd unit, token copies, with fixes."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.root = PROJECT_ROOT.resolve()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _install_links(self):
+        (self.home / ".local" / "bin").mkdir(parents=True)
+        (self.home / ".local" / "bin" / "omni-profile").symlink_to(self.root / "bin" / "omni-profile")
+        pdir = self.home / ".config" / "omarchy" / "plugins"
+        pdir.mkdir(parents=True)
+        for src in sorted((self.root / "plugins").glob("omni.*")):
+            (pdir / src.name).symlink_to(src)
+        return pdir
+
+    def test_fresh_home_reports_missing_with_reinstall_fix(self):
+        info = self.engine.check_installation(home=self.home)
+        self.assertEqual(info["cli"], "missing")
+        self.assertTrue(all(v == "missing" for v in info["plugins"].values()))
+        self.assertTrue(info["problems"])
+        self.assertTrue(all("install.sh" in p["fix"] for p in info["problems"]))
+
+    def test_clean_install_has_no_problems(self):
+        self._install_links()
+        info = self.engine.check_installation(home=self.home)
+        self.assertEqual(info["cli"], "ok")
+        self.assertEqual(info["problems"], [])
+
+    def test_broken_plugin_link_detected(self):
+        pdir = self._install_links()
+        victim = sorted(pdir.iterdir())[0]
+        victim.unlink()
+        victim.symlink_to(self.home / "gone")
+        info = self.engine.check_installation(home=self.home)
+        self.assertEqual(info["plugins"][victim.name], "broken")
+        self.assertEqual(len(info["problems"]), 1)
+
+
+class TestSettingsCounts(unittest.TestCase):
+    def test_settings_panel_counts_match_profiles(self):
+        import re
+        qml = (PROJECT_ROOT / "plugins" / "omni.settings" / "SettingsPanel.qml").read_text(encoding="utf-8")
+        for mid in ("windows", "mac", "kde"):
+            m = re.search(r'id:\s*"%s".*?count:\s*(\d+)' % mid, qml, re.S)
+            self.assertIsNotNone(m, mid)
+            prof = json.loads((PROJECT_ROOT / "profiles" / f"{mid}.json").read_text(encoding="utf-8"))
+            self.assertEqual(int(m.group(1)), len(prof["bindings"]), mid)
+
+
+
+class TestAppRules(unittest.TestCase):
+    """Per-app auto switching: matching, persistence and return-to-base behavior."""
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._old = os.environ.get("OMNIPAL_CONFIG_DIR")
+        os.environ["OMNIPAL_CONFIG_DIR"] = self._tmp.name
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.engine.restore()
+
+    def tearDown(self):
+        self.engine.restore()
+        if self._old is None:
+            os.environ.pop("OMNIPAL_CONFIG_DIR", None)
+        else:
+            os.environ["OMNIPAL_CONFIG_DIR"] = self._old
+        self._tmp.cleanup()
+
+    def test_match_kinds_and_case(self):
+        rules = {"enabled": True, "rules": [
+            {"class": "Code", "mode": "mac"},
+            {"class": "org.kde.", "match": "prefix", "mode": "kde"},
+            {"class": "^jetbrains-", "match": "regex", "mode": "windows"},
+            {"class": "firefox", "mode": "mac", "enabled": False},
+        ]}
+        m = self.engine.match_app_rule
+        self.assertEqual(m("code", rules)["mode"], "mac")
+        self.assertEqual(m("org.kde.dolphin", rules)["mode"], "kde")
+        self.assertEqual(m("jetbrains-idea", rules)["mode"], "windows")
+        self.assertIsNone(m("firefox", rules))
+        self.assertIsNone(m("code", {"enabled": False, "rules": rules["rules"]}))
+
+    def test_save_rejects_unknown_mode(self):
+        with self.assertRaises(ValueError):
+            self.engine.save_app_rules({"enabled": True, "rules": [{"class": "x", "mode": "nope"}]})
+
+    def test_switch_and_return_to_manual_mode(self):
+        self.engine.save_app_rules({"enabled": True, "default_mode": None,
+                                    "rules": [{"class": "code", "mode": "mac"}]})
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertEqual(self.engine.apply_app_rule("code"), "mac")
+        self.assertEqual(self.engine.get_state().get("mode"), "mac")
+        self.assertEqual(self.engine.apply_app_rule("kitty"), "windows")
+        self.assertEqual(self.engine.get_state().get("mode"), "windows")
+        self.assertIsNone(self.engine.apply_app_rule("kitty"))
+
+    def test_manual_switch_during_rule_becomes_new_base(self):
+        self.engine.save_app_rules({"enabled": True, "rules": [{"class": "code", "mode": "mac"}]})
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertEqual(self.engine.apply_app_rule("code"), "mac")
+        self.assertTrue(self.engine.switch_mode("kde"))  # user overrides by hand inside VS Code
+        self.assertIsNone(self.engine.apply_app_rule("kitty"))  # stays on kde, not back to windows
+        self.assertEqual(self.engine.get_state().get("mode"), "kde")
+
+
+class TestRulesAddCurrent(unittest.TestCase):
+    """rules add/test --current read the focused window's class (via the hyprctl stub)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        fakebin = str(PROJECT_ROOT / "tests" / "fakebin")
+        self.env = dict(os.environ, OMNIPAL_CONFIG_DIR=self._tmp.name,
+                        PATH=fakebin + os.pathsep + os.environ.get("PATH", ""))
+        self.cli = [sys.executable, str(PROJECT_ROOT / "bin" / "omni-profile"), "rules"]
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        return subprocess.run(self.cli + list(args), capture_output=True, text=True, env=self.env)
+
+    def test_add_current_uses_focused_class(self):
+        r = self.run_cli("add", "--current", "mac", "--delay", "0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rules = json.loads(self.run_cli("list", "--json").stdout)["rules"]
+        self.assertEqual([(x["class"], x["mode"]) for x in rules], [("fake", "mac")])
+        self.assertIn("fake -> mac", self.run_cli("test", "--current", "--delay", "0").stdout)
+
+    def test_add_without_mode_is_rejected(self):
+        self.assertNotEqual(self.run_cli("add", "code").returncode, 0)
+        self.assertNotEqual(self.run_cli("add", "--current", "--delay", "0").returncode, 0)
+
+
+class TestCheatSheetHighlight(unittest.TestCase):
+    def test_highlight_escapes_and_marks_matches(self):
+        import shutil
+        if not shutil.which("node"):
+            self.skipTest("node not available")
+        js = PROJECT_ROOT / "plugins" / "omni.cheat-sheet" / "CheatSheetData.js"
+        script = (
+            "const fs=require('fs');eval(fs.readFileSync(process.argv[1],'utf8').replace('.pragma library',''));"
+            "console.log(JSON.stringify([highlightMatches('关闭 <窗口> Close','clo','#e2a03f'),highlightMatches('abc','',null)]))"
+        )
+        out = subprocess.run(["node", "-e", script, str(js)], capture_output=True, text=True, check=True).stdout
+        a, b = json.loads(out)
+        self.assertEqual(a, '关闭 &lt;窗口&gt; <b><font color="#e2a03f">Clo</font></b>se')
+        self.assertEqual(b, "abc")
+
+
+
+class TestAppRulesExportImport(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.env = dict(os.environ, OMNIPAL_CONFIG_DIR=self._tmp.name)
+        self.cli = [sys.executable, str(PROJECT_ROOT / "bin" / "omni-profile")]
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *a, stdin=None):
+        return subprocess.run(self.cli + list(a), env=self.env, capture_output=True, text=True, input=stdin)
+
+    def test_roundtrip_merge_and_skip_unknown_mode(self):
+        self.assertEqual(self.run_cli("rules", "add", "code", "mac").returncode, 0)
+        exported = self.run_cli("rules", "export").stdout
+        self.assertIn('"code"', exported)
+        bundle = json.dumps({"rules": [{"class": "code", "mode": "windows"},
+                                       {"class": "kitty", "mode": "omarchy"},
+                                       {"class": "x", "mode": "does-not-exist"}]})
+        res = self.run_cli("rules", "import", "-", stdin=bundle)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("跳过", res.stdout)
+        data = json.loads((Path(self._tmp.name) / "app_rules.json").read_text())
+        modes = {r["class"]: r["mode"] for r in data["rules"]}
+        self.assertEqual(modes, {"code": "windows", "kitty": "omarchy"})
+
+    def test_replace(self):
+        self.run_cli("rules", "add", "code", "mac")
+        res = self.run_cli("rules", "import", "-", "--replace", stdin=json.dumps({"rules": [{"class": "kitty", "mode": "mac"}]}))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        data = json.loads((Path(self._tmp.name) / "app_rules.json").read_text())
+        self.assertEqual([r["class"] for r in data["rules"]], ["kitty"])
+
+class TestForwardShortcut(unittest.TestCase):
+    """mac mode forwards Super+W etc. to the app via sendshortcut."""
+
+    def setUp(self):
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.evals, self.calls = [], []
+        self.engine._eval_lua = lambda code: self.evals.append(code) or True
+        self.engine._reload_hyprland = lambda: self.calls.append("reload") or True
+        self.engine._write_active_overlay = lambda recs: setattr(self, "overlay", recs)
+        self.engine._get_active_overlay = lambda: getattr(self, "overlay", [])
+        self.engine._write_state = lambda *a, **k: None
+        self.engine.record_switch = lambda *a, **k: None
+        self.engine.get_persistence_status = lambda: {"enabled": False}
+
+    def test_parse_and_terminal(self):
+        from engine.engine import parse_forward, forward_for_class
+        self.assertEqual(parse_forward("ctrl shift t"), (["CTRL", "SHIFT"], "T"))
+        self.assertEqual(forward_for_class("CTRL W", "firefox"), (["CTRL"], "W"))
+        self.assertEqual(forward_for_class("CTRL W", "Alacritty"), (["CTRL", "SHIFT"], "W"))
+        self.assertEqual(forward_for_class("CTRL SHIFT T", "kitty"), (["CTRL", "SHIFT"], "T"))
+        for bad in ["", "CTRL W;rm", 'CTRL "x', "C-1 W"]:
+            with self.assertRaises(ValueError):
+                parse_forward(bad)
+
+    def test_mac_unbinds_native_and_quotes_lua(self):
+        from engine.engine import lua_str
+        self.assertTrue(self.engine.switch_mode("mac"))
+        lua = self.evals[-1]
+        fw = [b for b in self.overlay if b.get("native_unbound")]
+        self.assertGreaterEqual(len(fw), 10)
+        for b in fw:
+            self.assertIn(f"hl.unbind({lua_str(b['combo'])})", lua)
+        self.assertNotIn("omni-profile send", lua)  # no external process per key
+        self.assertIn('hl.dsp.send_shortcut({ mods = t and "CTRL SHIFT" or "CTRL", key = "W" })', lua)
+        self.assertIn('["alacritty"] = true', lua)
+
+    def test_bad_forward_is_skipped(self):
+        prof = self.engine.profiles["mac"]
+        saved = list(prof["bindings"])
+        prof["bindings"] = saved + [{"mod": "SUPER", "key": "F12", "action": "forward_shortcut", "forward": 'CTRL ")os.exit('}]
+        try:
+            self.engine.switch_mode("mac")
+        finally:
+            prof["bindings"] = saved
+        self.assertNotIn("os.exit", self.evals[-1])
+
+    def test_restore_and_switch_reload_natives(self):
+        self.engine.switch_mode("mac")
+        self.engine.switch_mode("windows")
+        self.assertEqual(self.calls, ["reload"])
+        self.assertFalse(any(b.get("native_unbound") for b in self.overlay))
+        self.engine.restore()
+        self.assertEqual(self.calls, ["reload"])  # windows unbound nothing native
+
+    def test_user_terminals(self):
+        from engine.engine import load_terminal_patterns, is_terminal_class, forward_lua
+        with tempfile.TemporaryDirectory() as d:
+            old = os.environ.get("OMNIPAL_CONFIG_DIR")
+            os.environ["OMNIPAL_CONFIG_DIR"] = d
+            try:
+                Path(d, "terminals.json").write_text('["MyTerm", "rio*", "x\\"] = true }) os.exit() --"]')
+                pats = load_terminal_patterns()
+                self.assertTrue(is_terminal_class("myterm", pats))
+                self.assertTrue(is_terminal_class("rio-nightly", pats))
+                self.assertFalse(is_terminal_class("firefox", pats))
+                lua = forward_lua(["CTRL"], "W", pats)
+                self.assertIn('"rio"', lua)
+                from engine.engine import lua_str
+                evil = [p for p in pats if "os.exit" in p][0]
+                self.assertIn(f"[{lua_str(evil)}] = true", lua)  # stays one escaped literal
+            finally:
+                if old is None: os.environ.pop("OMNIPAL_CONFIG_DIR", None)
+                else: os.environ["OMNIPAL_CONFIG_DIR"] = old
+
+    def test_send_cli_stub(self):
+        self.assertTrue(self.engine.send_shortcut("CTRL W", window_class="kitty"))
+        self.assertFalse(self.engine.send_shortcut("CTRL W;x", window_class="kitty"))
+
+
 if __name__ == "__main__":
     unittest.main()
-
-

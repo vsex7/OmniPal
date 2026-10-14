@@ -2,12 +2,13 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import Quickshell 1.0
 import Quickshell.Io 1.0
+import "Tokens.js" as Tokens
 
 Item {
     id: root
 
     // --- Config ---
-    property string stateFilePath: "/run/user/1000/omnipal/state.json"
+    property string stateFilePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/omnipal/state.json"
     property int pollIntervalMs: 2000
 
     // --- State ---
@@ -20,16 +21,19 @@ Item {
     readonly property var modeIcons: ({
         "windows": "⊞",
         "mac":     "◆",
+        "kde":     "❖",
         "omarchy": "⊡"
     })
     readonly property var modeColors: ({
-        "windows": "#0078d4",
-        "mac":     "#a2aaad",
-        "omarchy": "#a3be8c"
+        "windows": Tokens.mode.windows,
+        "mac":     Tokens.mode.mac,
+        "kde":     Tokens.mode.kde,
+        "omarchy": Tokens.mode.omarchy
     })
     readonly property var modeNames: ({
         "windows": "Windows 11 习惯模式",
         "mac":     "macOS 习惯模式",
+        "kde":     "KDE Plasma 习惯模式",
         "omarchy": "Omarchy 原生模式"
     })
 
@@ -100,7 +104,7 @@ Item {
     }
 
     // --- Derived ---
-    property color currentColor: root.modeColors[root.currentMode] || "#a3be8c"
+    property color currentColor: root.modeColors[root.currentMode] || Tokens.mode.omarchy
 
     // --- Helpers ---
 
@@ -140,7 +144,7 @@ Item {
             font.family: "monospace"
             font.pixelSize: 14
             font.bold: true
-            color: root.engineRunning ? root.currentColor : "#bf616a"
+            color: root.engineRunning ? root.currentColor : Tokens.semantic.danger
             anchors.verticalCenter: parent.verticalCenter
         }
 

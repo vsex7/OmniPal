@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="560" font-family="Noto Sans Mono CJK SC">
+<rect width="880" height="560" fill="#16161a"/>
+<rect x="0" y="0" width="200" height="560" fill="#1e1e23"/>
+<g font-size="15" fill="#8a867d"><text x="24" y="48" fill="#e6e1d6" font-size="18" font-weight="700">omnipal_</text>
+<text x="24" y="100">模式</text><text x="24" y="136">吸附</text>
+<rect x="0" y="152" width="3" height="28" fill="#e2a03f"/><text x="24" y="172" fill="#e6e1d6">应用规则</text>
+<text x="24" y="208">持久化</text><text x="24" y="244">诊断</text></g>
+<text x="232" y="56" font-size="20" fill="#e6e1d6" font-weight="700">应用规则</text>
+<text x="232" y="82" font-size="13" fill="#8a867d">焦点切到这些应用时自动换模式，离开后回到默认模式。</text>
+<g font-size="13"><rect x="232" y="104" width="616" height="44" fill="none" stroke="#3a3a40"/>
+<text x="248" y="131" fill="#8a867d">默认模式</text>
+<rect x="736" y="114" width="96" height="24" fill="none" stroke="#e6e1d6"/><text x="784" y="131" fill="#e6e1d6" text-anchor="middle">omarchy v</text>
+<rect x="752" y="164" width="96" height="30" fill="#e2a03f"/><text x="800" y="184" fill="#16161a" text-anchor="middle" font-weight="700">+ 添加</text></g>
+<g font-size="12" fill="#8a867d"><text x="248" y="226">应用（窗口类名）</text><text x="440" y="226">匹配</text><text x="560" y="226">模式</text><text x="720" y="226">启用</text></g>
+<path d="M232 236H848" stroke="#3a3a40"/>
+<g font-size="14">
+<text x="248" y="272" fill="#e6e1d6">code</text><text x="248" y="290" font-size="11" fill="#8a867d">Visual Studio Code</text>
+<rect x="560" y="258" width="10" height="10" fill="#b5ada0"/><text x="578" y="268" fill="#e6e1d6">mac</text>
+<rect x="720" y="258" width="32" height="16" fill="#e2a03f"/><rect x="738" y="260" width="12" height="12" fill="#16161a"/><text x="828" y="270" fill="#8a867d" text-anchor="end">×</text>
+<path d="M232 306H848" stroke="#2a2a30"/>
+<text x="248" y="340" fill="#e6e1d6">firefox</text><text x="248" y="358" font-size="11" fill="#8a867d">Firefox</text>
+<rect x="560" y="326" width="10" height="10" fill="#6f93b8"/><text x="578" y="336" fill="#e6e1d6">windows</text>
+<rect x="720" y="326" width="32" height="16" fill="#e2a03f"/><rect x="738" y="328" width="12" height="12" fill="#16161a"/><text x="828" y="338" fill="#8a867d" text-anchor="end">×</text>
+<path d="M232 374H848" stroke="#2a2a30"/>
+<text x="248" y="408" fill="#8a867d">Alacritty</text><text x="248" y="426" font-size="11" fill="#5a5850">终端</text>
+<rect x="560" y="394" width="10" height="10" fill="#8fa77a"/><text x="578" y="404" fill="#8a867d">omarchy</text>
+<rect x="720" y="394" width="32" height="16" fill="none" stroke="#3a3a40"/><rect x="722" y="396" width="12" height="12" fill="#3a3a40"/><text x="828" y="406" fill="#8a867d" text-anchor="end">×</text>
+</g>
+<rect x="232" y="460" width="616" height="64" fill="none" stroke="#3a3a40" stroke-dasharray="4 4"/>
+<text x="248" y="488" font-size="13" fill="#8a867d">当前焦点  <tspan fill="#e6e1d6">code</tspan>  →  <tspan fill="#e2a03f">mac</tspan></text>
+<text x="248" y="510" font-size="12" fill="#5a5850">点“添加”时自动填入当前焦点应用的类名</text>
+<text x="440" y="268" font-size="13" fill="#8a867d">精确</text><text x="440" y="336" font-size="13" fill="#8a867d">前缀</text><text x="440" y="404" font-size="13" fill="#8a867d">精确</text></svg>

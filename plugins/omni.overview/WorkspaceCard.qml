@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "Tokens.js" as Tokens
 
 Rectangle {
   id: root
@@ -21,7 +22,7 @@ Rectangle {
   readonly property string workspaceName: root.workspaceData ? (root.workspaceData.name || String(root.workspaceId)) : "1"
   readonly property bool isNewSlot: root.workspaceData && root.workspaceData.isNewSlot === true
   readonly property bool isDark: (Color.background.r * 0.299 + Color.background.g * 0.587 + Color.background.b * 0.114) < 0.5
-  readonly property color accentColor: Color.accent || "#88c0d0"
+  readonly property color accentColor: Color.accent || Tokens.semantic.accent
 
   radius: 8
   color: root.isNewSlot

@@ -225,3 +225,27 @@ function filterRows(rawRows, query, selectedCategory) {
   }
   return out;
 }
+
+// Escapes text for Qt StyledText, then wraps every case-insensitive match of
+// query in a bold, colored span. Empty query returns the escaped text.
+function escapeStyled(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function highlightMatches(text, query, color) {
+  var src = String(text || "");
+  var q = String(query || "").trim();
+  if (q === "") return escapeStyled(src);
+  var lower = src.toLowerCase();
+  var ql = q.toLowerCase();
+  var out = "";
+  var pos = 0;
+  while (true) {
+    var hit = lower.indexOf(ql, pos);
+    if (hit === -1) break;
+    out += escapeStyled(src.substring(pos, hit));
+    out += '<b><font color="' + escapeStyled(color || "#e2a03f") + '">' + escapeStyled(src.substring(hit, hit + q.length)) + "</font></b>";
+    pos = hit + q.length;
+  }
+  return out + escapeStyled(src.substring(pos));
+}

@@ -13,7 +13,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from engine.engine import OmniPalEngine, run_daemon, stats_file_path
+from engine.engine import OmniPalEngine, run_daemon, stats_file_path, LUA_DISPATCHERS
 
 def cmd_status(engine: OmniPalEngine, args):
     state = engine.get_state()
@@ -121,6 +121,10 @@ def cmd_cheatsheet(engine: OmniPalEngine, args):
         desc_str = item["description"]
         print(f"{key_str}{name_str}{desc_str}")
 
+def cmd_send(engine: OmniPalEngine, args):
+    if not engine.send_shortcut(" ".join(args.keys), window_class=args.window_class):
+        sys.exit(1)
+
 def cmd_snap(engine: OmniPalEngine, args):
     success = engine.snap(args.zone, target_address=getattr(args, "address", None), no_hud=getattr(args, "no_hud", False))
     if not success:
@@ -184,11 +188,25 @@ def cmd_doctor(engine: OmniPalEngine, args):
 
     print(f"  • Schema 与 Profile 一致性: {'✅ 100% 校验通过' if diag.get('consistency') else '❌ 校验失败'}")
 
+    inst = diag.get("install", {})
+    if inst:
+        plugins = inst.get("plugins", {})
+        ok_plugins = sum(1 for v in plugins.values() if v == "ok")
+        print(f"  • 命令行链接: {'✅ 正常' if inst.get('cli') == 'ok' else '❌ ' + str(inst.get('cli'))}")
+        print(f"  • 插件链接: {ok_plugins}/{len(plugins)} 正常")
+        print(f"  • 后台服务: {inst.get('service')}")
+        print(f"  • 颜色 Token: {'✅ 已同步' if inst.get('tokens_in_sync') else '❌ 未同步'}")
+
     issues = diag.get("issues", [])
     if issues:
         print("\n⚠️ 诊断发现的问题:")
         for iss in issues:
             print(f"    - {iss}")
+        fixes = list(dict.fromkeys(diag.get("fixes", [])))
+        if fixes:
+            print("\n🔧 建议修复:")
+            for fx in fixes:
+                print(f"    $ {fx}")
         sys.exit(1)
     else:
         print("\n🎉 系统运行良好，无冲突与异常。")
@@ -205,6 +223,92 @@ def cmd_list(engine: OmniPalEngine, args):
         if p.get("override"):
             src += " (覆盖)"
         print(f"{p['id'].ljust(12)}{p['name'].ljust(22)}{str(p['bindings_count']).ljust(10)}{src.ljust(12)}{p['description']}")
+
+
+PROFILE_ID_RE = __import__("re").compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+
+def _clean_profile(p_data: dict) -> dict:
+    """Drops engine-internal fields (prefixed with _) so the profile is portable."""
+    return {k: v for k, v in p_data.items() if not k.startswith("_")}
+
+def cmd_export(engine: OmniPalEngine, args):
+    p_id = args.profile.lower().strip()
+    if p_id not in engine.profiles:
+        print(f"❌ 找不到模式 '{p_id}'。可用模式: {', '.join(engine.profiles)}", file=sys.stderr)
+        sys.exit(1)
+    text = json.dumps(_clean_profile(engine.profiles[p_id]), ensure_ascii=False, indent=2) + "\n"
+    if not args.output or args.output == "-":
+        sys.stdout.write(text)
+        return
+    out = Path(args.output).expanduser()
+    if out.exists() and not args.force:
+        print(f"❌ {out} 已存在，加 --force 覆盖", file=sys.stderr)
+        sys.exit(1)
+    out.write_text(text, encoding="utf-8")
+    print(f"✅ 已导出 '{p_id}' 到 {out}")
+
+def cmd_import(engine: OmniPalEngine, args):
+    import tempfile, os
+    from scripts.check_consistency import _validate_profile_file
+    try:
+        raw = sys.stdin.read() if args.file == "-" else Path(args.file).expanduser().read_text(encoding="utf-8")
+        p_data = json.loads(raw)
+    except Exception as e:
+        print(f"❌ 读取失败: {e}", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(p_data, dict) or not isinstance(p_data.get("bindings", []), list):
+        print("❌ 文件不是有效的 OmniPal profile", file=sys.stderr)
+        sys.exit(1)
+    p_data = _clean_profile(p_data)
+    if args.id:
+        p_data["id"] = args.id
+    p_id = str(p_data.get("id", "")).lower().strip()
+    if not PROFILE_ID_RE.match(p_id):
+        print(f"❌ 模式 ID '{p_id}' 不合法：只能用小写字母、数字、- 和 _，最长 32 位。可用 --id 指定新 ID", file=sys.stderr)
+        sys.exit(1)
+    p_data["id"] = p_id
+    p_data.setdefault("name", p_id)
+
+    existing = engine.profiles.get(p_id)
+    if existing and not args.force:
+        kind = "内置模式" if existing.get("_source") == "project" else "已有的自定义模式"
+        print(f"❌ '{p_id}' 与{kind}重名。用 --id 换个名字，或加 --force 覆盖", file=sys.stderr)
+        sys.exit(1)
+
+    valid_actions = engine.actions_catalog
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td) / f"{p_id}.json"
+        tmp.write_text(json.dumps(p_data, ensure_ascii=False), encoding="utf-8")
+        if not _validate_profile_file(tmp, valid_actions):
+            print("❌ 校验未通过，未导入", file=sys.stderr)
+            sys.exit(1)
+
+    # 自定义命令会在按键时被执行，导入前列出来让用户心里有数
+    commands = []
+    for b in p_data.get("bindings", []):
+        if b.get("action") not in LUA_DISPATCHERS and b.get("arg"):
+            commands.append(f"  {b.get('mod', '')} {b.get('key', '')}  ->  {b['arg']}")
+    if commands:
+        print("⚠️  这个 profile 会在按键时执行以下命令，请确认来源可信：")
+        print("\n".join(commands))
+        if not args.yes:
+            if not sys.stdin.isatty() or args.file == "-":
+                print("❌ 含自定义命令，非交互环境请加 --yes 确认", file=sys.stderr)
+                sys.exit(1)
+            if input("继续导入？[y/N] ").strip().lower() not in ("y", "yes"):
+                print("已取消")
+                sys.exit(1)
+
+    dest_dir = engine.user_profiles_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{p_id}.json"
+    fd, tmp_path = tempfile.mkstemp(dir=dest_dir, suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(p_data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp_path, dest)
+    print(f"✅ 已导入 '{p_id}'（{len(p_data.get('bindings', []))} 个快捷键）到 {dest}")
+    print(f"   切换: omni-profile switch {p_id}")
 
 def cmd_persist(engine: OmniPalEngine, args):
     action = getattr(args, "persist_action", None)
@@ -251,6 +355,118 @@ def _print_stat_rank(title: str, counts: dict, top: int = 10):
     for i, (name, cnt) in enumerate(ranked, 1):
         print(f"  {i}. {str(name).ljust(22)}{cnt} 次")
 
+def _resolve_current_class(engine: OmniPalEngine, args):
+    """For --current: count down so the user can focus the target app, then read its window class."""
+    import time
+    delay = max(0, int(getattr(args, "delay", 3) or 0))
+    if delay:
+        print(f"⏳ 请在 {delay} 秒内切换到要设置规则的应用窗口…", flush=True)
+        for left in range(delay, 0, -1):
+            print(f"   {left}…", flush=True)
+            time.sleep(1)
+    win = engine.get_active_window() or {}
+    cls = (win.get("class") or win.get("initialClass") or "").strip()
+    if not cls:
+        print("❌ 读不到当前焦点窗口的类名（Hyprland 没在运行，或焦点在桌面上）", file=sys.stderr)
+        sys.exit(1)
+    print(f"🎯 当前应用: {cls}")
+    return cls
+
+def cmd_rules(engine: OmniPalEngine, args):
+    data = engine.load_app_rules()
+    act = args.rules_action or "list"
+    if act in ("add", "test") and getattr(args, "current", False):
+        if act == "add":
+            # `rules add --current mac`: argparse puts the mode into window_class
+            if args.mode is None:
+                args.mode = args.window_class
+        args.window_class = _resolve_current_class(engine, args)
+    if act == "add" and (not args.window_class or not args.mode):
+        print("❌ 用法: omni-profile rules add <窗口类名> <模式>，或 omni-profile rules add --current <模式>", file=sys.stderr)
+        sys.exit(1)
+    if act == "test" and not args.window_class:
+        print("❌ 用法: omni-profile rules test <窗口类名>，或 omni-profile rules test --current", file=sys.stderr)
+        sys.exit(1)
+    if act == "list":
+        if getattr(args, "json", False):
+            print(json.dumps(data, ensure_ascii=False))
+            return
+        print(f"应用规则: {'启用' if data['enabled'] else '停用'}，无匹配时回到: {data['default_mode'] or '手动选择的模式'}")
+        if not data["rules"]:
+            print("  （暂无规则，用 omni-profile rules add <窗口类名> <模式> 添加）")
+        for i, r in enumerate(data["rules"], 1):
+            flag = "" if r.get("enabled", True) else " [停用]"
+            print(f"  {i}. {r['class']} ({r.get('match', 'exact')}) -> {r['mode']}{flag}")
+        return
+    if act == "add":
+        data["rules"] = [r for r in data["rules"] if r["class"] != args.window_class]
+        data["rules"].append({"class": args.window_class, "match": args.match, "mode": args.mode, "enabled": True})
+    elif act == "remove":
+        before = len(data["rules"])
+        data["rules"] = [r for r in data["rules"] if r["class"] != args.window_class]
+        if len(data["rules"]) == before:
+            print(f"❌ 没有找到 {args.window_class} 的规则"); sys.exit(1)
+    elif act == "toggle":
+        hit = [r for r in data["rules"] if r["class"] == args.window_class]
+        if not hit:
+            print(f"❌ 没有找到 {args.window_class} 的规则"); sys.exit(1)
+        for r in hit:
+            r["enabled"] = not r.get("enabled", True)
+    elif act in ("enable", "disable"):
+        data["enabled"] = act == "enable"
+    elif act == "default":
+        data["default_mode"] = None if args.mode == "none" else args.mode
+    elif act == "export":
+        text = json.dumps({"omnipal_app_rules": 1, **data}, ensure_ascii=False, indent=2) + "\n"
+        if not args.output or args.output == "-":
+            sys.stdout.write(text); return
+        out = Path(args.output).expanduser()
+        if out.exists() and not args.force:
+            print(f"❌ {out} 已存在，加 --force 覆盖", file=sys.stderr); sys.exit(1)
+        out.write_text(text, encoding="utf-8")
+        print(f"✅ 已导出 {len(data['rules'])} 条应用规则到 {out}")
+        return
+    elif act == "import":
+        try:
+            raw = sys.stdin.read() if args.file == "-" else Path(args.file).expanduser().read_text(encoding="utf-8")
+            incoming = json.loads(raw)
+        except Exception as e:
+            print(f"❌ 读取失败: {e}", file=sys.stderr); sys.exit(1)
+        if not isinstance(incoming, dict) or not isinstance(incoming.get("rules"), list):
+            print("❌ 不是有效的应用规则文件（缺少 rules 列表）", file=sys.stderr); sys.exit(1)
+        new_rules, skipped = [], []
+        for r in incoming["rules"]:
+            if not isinstance(r, dict) or not r.get("class") or not r.get("mode"):
+                skipped.append(str(r)); continue
+            if r["mode"] not in engine.profiles:
+                skipped.append(f"{r['class']} -> {r['mode']}（本机没有这个模式，可先用 import 导入对应 profile）"); continue
+            new_rules.append({"class": str(r["class"]), "match": r.get("match", "exact"),
+                              "mode": r["mode"], "enabled": bool(r.get("enabled", True))})
+        if args.replace:
+            data["rules"] = new_rules
+            if incoming.get("default_mode") in engine.profiles or incoming.get("default_mode") is None:
+                data["default_mode"] = incoming.get("default_mode")
+        else:
+            incoming_classes = {r["class"] for r in new_rules}
+            data["rules"] = [r for r in data["rules"] if r["class"] not in incoming_classes] + new_rules
+        try:
+            engine.save_app_rules(data)
+        except (ValueError, Exception) as e:
+            print(f"❌ {e}", file=sys.stderr); sys.exit(1)
+        print(f"✅ 已导入 {len(new_rules)} 条应用规则（{'替换' if args.replace else '合并'}）")
+        for sk in skipped:
+            print(f"  ⚠️  跳过: {sk}")
+        return
+    elif act == "test":
+        r = engine.match_app_rule(args.window_class, data)
+        print(f"{args.window_class} -> {r['mode'] if r else '无匹配'}")
+        return
+    try:
+        engine.save_app_rules(data)
+    except ValueError as e:
+        print(f"❌ {e}"); sys.exit(1)
+    print("✅ 应用规则已保存，守护进程会在下次切换焦点时生效")
+
 def cmd_stats(engine: OmniPalEngine, args):
     if args.reset:
         if not engine.reset_stats():
@@ -292,6 +508,20 @@ def main():
     p_list.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_list.set_defaults(func=cmd_list)
 
+    # export / import
+    p_export = subparsers.add_parser("export", help="导出一个模式为 JSON，便于分享")
+    p_export.add_argument("profile", help="要导出的模式 ID")
+    p_export.add_argument("-o", "--output", help="输出文件（默认打印到终端）")
+    p_export.add_argument("--force", action="store_true", help="覆盖已存在的输出文件")
+    p_export.set_defaults(func=cmd_export)
+
+    p_import = subparsers.add_parser("import", help="从 JSON 文件导入自定义模式（- 表示从标准输入读取）")
+    p_import.add_argument("file", help="profile JSON 文件路径，或 -")
+    p_import.add_argument("--id", help="以新的模式 ID 导入")
+    p_import.add_argument("--force", action="store_true", help="允许覆盖同名模式")
+    p_import.add_argument("-y", "--yes", action="store_true", help="含自定义命令时不再询问")
+    p_import.set_defaults(func=cmd_import)
+
     # switch
     p_switch = subparsers.add_parser("switch", help="切换至指定快捷键模式")
     p_switch.add_argument("mode", help="目标模式 (如 windows, mac, omarchy 或用户自定义模式)")
@@ -313,6 +543,11 @@ def main():
     p_cheat.set_defaults(func=cmd_cheatsheet)
 
     # snap
+    p_send = subparsers.add_parser("send", help="把快捷键转发给当前窗口（终端自动改为 Ctrl+Shift）")
+    p_send.add_argument("keys", nargs="+", help="例如: CTRL W")
+    p_send.add_argument("--class", dest="window_class", default=None, help="指定窗口类名（默认读取当前焦点窗口）")
+    p_send.set_defaults(func=cmd_send)
+
     p_snap = subparsers.add_parser("snap", help="触发窗口吸附分屏或呼出吸附布局菜单")
     p_snap.add_argument("zone", help="目标吸附区域 (如 left, right, top-left, center, third-center) 或 layouts (呼出选择器)")
     p_snap.add_argument("address", nargs="?", default=None, help="目标窗口十六进制地址 (如 0x56c7c335e060，默认探测鼠标悬停窗口或活动窗口)")
@@ -351,6 +586,36 @@ def main():
     p_p_disable.set_defaults(func=cmd_persist)
 
     # stats
+    p_rules = subparsers.add_parser("rules", help="按应用自动切换模式的规则（需运行守护进程）")
+    rules_sub = p_rules.add_subparsers(dest="rules_action")
+    r_list = rules_sub.add_parser("list", help="列出规则")
+    r_list.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    r_add = rules_sub.add_parser("add", help="添加或更新一条规则")
+    r_add.add_argument("window_class", nargs="?", help="窗口类名，可用 hyprctl activewindow 查看；用 --current 时省略")
+    r_add.add_argument("mode", nargs="?", help="目标模式")
+    r_add.add_argument("--current", action="store_true", help="倒计时后取当前焦点窗口的类名")
+    r_add.add_argument("--delay", type=int, default=3, help="--current 的倒计时秒数（默认 3，0 表示立即读取）")
+    r_add.add_argument("--match", choices=["exact", "prefix", "regex"], default="exact")
+    r_rm = rules_sub.add_parser("remove", help="删除一条规则")
+    r_rm.add_argument("window_class")
+    r_tg = rules_sub.add_parser("toggle", help="启用或停用某一条规则")
+    r_tg.add_argument("window_class")
+    rules_sub.add_parser("enable", help="启用自动切换")
+    rules_sub.add_parser("disable", help="停用自动切换")
+    r_def = rules_sub.add_parser("default", help="无匹配时回到的模式（none 表示回到手动选择的模式）")
+    r_def.add_argument("mode")
+    r_exp = rules_sub.add_parser("export", help="导出应用规则为 JSON")
+    r_exp.add_argument("-o", "--output", help="输出文件（默认打印到终端）")
+    r_exp.add_argument("--force", action="store_true", help="覆盖已存在的输出文件")
+    r_imp = rules_sub.add_parser("import", help="导入应用规则（默认按类名合并，- 表示标准输入）")
+    r_imp.add_argument("file")
+    r_imp.add_argument("--replace", action="store_true", help="用导入的规则整体替换现有规则")
+    r_test = rules_sub.add_parser("test", help="测试某个窗口类名会匹配到哪个模式")
+    r_test.add_argument("window_class", nargs="?")
+    r_test.add_argument("--current", action="store_true", help="倒计时后测试当前焦点窗口")
+    r_test.add_argument("--delay", type=int, default=3, help="--current 的倒计时秒数")
+    p_rules.set_defaults(func=cmd_rules)
+
     p_stats = subparsers.add_parser("stats", help="查看本地使用统计（切换/吸附/动作排行，完全本地零上传；--reset 清空）")
     p_stats.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_stats.add_argument("--reset", action="store_true", help="清空并重置全部本地统计")

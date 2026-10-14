@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "Tokens.js" as Tokens
 
 // OmniPal macOS 风格底部 Dock 栏（omni.mac-dock）
 //
@@ -52,7 +53,7 @@ Item {
   property real contextCenterX: 0
 
   // ---------- 设计令牌 ----------
-  readonly property color dangerColor: "#bf616a"
+  readonly property color dangerColor: Tokens.semantic.danger
   readonly property color hairline: Util.alpha(Color.menu.text, 0.10)
 
   function open(payloadJson) {

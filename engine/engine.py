@@ -18,6 +18,7 @@ import atexit
 import datetime
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -27,12 +28,38 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-RUN_DIR = Path(f"/run/user/{os.getuid()}/omnipal")
+__version__ = "1.8.0"
+
+RUN_DIR = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "omnipal"
 STATE_FILE = RUN_DIR / "state.json"
 OVERLAY_FILE = RUN_DIR / "active_overlay.json"
 SNAP_FILE = RUN_DIR / "snap.json"
 SNAP_LAYOUTS_FILE = RUN_DIR / "snap_layouts.json"
 PID_FILE = RUN_DIR / "daemon.pid"
+APP_RULE_STATE_FILE = RUN_DIR / "app_rule.json"
+
+def lua_str(value: Any) -> str:
+    """Returns a safely quoted Lua string literal (prevents broken batches and Lua injection)."""
+    text = "" if value is None else str(value)
+    out = []
+    for ch in text:
+        o = ord(ch)
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == '"':
+            out.append('\\"')
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif o < 32 or o == 127:
+            out.append("\\%03d" % o)
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
 
 LUA_DISPATCHERS = {
     "close_window": "hl.dsp.window.close()",
@@ -40,6 +67,90 @@ LUA_DISPATCHERS = {
     "workspace_next": "hl.dsp.focus({ workspace = 'e+1' })",
     "workspace_prev": "hl.dsp.focus({ workspace = 'e-1' })",
 }
+
+# Actions that forward a shortcut to the focused app (Hyprland `sendshortcut`).
+# Their combo usually collides with an Omarchy native bind, so the native bind is
+# unbound while the overlay is active and restored via `hyprctl reload`.
+FORWARD_ACTION = "forward_shortcut"
+TERMINAL_CLASSES = (
+    "alacritty", "kitty", "foot", "footclient", "ghostty", "com.mitchellh.ghostty",
+    "org.wezfurlong.wezterm", "wezterm", "xterm", "konsole", "org.kde.konsole",
+    "gnome-terminal", "org.gnome.terminal", "org.gnome.ptyxis", "tilix", "terminator",
+)
+_FORWARD_MOD_RE = re.compile(r"^[A-Za-z]+$")
+_FORWARD_KEY_RE = re.compile(r"^[A-Za-z0-9_]{1,24}$")
+
+
+def parse_forward(spec: str):
+    """'CTRL SHIFT T' -> (['CTRL','SHIFT'], 'T'). Raises ValueError on bad input."""
+    parts = str(spec or "").replace("+", " ").split()
+    if not parts:
+        raise ValueError("empty forward shortcut")
+    *mods, key = parts
+    mods = [m.upper() for m in mods]
+    for m in mods:
+        if not _FORWARD_MOD_RE.match(m):
+            raise ValueError(f"bad modifier: {m!r}")
+    if not _FORWARD_KEY_RE.match(key):
+        raise ValueError(f"bad key: {key!r}")
+    return mods, (key.upper() if len(key) == 1 else key)
+
+
+def load_terminal_patterns() -> List[str]:
+    """Built-in terminals plus ~/.config/omnipal/terminals.json (a JSON list of window
+    classes; a trailing '*' means prefix match). Lower-cased, deduped."""
+    pats = list(TERMINAL_CLASSES)
+    try:
+        path = app_rules_file_path().parent / "terminals.json"
+        if path.exists():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            for x in raw if isinstance(raw, list) else []:
+                if isinstance(x, str) and x.strip():
+                    pats.append(x.strip().lower())
+    except Exception as e:
+        print(f"Warning: Failed to read terminals.json: {e}", file=sys.stderr)
+    return list(dict.fromkeys(pats))
+
+
+def is_terminal_class(window_class: str, patterns: Optional[List[str]] = None) -> bool:
+    wc = (window_class or "").strip().lower()
+    if not wc:
+        return False
+    for p in (patterns if patterns is not None else load_terminal_patterns()):
+        if (p.endswith("*") and wc.startswith(p[:-1])) or wc == p:
+            return True
+    return False
+
+
+def forward_lua(mods: List[str], key: str, patterns: List[str]) -> str:
+    """Pure-Lua forward: reads the focused window class, adds SHIFT for terminals,
+    then dispatches send_shortcut. Every dynamic value goes through lua_str()."""
+    exact = ", ".join(f"[{lua_str(p)}] = true" for p in patterns if not p.endswith("*"))
+    prefix = ", ".join(lua_str(p[:-1]) for p in patterns if p.endswith("*"))
+    term_mods = mods + ["SHIFT"] if "CTRL" in mods and "SHIFT" not in mods else mods
+    return ("function() local w = hl.get_active_window(); "
+            "local c = string.lower((w and w.class) or ''); "
+            f"local t = ({{ {exact} }})[c] or false; "
+            f"for _, p in ipairs({{ {prefix} }}) do if c:sub(1, #p) == p then t = true end end; "
+            f"hl.dispatch(hl.dsp.send_shortcut({{ mods = t and {lua_str(' '.join(term_mods))} or {lua_str(' '.join(mods))}, "
+            f"key = {lua_str(key)} }})) end")
+
+
+def forward_for_class(spec: str, window_class: str):
+    """Terminals keep Ctrl+W / Ctrl+C for the shell, so they get Ctrl+Shift instead."""
+    mods, key = parse_forward(spec)
+    if is_terminal_class(window_class) and "CTRL" in mods and "SHIFT" not in mods:
+        mods = mods + ["SHIFT"]
+    return mods, key
+
+
+def _debug(msg) -> None:
+    """Prints swallowed errors to stderr when OMNIPAL_DEBUG=1."""
+    if os.environ.get("OMNIPAL_DEBUG") == "1":
+        import traceback
+        caller = traceback.extract_stack(limit=2)[0]
+        print(f"[omnipal debug] {caller.name}:{caller.lineno}: {msg!r}", file=sys.stderr)
+
 
 VALID_WINDOW_POLICIES = {"tiled", "floating", "follow-profile"}
 WINDOW_POLICY_ALIASES = {
@@ -98,6 +209,10 @@ def persistence_file_path() -> Path:
     """The single explicit opt-in persistence file. Never touched unless the user enables it."""
     return resolve_config_dir() / "persistence.json"
 
+def app_rules_file_path() -> Path:
+    """Per-app auto-switch rules. Only written when the user adds a rule."""
+    return resolve_config_dir() / "app_rules.json"
+
 def stats_file_path() -> Path:
     """The fully local usage statistics file: aggregate counters only, never leaves the machine."""
     return resolve_config_dir() / "stats.json"
@@ -139,8 +254,8 @@ class OmniPalEngine:
                     pol = normalize_window_policy(_st.get("window_policy"))
                     if pol:
                         self.window_policy = pol
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
         self._load_catalog()
         self._load_snap_schema()
         self._ensure_run_dir()
@@ -150,8 +265,8 @@ class OmniPalEngine:
         try:
             RUN_DIR.mkdir(parents=True, exist_ok=True)
             RUN_DIR.chmod(0o700)
-        except Exception:
-            pass
+        except Exception as _e:
+            _debug(_e)
 
     def _load_snap_schema(self):
         if self.snap_schema_file.exists():
@@ -174,8 +289,8 @@ class OmniPalEngine:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             tmp.replace(SNAP_LAYOUTS_FILE)
-        except Exception:
-            pass
+        except Exception as _e:
+            _debug(_e)
 
     def get_snap_layouts(self) -> List[Dict[str, Any]]:
         return self.snap_layouts
@@ -313,8 +428,8 @@ class OmniPalEngine:
             print(f"Warning: Failed to write persistence config {path}: {e}", file=sys.stderr)
             try:
                 tmp_file.unlink()
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
             return False
         return True
 
@@ -379,8 +494,8 @@ class OmniPalEngine:
             stats[bucket][key] = stats[bucket].get(key, 0) + 1
             stats["last_updated"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             self._write_stats(stats)
-        except Exception:
-            pass
+        except Exception as _e:
+            _debug(_e)
 
     def _write_stats(self, data: Dict[str, Any]) -> bool:
         path = stats_file_path()
@@ -394,8 +509,8 @@ class OmniPalEngine:
         except Exception:
             try:
                 tmp_file.unlink()
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
             return False
 
     def _eval_lua(self, lua_code: str) -> bool:
@@ -442,8 +557,8 @@ class OmniPalEngine:
                         if pol:
                             self.window_policy = pol
                             return pol
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
         return normalize_window_policy(getattr(self, "window_policy", None)) or "tiled"
 
     def set_window_policy(self, policy: str) -> bool:
@@ -462,7 +577,7 @@ class OmniPalEngine:
         sock = find_socket2_path()
         compositor_connected = sock is not None and sock.exists()
         default_state = {
-            "version": "1.2.0",
+            "version": __version__,
             "mode": "omarchy",
             "name": "Omarchy 原生模式",
             "display": self.profiles.get("omarchy", {}).get("display", {"icon": "⊡", "brief": "OMA", "color": "#a3be8c"}),
@@ -500,8 +615,8 @@ class OmniPalEngine:
         if PID_FILE.exists():
             try:
                 daemon_pid = int(PID_FILE.read_text().strip())
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
 
         if policy:
             cur_policy = normalize_window_policy(policy)
@@ -513,8 +628,8 @@ class OmniPalEngine:
                         data = json.load(f)
                         if isinstance(data, dict):
                             cur_policy = normalize_window_policy(data.get("window_policy"))
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _debug(_e)
             if not cur_policy:
                 cur_policy = normalize_window_policy(getattr(self, "window_policy", None)) or "tiled"
 
@@ -525,7 +640,7 @@ class OmniPalEngine:
         compositor_connected = sock is not None and sock.exists()
 
         state_data = {
-            "version": "1.2.0",
+            "version": __version__,
             "mode": mode,
             "name": profile_name,
             "display": display_meta,
@@ -576,7 +691,7 @@ class OmniPalEngine:
         for b in active_overlay:
             combo = b.get("combo")
             if combo:
-                lua_lines.append(f'hl.unbind("{combo}")')
+                lua_lines.append(f'hl.unbind({lua_str(combo)})')
 
         success = True
         if lua_lines:
@@ -585,32 +700,65 @@ class OmniPalEngine:
         try:
             if OVERLAY_FILE.exists():
                 OVERLAY_FILE.unlink()
-        except Exception:
-            pass
+        except Exception as _e:
+            _debug(_e)
 
         self._write_state("omarchy", 0)
+        # State is already "omarchy", so the reload watcher won't re-apply an overlay.
+        if any(b.get("native_unbound") for b in active_overlay):
+            success = self._reload_hyprland() and success
         return success
 
-    def switch_mode(self, target_mode: str) -> bool:
+    def _reload_hyprland(self) -> bool:
+        try:
+            res = subprocess.run(["hyprctl", "reload"], capture_output=True, text=True, check=False)
+            return res.returncode == 0
+        except Exception as e:
+            print(f"hyprctl reload failed: {e}", file=sys.stderr)
+            return False
+
+    def send_shortcut(self, spec: str, window_class: Optional[str] = None) -> bool:
+        """Forwards a shortcut to the focused window, adjusted for terminals."""
+        if window_class is None:
+            window_class = ""
+            try:
+                res = subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, check=False)
+                window_class = (json.loads(res.stdout or "{}") or {}).get("class", "") or ""
+            except Exception as e:
+                _debug(e)
+        try:
+            mods, key = forward_for_class(spec, window_class)
+        except ValueError as e:
+            print(f"Invalid shortcut: {e}", file=sys.stderr)
+            return False
+        arg = f"{' '.join(mods)}, {key}, activewindow"
+        res = subprocess.run(["hyprctl", "dispatch", "sendshortcut", arg], capture_output=True, text=True, check=False)
+        return res.returncode == 0 and "error" not in (res.stdout or "").lower()
+
+    def switch_mode(self, target_mode: str, _rollback: bool = False) -> bool:
         """Atomically switches the in-memory keybindings to target_mode with rollback on error."""
         target_mode = target_mode.lower().strip()
         if target_mode not in self.profiles:
             valid_modes = ", ".join(self.profiles.keys())
             raise ValueError(f"Unknown mode '{target_mode}'. Available modes: {valid_modes}")
 
+        previous_mode = self.get_state().get("mode", "omarchy")
         target_profile = self.profiles[target_mode]
         target_bindings = target_profile.get("bindings", [])
 
-        # 1. Unbind previous overlay
+        # 1. Unbind previous overlay (a reload brings back natives it had unbound)
+        if any(b.get("native_unbound") for b in self._get_active_overlay()):
+            self.restore()
         current_overlay = self._get_active_overlay()
         lua_ops = []
         for b in current_overlay:
             combo = b.get("combo")
             if combo:
-                lua_ops.append(f'hl.unbind("{combo}")')
+                lua_ops.append(f'hl.unbind({lua_str(combo)})')
 
         # 2. Add bind commands for new profile
         new_overlay_records = []
+        terminals = None
         for b in target_bindings:
             action_id = b.get("action")
             action_meta = self.actions_catalog.get(action_id, {})
@@ -621,17 +769,30 @@ class OmniPalEngine:
                 continue
 
             combo = format_combo(mod, key)
-            if action_id in LUA_DISPATCHERS:
+            unbind_native = False
+            if action_id == FORWARD_ACTION:
+                try:
+                    mods, fkey = parse_forward(b.get("forward", ""))
+                except ValueError as e:
+                    print(f"Skipping forward binding {combo}: {e}", file=sys.stderr)
+                    continue
+                if terminals is None:
+                    terminals = load_terminal_patterns()
+                lua_ops.append(f'hl.unbind({lua_str(combo)})')
+                lua_ops.append(f'o.bind({lua_str(combo)}, {lua_str(name)}, {forward_lua(mods, fkey, terminals)})')
+                unbind_native = True
+            elif action_id in LUA_DISPATCHERS:
                 dispatcher_expr = LUA_DISPATCHERS[action_id]
-                lua_ops.append(f'o.bind("{combo}", "{name}", {dispatcher_expr})')
+                lua_ops.append(f'o.bind({lua_str(combo)}, {lua_str(name)}, {dispatcher_expr})')
             else:
                 cmd = b.get("arg") or action_meta.get("default_arg", "")
-                lua_ops.append(f'o.bind("{combo}", "{name}", "{cmd}")')
+                lua_ops.append(f'o.bind({lua_str(combo)}, {lua_str(name)}, {lua_str(cmd)})')
 
             new_overlay_records.append({
                 "action": action_id,
                 "combo": combo,
-                "name": name
+                "name": name,
+                **({"native_unbound": True} if unbind_native else {}),
             })
 
         # 3. Execute batch in single eval call (< 5ms)
@@ -645,14 +806,18 @@ class OmniPalEngine:
             if self.get_persistence_status()["enabled"]:
                 self.set_persistence(True, target_mode)
         else:
-            print("Warning: Failed to apply overlay in Hyprland, rolling back to baseline...", file=sys.stderr)
+            print("Warning: Failed to apply overlay in Hyprland, rolling back...", file=sys.stderr)
             self.restore()
+            # Re-apply the mode the user had before, instead of dropping to baseline.
+            if not _rollback and previous_mode != "omarchy" and previous_mode != target_mode and previous_mode in self.profiles:
+                if not self.switch_mode(previous_mode, _rollback=True):
+                    print(f"Warning: Could not re-apply previous mode '{previous_mode}'.", file=sys.stderr)
 
         return success
 
     def cycle_mode(self, reverse: bool = False) -> str:
-        """Cycles to the next mode in sequence: omarchy -> windows -> mac -> user profiles -> omarchy."""
-        curated = ["omarchy", "windows", "mac"]
+        """Cycles to the next mode in sequence: omarchy -> windows -> mac -> kde -> user profiles -> omarchy."""
+        curated = ["omarchy", "windows", "mac", "kde"]
         user_modes = sorted([m for m in self.profiles if m not in curated])
         modes = [m for m in curated if m in self.profiles] + user_modes
         if not modes:
@@ -668,6 +833,112 @@ class OmniPalEngine:
 
         self.switch_mode(next_mode)
         return next_mode
+
+    # ---------------- Per-app auto switching ----------------
+    def load_app_rules(self) -> Dict[str, Any]:
+        """Returns {"enabled": bool, "default_mode": str|None, "rules": [...]}; missing file means no rules."""
+        data: Dict[str, Any] = {"enabled": True, "default_mode": None, "rules": []}
+        path = app_rules_file_path()
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                if isinstance(raw, dict):
+                    data["enabled"] = bool(raw.get("enabled", True))
+                    dm = raw.get("default_mode")
+                    data["default_mode"] = dm if dm in self.profiles else None
+                    data["rules"] = [r for r in raw.get("rules", []) if isinstance(r, dict) and r.get("class") and r.get("mode")]
+            except Exception as e:
+                print(f"Warning: Failed to read app rules {path}: {e}", file=sys.stderr)
+        return data
+
+    def save_app_rules(self, data: Dict[str, Any]) -> None:
+        for r in data.get("rules", []):
+            if r.get("mode") not in self.profiles:
+                raise ValueError(f"Unknown mode '{r.get('mode')}' in rule for '{r.get('class')}'")
+            if r.get("match", "exact") not in ("exact", "prefix", "regex"):
+                raise ValueError(f"Invalid match type '{r.get('match')}'")
+            if r.get("match") == "regex":
+                import re
+                re.compile(r["class"])
+        dm = data.get("default_mode")
+        if dm is not None and dm not in self.profiles:
+            raise ValueError(f"Unknown default mode '{dm}'")
+        path = app_rules_file_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.parent / (path.name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        tmp.replace(path)
+
+    def match_app_rule(self, window_class: str, rules: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """First enabled rule whose class matches wins. Matching is case-insensitive."""
+        import re
+        rules = rules if rules is not None else self.load_app_rules()
+        if not rules.get("enabled", True) or not window_class:
+            return None
+        wc = window_class.strip().lower()
+        for r in rules.get("rules", []):
+            if not r.get("enabled", True):
+                continue
+            pat = str(r["class"]).strip()
+            kind = r.get("match", "exact")
+            try:
+                if (kind == "exact" and wc == pat.lower()) or \
+                   (kind == "prefix" and wc.startswith(pat.lower())) or \
+                   (kind == "regex" and re.search(pat, window_class, re.IGNORECASE)):
+                    return r
+            except re.error as e:
+                _debug(e)
+        return None
+
+    def apply_app_rule(self, window_class: str) -> Optional[str]:
+        """Called on focus change. Switches to the rule's mode, or back to the base mode when
+        no rule matches. Returns the mode switched to, or None if nothing changed."""
+        rules = self.load_app_rules()
+        rule = self.match_app_rule(window_class, rules)
+        current = self.get_state().get("mode", "omarchy")
+        if rule is None and getattr(self, "_auto_active", False) is False:
+            self._write_app_rule_state(window_class, None)
+            return None
+        auto_target = getattr(self, "_auto_target", None)
+        if getattr(self, "_auto_active", False) and auto_target and current != auto_target:
+            # The user switched by hand while a rule was active: respect it as the new base.
+            self._base_mode = current
+            self._auto_active = False
+            self._auto_target = None
+            if rule is not None and rule["mode"] == auto_target:
+                self._write_app_rule_state(window_class, rule)
+                return None
+        if rule is not None:
+            if not getattr(self, "_auto_active", False):
+                # Remember what the user picked by hand, so we can return to it.
+                self._base_mode = current
+            self._auto_active = True
+            target = rule["mode"]
+        else:
+            self._auto_active = False
+            target = rules.get("default_mode") or getattr(self, "_base_mode", None) or current
+        self._write_app_rule_state(window_class, rule)
+        self._auto_target = target if rule is not None else None
+        if target == current or target not in self.profiles:
+            return None
+        if target == "omarchy":
+            ok = self.restore()
+        else:
+            ok = self.switch_mode(target)
+        return target if ok else None
+
+    def _write_app_rule_state(self, window_class: str, rule: Optional[Dict[str, Any]]) -> None:
+        """Broadcasts the currently matched rule for the settings UI and cheat sheet."""
+        try:
+            self._ensure_run_dir()
+            tmp = APP_RULE_STATE_FILE.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"window_class": window_class, "rule": rule}, f, ensure_ascii=False)
+            tmp.replace(APP_RULE_STATE_FILE)
+        except Exception as e:
+            _debug(e)
 
     def cheatsheet(self, mode: Optional[str] = None) -> List[Dict[str, Any]]:
         """Returns structured cheatsheet data from single source of truth."""
@@ -751,7 +1022,7 @@ class OmniPalEngine:
                 cursor_win = self.get_window_under_cursor()
                 if cursor_win and cursor_win.get("address"):
                     target_addr = cursor_win["address"]
-                    self._eval_lua(f'hl.dispatch(hl.dsp.focus({{ window = "address:{target_addr}" }}))')
+                    self._eval_lua(f'hl.dispatch(hl.dsp.focus({{ window = {lua_str("address:" + str(target_addr))} }}))')
 
             target_title = ""
             target_class = ""
@@ -784,8 +1055,8 @@ class OmniPalEngine:
                 with open(tmp_snap, "w", encoding="utf-8") as f:
                     json.dump(snap_data, f, ensure_ascii=False)
                 tmp_snap.replace(SNAP_FILE)
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
 
             if not no_hud:
                 try:
@@ -802,8 +1073,8 @@ class OmniPalEngine:
                         stderr=subprocess.DEVNULL,
                         start_new_session=True
                     )
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _debug(_e)
             return True
 
         # 2. Write snap.json for state/event observation
@@ -819,8 +1090,8 @@ class OmniPalEngine:
             with open(tmp_snap, "w", encoding="utf-8") as f:
                 json.dump(snap_data, f, ensure_ascii=False)
             tmp_snap.replace(SNAP_FILE)
-        except Exception:
-            pass
+        except Exception as _e:
+            _debug(_e)
 
         # 3. Summon via omarchy-shell asynchronously if not suppressed
         if not no_hud:
@@ -834,13 +1105,13 @@ class OmniPalEngine:
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
                 )
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
 
         focus_lua = ""
         if target_address:
             clean_addr = target_address.strip()
-            focus_lua = f'hl.dispatch(hl.dsp.focus({{ window = "address:{clean_addr}" }}))\n'
+            focus_lua = f'hl.dispatch(hl.dsp.focus({{ window = {lua_str("address:" + str(clean_addr))} }}))\n'
 
         # 4. Fullscreen / maximize dispatch
         if zone in ("maximize", "max"):
@@ -923,18 +1194,96 @@ end"""
 
         return results
 
+    def check_installation(self, home: Optional[Path] = None) -> Dict[str, Any]:
+        """Checks what install.sh set up and returns each problem with a concrete fix."""
+        home = Path(home) if home else Path.home()
+        root = self.root_dir.resolve()
+        reinstall = f"bash {root}/scripts/install.sh"
+        problems: List[Dict[str, str]] = []
+        info: Dict[str, Any] = {"cli": "missing", "plugins": {}, "service": "missing", "tokens_in_sync": True}
+
+        # CLI link
+        cli = home / ".local" / "bin" / "omni-profile"
+        if cli.is_symlink() or cli.exists():
+            if not cli.exists():
+                info["cli"] = "broken"
+                problems.append({"problem": f"CLI link {cli} is broken (points to a moved or deleted checkout)", "fix": reinstall})
+            elif cli.resolve() != (root / "bin" / "omni-profile"):
+                info["cli"] = "other"
+                problems.append({"problem": f"CLI link {cli} points to another checkout: {cli.resolve()}", "fix": reinstall})
+            else:
+                info["cli"] = "ok"
+        else:
+            problems.append({"problem": f"CLI link {cli} is missing", "fix": reinstall})
+
+        # Plugin links
+        plugins_dir = home / ".config" / "omarchy" / "plugins"
+        for src in sorted((root / "plugins").glob("omni.*")):
+            if not src.is_dir():
+                continue
+            link = plugins_dir / src.name
+            if not (link.is_symlink() or link.exists()):
+                state = "missing"
+            elif not link.exists():
+                state = "broken"
+            elif link.resolve() != src:
+                state = "other"
+            else:
+                state = "ok"
+            info["plugins"][src.name] = state
+            if state != "ok":
+                problems.append({"problem": f"Plugin {src.name} link is {state} in {plugins_dir}", "fix": reinstall})
+
+        # systemd user unit
+        unit = home / ".config" / "systemd" / "user" / "omnipal.service"
+        if unit.exists():
+            text = unit.read_text(encoding="utf-8", errors="replace")
+            if str(root / "bin" / "omni-profile") not in text:
+                info["service"] = "stale"
+                problems.append({"problem": f"{unit} points to a different checkout path", "fix": reinstall})
+            else:
+                info["service"] = "installed"
+                try:
+                    res = subprocess.run(["systemctl", "--user", "is-active", "omnipal.service"],
+                                         capture_output=True, text=True, timeout=3)
+                    status = res.stdout.strip()
+                    if status in ("active", "inactive", "failed", "activating", "deactivating"):
+                        info["service"] = status
+                    if status == "failed":
+                        problems.append({"problem": "omnipal.service is in failed state",
+                                         "fix": "journalctl --user -u omnipal.service -n 50; systemctl --user restart omnipal.service"})
+                except Exception as e:
+                    _debug(f"systemctl query failed: {e}")
+        # A missing unit is fine: the daemon is optional.
+
+        # Tokens.js copies
+        try:
+            from scripts.sync_tokens import out_of_sync
+            bad = out_of_sync(root)
+        except Exception as e:
+            _debug(f"token sync check failed: {e}")
+            bad = []
+        if bad:
+            info["tokens_in_sync"] = False
+            problems.append({"problem": f"Tokens.js out of sync in {len(bad)} plugin(s)",
+                             "fix": f"python3 {root}/scripts/sync_tokens.py"})
+
+        info["problems"] = problems
+        return info
+
     def doctor(self) -> Dict[str, Any]:
         """Runs comprehensive diagnostics on daemon, sockets, live binds, and state consistency."""
         report: Dict[str, Any] = {
             "healthy": True,
-            "version": "1.2.0",
+            "version": __version__,
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "daemon": {"running": False, "pid": None},
             "socket2": {"connected": False, "path": None},
             "state": self.get_state(),
             "overlay": {"count": 0, "verified_in_hyprland": 0, "missing": []},
             "consistency": False,
-            "issues": []
+            "issues": [],
+            "fixes": []
         }
 
         # 1. Check daemon PID
@@ -985,6 +1334,13 @@ end"""
             except Exception as e:
                 report["issues"].append(f"Failed to query hyprctl binds: {e}")
 
+        # 4. Installation self-check (CLI link, plugin links, systemd unit, token copies)
+        install = self.check_installation()
+        report["install"] = install
+        for item in install["problems"]:
+            report["issues"].append(item["problem"])
+        report["fixes"] = [item["fix"] for item in install["problems"]]
+
         # 4. Consistency check
         from scripts.check_consistency import check_consistency
         report["consistency"] = check_consistency(self.root_dir, user_profiles_dir=self.user_profiles_dir)
@@ -1008,6 +1364,7 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
             s.connect(str(socket_path))
             s.settimeout(2.0)
             buffer = ""
+            last_class = None
             while not stop_event.is_set():
                 try:
                     data = s.recv(4096)
@@ -1017,7 +1374,14 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                     while "\n" in buffer:
                         line, buffer = buffer.split("\n", 1)
                         line = line.strip()
-                        if line == "configreloaded>>":
+                        if line.startswith("activewindow>>"):
+                            win_class = line[len("activewindow>>"):].split(",", 1)[0]
+                            if win_class and win_class != last_class:
+                                last_class = win_class
+                                switched = engine.apply_app_rule(win_class)
+                                if switched:
+                                    print(f"🎯 {win_class} -> {switched}", flush=True)
+                        elif line == "configreloaded>>":
                             time.sleep(0.1)  # Debounce settle time
                             curr_mode = engine.get_state().get("mode", "omarchy")
                             if curr_mode != "omarchy":
@@ -1039,8 +1403,8 @@ def run_daemon():
     # Record PID
     try:
         PID_FILE.write_text(str(os.getpid()))
-    except Exception:
-        pass
+    except Exception as _e:
+        _debug(_e)
 
     print(f"🚀 OmniPal Engine daemon started (PID: {os.getpid()}). Watching for signals & Hyprland events...", flush=True)
 
@@ -1057,8 +1421,8 @@ def run_daemon():
             try:
                 if PID_FILE.exists():
                     PID_FILE.unlink()
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
             engine.restore()
 
     def sig_handler(signum, frame):

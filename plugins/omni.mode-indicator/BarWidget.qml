@@ -5,6 +5,7 @@ import Quickshell.Hyprland
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "Tokens.js" as Tokens
 
 // OmniPal 托盘模式指示器与右键快捷控制面板（omni.mode-indicator）
 //
@@ -26,7 +27,7 @@ BarWidget {
   property string currentName: "Omarchy 原生模式"
   property string currentIcon: "⊡"
   property string currentBrief: "OMA"
-  property color currentColor: "#a3be8c"
+  property color currentColor: Tokens.mode.omarchy
   property int activeBindingsCount: 0
   property bool engineRunning: false
   property string engineStatus: "native"
@@ -163,7 +164,7 @@ BarWidget {
     root.currentName = "Omarchy 原生模式"
     root.currentIcon = "⊡"
     root.currentBrief = "OMA"
-    root.currentColor = "#a3be8c"
+    root.currentColor = Tokens.mode.omarchy
     root.activeBindingsCount = 0
     root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, "omarchy")
     runCmd("omni-profile restore")
@@ -343,7 +344,7 @@ BarWidget {
                 height: Style.space(6)
                 radius: Style.space(3)
                 color: root.engineRunning
-                  ? (root.engineStatus === "active" ? "#a3be8c" : "#88c0d0")
+                  ? (root.engineStatus === "active" ? Tokens.semantic.ok : Tokens.semantic.accent)
                   : Color.muted
                 anchors.verticalCenter: parent.verticalCenter
               }
@@ -375,13 +376,13 @@ BarWidget {
                 width: Style.space(6)
                 height: Style.space(6)
                 radius: Style.space(3)
-                color: root.compositorConnected ? "#a3be8c" : "#bf616a"
+                color: root.compositorConnected ? Tokens.semantic.ok : Tokens.semantic.danger
                 anchors.verticalCenter: parent.verticalCenter
               }
 
               Text {
                 text: root.compositorConnected ? "Hyprland 连通" : "未连接 Compositor"
-                color: root.compositorConnected ? Qt.darker(Color.foreground, 1.4) : "#bf616a"
+                color: root.compositorConnected ? Qt.darker(Color.foreground, 1.4) : Tokens.semantic.danger
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
               }

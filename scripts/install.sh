@@ -15,21 +15,48 @@ echo "项目路径: ${PROJECT_ROOT}"
 
 # 1. 依赖检查
 command -v python3 >/dev/null 2>&1 || { echo "❌ 缺少依赖: python3"; exit 1; }
-command -v hyprctl >/dev/null 2>&1 || { echo "❌ 缺少依赖: hyprctl (Hyprland)"; exit 1; }
+command -v hyprctl >/dev/null 2>&1 || { echo "❌ 缺少依赖: hyprctl。OmniPal 只支持运行在 Hyprland 上的 Omarchy，请在 Omarchy 桌面里安装。"; exit 1; }
 
 # 2. 预先校验一致性
 echo "🔍 运行 Profile 与 Schema 一致性校验..."
 python3 "${PROJECT_ROOT}/scripts/check_consistency.py"
 
+# 2.5 提醒：服务和软链接都指向当前目录，移动或删除它会让 OmniPal 失效
+case "${PROJECT_ROOT}" in
+    /tmp/*|"${HOME}/Downloads"/*)
+        echo "⚠️  OmniPal 位于临时目录 ${PROJECT_ROOT}，删除后服务会失效。建议先移到 ~/.local/share/omnipal 再安装。" ;;
+esac
+echo "ℹ️  安装后请不要移动或删除 ${PROJECT_ROOT}；如需移动，请先卸载再重新安装。"
+
 # 3. 创建 CLI 符号链接
-mkdir -p "${HOME}/.local/bin"
+# 记录本次安装新建的目录，卸载时只删除这些目录（且仅在为空时）
+CREATED_DIRS_FILE="${HOME}/.local/share/omnipal/created-dirs"
+record_dir() {
+    mkdir -p "$(dirname "${CREATED_DIRS_FILE}")"
+    echo "$1" >> "${CREATED_DIRS_FILE}"
+}
+# 把 mkdir -p 会连带新建的每一级上级目录都记下来（由外到内），卸载时由内到外删除
+track_mkdir() {
+    local missing=() d="$1"
+    while [ ! -d "${d}" ] && [ "${d}" != "${HOME}" ] && [ "${d}" != "/" ]; do
+        missing=("${d}" "${missing[@]}")
+        d="$(dirname "${d}")"
+    done
+    [ ${#missing[@]} -eq 0 ] && return 0
+    mkdir -p "$1"
+    for d in "${missing[@]}"; do record_dir "${d}"; done
+}
+# 记录文件自身所在的目录也要算作新建
+track_mkdir "$(dirname "${CREATED_DIRS_FILE}")"
+
+track_mkdir "${HOME}/.local/bin"
 ln -sf "${PROJECT_ROOT}/bin/omni-profile" "${BIN_TARGET}"
 chmod +x "${PROJECT_ROOT}/bin/omni-profile"
 echo "✅ CLI 链接已创建: ${BIN_TARGET}"
 
 # 4. 安装 Quickshell 插件（符号链接至 ~/.config/omarchy/plugins/）
 OMARCHY_PLUGINS_DIR="${HOME}/.config/omarchy/plugins"
-mkdir -p "${OMARCHY_PLUGINS_DIR}"
+track_mkdir "${OMARCHY_PLUGINS_DIR}"
 echo "🧩 部署 OmniPal Quickshell 插件..."
 for p_path in "${PROJECT_ROOT}/plugins"/omni.*; do
     if [ -d "${p_path}" ]; then
@@ -40,12 +67,15 @@ for p_path in "${PROJECT_ROOT}/plugins"/omni.*; do
 done
 
 # 5. 创建可选的 systemd 用户守护进程（用于在会话退出时自动触发 restore）
-mkdir -p "${SYSTEMD_USER_DIR}"
+track_mkdir "${SYSTEMD_USER_DIR}"
 cat > "${SERVICE_FILE}" <<EOF
 [Unit]
 Description=OmniPal Runtime Hot-Switching Daemon
 Documentation=https://github.com/vsex7/OmniPal
 PartOf=graphical-session.target
+ConditionPathExists=${PROJECT_ROOT}/bin/omni-profile
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple

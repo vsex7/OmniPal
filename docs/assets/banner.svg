@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400">
+  <rect width="1280" height="400" fill="#16161a"/>
+  <g font-family="JetBrains Mono,DejaVu Sans Mono,monospace">
+    <text x="96" y="132" font-size="64" font-weight="700" fill="#e6e1d6">omnipal<tspan fill="#e2a03f">_</tspan></text>
+    <text x="96" y="182" font-size="22" fill="#8a867d">Windows / macOS keybindings for Omarchy. One command, nothing written to your config.</text>
+    <text x="96" y="262" font-size="22" fill="#8a867d">$ <tspan fill="#e6e1d6">omni-profile switch mac</tspan></text>
+    <text x="96" y="298" font-size="22" fill="#8a867d">$ <tspan fill="#e6e1d6">omni-profile switch windows</tspan></text>
+    <text x="96" y="334" font-size="22" fill="#8a867d">$ <tspan fill="#e6e1d6">omni-profile restore</tspan></text>
+  </g>
+  <g font-family="JetBrains Mono,DejaVu Sans Mono,monospace" font-size="20" fill="#e6e1d6" text-anchor="middle">
+    <g transform="translate(860,236)"><rect width="112" height="64" fill="none" stroke="#e6e1d6" stroke-width="2"/><path d="M0 52H112" stroke="#e6e1d6" stroke-width="2"/><text x="56" y="34">Super</text></g>
+    <g transform="translate(984,236)"><rect width="64" height="64" fill="none" stroke="#e6e1d6" stroke-width="2"/><path d="M0 52H64" stroke="#e6e1d6" stroke-width="2"/><text x="32" y="34">Alt</text></g>
+    <g transform="translate(1060,236)"><rect width="64" height="64" fill="#e2a03f" stroke="#e2a03f" stroke-width="2"/><path d="M0 52H64" stroke="#16161a" stroke-width="2"/><text x="32" y="34" fill="#16161a" font-weight="700">F4</text></g>
+  </g>
+</svg>
