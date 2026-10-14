@@ -958,5 +958,41 @@ class TestLuaEscaping(unittest.TestCase):
         engine.restore()
 
 
+
+class TestSwitchRollback(unittest.TestCase):
+    """A failed switch must land the user back in the mode they had before, not the native baseline."""
+
+    def setUp(self):
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.engine.record_switch = lambda mode_id: None
+
+    def test_failed_switch_restores_previous_mode(self):
+        self.engine._eval_lua = lambda code: True
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertEqual(self.engine.get_state().get("mode"), "windows")
+
+        calls = []
+
+        def flaky_eval(code):
+            calls.append(code)
+            # Fail only the first batch (the switch to mac); restore and re-apply succeed.
+            return len(calls) > 1
+
+        self.engine._eval_lua = flaky_eval
+        self.assertFalse(self.engine.switch_mode("mac"))
+        self.assertEqual(self.engine.get_state().get("mode"), "windows")
+        combos = {r["combo"] for r in self.engine._get_active_overlay()}
+        expected = {format_combo(b.get("mod", "").strip(), b["key"].strip())
+                    for b in self.engine.profiles["windows"]["bindings"] if b.get("key", "").strip()}
+        self.assertEqual(combos, expected)
+
+    def test_failed_rollback_does_not_recurse(self):
+        self.engine._eval_lua = lambda code: True
+        self.engine.switch_mode("windows")
+        calls = []
+        self.engine._eval_lua = lambda code: calls.append(code) or False
+        self.assertFalse(self.engine.switch_mode("mac"))
+        self.assertLess(len(calls), 6)
+
 if __name__ == "__main__":
     unittest.main()
