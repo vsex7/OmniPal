@@ -2424,3 +2424,35 @@ class TestCliDeprecatedAliases(unittest.TestCase):
         readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("CLI 别名弃用", readme)
         self.assertIn("omni-profile window-policy set floating", readme)
+
+class TestModeDiff(unittest.TestCase):
+    def setUp(self):
+        self.e = OmniPalEngine(PROJECT_ROOT)
+        self.e._get_active_overlay = lambda: []
+        self.e.baseline_bindings = {}
+        self.e._load_baseline_cache = lambda: {}
+
+    def test_live_natives_listed_with_previous_function(self):
+        from engine.engine import combo_signature
+        sig = combo_signature("SUPER + TAB")
+        self.e._live_bind_details = lambda: {sig: [{"description": "Next workspace", "dispatcher": "__lua", "arg": "12"}]}
+        d = self.e.mode_diff("windows")
+        self.assertEqual(d["source"], "live")
+        tab = [t for t in d["takeovers"] if t["combo"] == "SUPER + TAB"]
+        self.assertEqual(len(tab), 1)
+        self.assertEqual(tab[0]["native"][0], {"description": "Next workspace", "dispatcher": "__lua", "arg": ""})
+        self.assertEqual(d["count"], len(d["takeovers"]))
+
+    def test_baseline_fallback_and_unknown_mode(self):
+        self.e._live_bind_details = lambda: {}
+        self.e.baseline_bindings = {"SUPER + TAB": {"combo": "SUPER + TAB", "description": "Next workspace", "dispatcher": "workspace", "arg": "e+1"}}
+        d = self.e.mode_diff("windows")
+        self.assertEqual(d["source"], "baseline")
+        self.assertTrue(any(t["combo"] == "SUPER + TAB" for t in d["takeovers"]))
+        with self.assertRaises(ValueError):
+            self.e.mode_diff("nope")
+
+    def test_no_data(self):
+        self.e._live_bind_details = lambda: {}
+        d = self.e.mode_diff("mac")
+        self.assertEqual((d["source"], d["count"]), ("none", 0))

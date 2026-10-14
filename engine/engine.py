@@ -1129,6 +1129,48 @@ class OmniPalEngine:
         return lua_ops, records
 
     # ---------- fixed entry points (same keys in every mode) ----------
+    def mode_diff(self, mode: str) -> Dict[str, Any]:
+        """Which Omarchy native binds `mode` takes over, and what they did before.
+
+        Natives come from live `hyprctl binds` (minus OmniPal's own overlay); combos the active
+        overlay already replaced fall back to the baseline snapshot. `source` says which was used."""
+        if mode not in self.profiles:
+            raise ValueError(f"unknown mode: {mode}")
+        overlay = self._get_active_overlay()
+        live = self._native_details(overlay)
+        if not self.baseline_bindings:
+            self._load_baseline_cache()
+        baseline: Dict[Tuple[int, str], List[Dict[str, Any]]] = {}
+        for b in (self.baseline_bindings or {}).values():
+            baseline.setdefault(combo_signature(b.get("combo", "")), []).append(b)
+        source = "live" if live else ("baseline" if baseline else "none")
+        fixed = self.fixed_combos()
+        bindings = ([] if mode == "omarchy" else self._without_fixed(self.profiles[mode].get("bindings", [])))
+        entries = [(b, False) for b in bindings] + [(b, True) for b in self.fixed_bindings]
+        out, seen = [], set()
+        for b, is_fixed in entries:
+            combo = format_combo(b.get("mod", ""), b.get("key", ""))
+            if not combo or combo in seen:
+                continue
+            seen.add(combo)
+            sig = combo_signature(combo)
+            natives = live.get(sig) or baseline.get(sig) or []
+            if not natives:
+                continue
+            meta = self.actions_catalog.get(b.get("action"), {})
+            out.append({
+                "combo": combo,
+                "action": b.get("action"),
+                "name": meta.get("name", b.get("action")),
+                "fixed": is_fixed,
+                "native": [{"description": n.get("description") or "",
+                            "dispatcher": n.get("dispatcher") or "",
+                            "arg": "" if n.get("dispatcher") == "__lua" else str(n.get("arg", ""))}
+                           for n in natives],
+            })
+        out.sort(key=lambda e: e["combo"])
+        return {"mode": mode, "source": source, "count": len(out), "takeovers": out}
+
     def fixed_combos(self) -> Dict[str, str]:
         return {format_combo(b.get("mod", ""), b["key"]): b["action"] for b in self.fixed_bindings}
 
@@ -2639,6 +2681,7 @@ end"""
             "window_policy": {"policy": self.get_window_policy(),
                               "overridden": self.get_window_policy() != "follow-profile"},
             "fixed_bindings": sorted(self.fixed_combos()),
+            "takeovers": {},
             "issues": [],
             "fixes": []
         }
@@ -2750,6 +2793,14 @@ end"""
 
         if report["issues"]:
             report["healthy"] = False
+
+        for m in self.profiles:
+            if m == "omarchy":
+                continue
+            try:
+                report["takeovers"][m] = self.mode_diff(m)
+            except Exception as e:
+                report["takeovers"][m] = {"mode": m, "error": str(e)}
 
         return report
 

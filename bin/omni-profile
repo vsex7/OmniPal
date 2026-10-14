@@ -174,6 +174,24 @@ def cmd_benchmark(engine: OmniPalEngine, args):
     if res.get("mode_restored"):
         print("ℹ️ 基准测试非破坏性执行：已自动恢复测试前的活动模式（未计入统计）")
 
+def cmd_diff(engine: OmniPalEngine, args):
+    try:
+        d = engine.mode_diff(args.mode)
+    except ValueError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(2)
+    if args.json:
+        print(json.dumps(d, indent=2, ensure_ascii=False))
+        return
+    if d["source"] == "none":
+        print("⚠️ 读不到 Hyprland 当前的快捷键，也没有快照，无法对比。", file=sys.stderr)
+    print(f"模式 {d['mode']} 会接管 {d['count']} 个 Omarchy 原生快捷键（来源: {d['source']}）")
+    for e in d["takeovers"]:
+        was = "；".join(n["description"] or f"{n['dispatcher']} {n['arg']}".strip() for n in e["native"])
+        tag = "（固定入口）" if e["fixed"] else ""
+        print(f"  {e['combo']}: {was or '未命名'} → {e['name']}{tag}")
+
+
 def cmd_doctor(engine: OmniPalEngine, args):
     diag = engine.doctor()
     if args.json:
@@ -643,6 +661,12 @@ def main():
     p_doc = subparsers.add_parser("doctor", help="执行系统状态与按键一致性健康诊断")
     p_doc.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_doc.set_defaults(func=cmd_doctor)
+
+    # diff
+    p_diff = subparsers.add_parser("diff", help="列出某个模式会接管哪些 Omarchy 原生快捷键")
+    p_diff.add_argument("mode", help="模式 id，如 windows / mac / kde")
+    p_diff.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_diff.set_defaults(func=cmd_diff)
 
     # daemon
     p_daemon = subparsers.add_parser("daemon", help="前台运行守护进程（带自动退出恢复）")
