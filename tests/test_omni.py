@@ -1179,5 +1179,21 @@ class TestRulesAddCurrent(unittest.TestCase):
         self.assertNotEqual(self.run_cli("add", "--current", "--delay", "0").returncode, 0)
 
 
+class TestCheatSheetHighlight(unittest.TestCase):
+    def test_highlight_escapes_and_marks_matches(self):
+        import shutil
+        if not shutil.which("node"):
+            self.skipTest("node not available")
+        js = PROJECT_ROOT / "plugins" / "omni.cheat-sheet" / "CheatSheetData.js"
+        script = (
+            "const fs=require('fs');eval(fs.readFileSync(process.argv[1],'utf8').replace('.pragma library',''));"
+            "console.log(JSON.stringify([highlightMatches('关闭 <窗口> Close','clo','#e2a03f'),highlightMatches('abc','',null)]))"
+        )
+        out = subprocess.run(["node", "-e", script, str(js)], capture_output=True, text=True, check=True).stdout
+        a, b = json.loads(out)
+        self.assertEqual(a, '关闭 &lt;窗口&gt; <b><font color="#e2a03f">Clo</font></b>se')
+        self.assertEqual(b, "abc")
+
+
 if __name__ == "__main__":
     unittest.main()
