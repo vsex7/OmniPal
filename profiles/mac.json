@@ -227,6 +227,16 @@
       "key": "9",
       "action": "forward_shortcut",
       "forward": "CTRL 9"
+    },
+    {
+      "action": "app_switch_next",
+      "mod": "SUPER",
+      "key": "Tab"
+    },
+    {
+      "action": "app_switch_prev",
+      "mod": "SUPER SHIFT",
+      "key": "Tab"
     }
   ]
 }

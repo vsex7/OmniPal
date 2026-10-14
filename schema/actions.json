@@ -266,6 +266,22 @@
       "description": "把组合键作为另一个快捷键发给当前窗口（如 Super+W 发成 Ctrl+W），终端里自动改发 Ctrl+Shift",
       "dispatcher": "exec",
       "default_arg": ""
+    },
+    {
+      "id": "app_switch_next",
+      "name": "切换到下一个应用",
+      "category": "navigation",
+      "description": "在当前工作区内切到下一个窗口，不切换工作区（类似 Cmd+Tab）",
+      "dispatcher": "cyclenext",
+      "default_arg": ""
+    },
+    {
+      "id": "app_switch_prev",
+      "name": "切换到上一个应用",
+      "category": "navigation",
+      "description": "在当前工作区内切到上一个窗口，不切换工作区（类似 Cmd+Shift+Tab）",
+      "dispatcher": "cyclenext",
+      "default_arg": "prev"
     }
   ]
 }

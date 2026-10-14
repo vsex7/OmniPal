@@ -103,7 +103,7 @@ Item {
       icon: "◆",
       name: "macOS 习惯模式",
       desc: "Super+Q 退出程序 · Super+Space 聚焦搜索 · Super+Shift+3/4 截图 · Super+H 最小化",
-      count: 40,
+      count: 42,
       color: Tokens.mode.mac,
       source: "project",
       override: false
