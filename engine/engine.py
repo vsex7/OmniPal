@@ -535,6 +535,37 @@ def hyprland_socket_ready() -> bool:
     """True when a Hyprland instance socket exists (signature env is populated as a side effect)."""
     return bool(derive_hyprland_instance_signature()) and bool(_ensure_hyprland_instance())
 
+_FLAG_OPTS = (("locked", "locked"), ("repeat", "repeating"), ("non_consuming", "non_consuming"))
+
+
+def _native_stash_lua(combo: str, natives: List[Dict[str, Any]], expected: int) -> Optional[str]:
+    """Lua that copies the handlers of a combo's native Lua binds into the registry stash.
+
+    Only `__lua` binds (Omarchy's Lua config) can be stashed: their arg is the registry ref of the
+    handler. Returns None when any native can't be captured, so restore falls back to a reload."""
+    if len(natives) != expected or not natives:
+        return None
+    entries = []
+    for nb in natives:
+        if nb.get("dispatcher") != "__lua" or not str(nb.get("arg", "")).isdigit():
+            return None
+        opts = [f'description = {lua_str(nb.get("description") or "")}']
+        opts += [f"{lua} = true" for js, lua in _FLAG_OPTS if nb.get(js)]
+        entries.append(f'{{ h = R[{int(nb["arg"])}], o = {{ {", ".join(opts)} }} }}')
+    c = lua_str(combo)
+    return (f'do local R = debug.getregistry(); R.omnipal_stash = R.omnipal_stash or {{}}; '
+            f'if R.omnipal_stash[{c}] == nil then R.omnipal_stash[{c}] = {{ {", ".join(entries)} }} end end')
+
+
+def _native_unstash_lua(combo: str) -> str:
+    """Lua that rebinds a combo's stashed native handlers; raises if the stash is gone."""
+    c = lua_str(combo)
+    return (f'do local R = debug.getregistry(); local S = R.omnipal_stash and R.omnipal_stash[{c}]; '
+            f'if not S then error("omnipal: no stashed native for " .. {c}) end; '
+            f'for _, e in ipairs(S) do if e.h == nil then error("omnipal: lost native handler") end; '
+            f'hl.bind({c}, e.h, e.o) end; R.omnipal_stash[{c}] = nil end')
+
+
 class OmniPalEngine:
     def __init__(self, root_dir: Optional[Path] = None, user_profiles_dir: Optional[Path] = None):
         self.root_dir = root_dir or Path(__file__).resolve().parent.parent
@@ -885,6 +916,22 @@ class OmniPalEngine:
             print(f"Hyprland eval exception: {e}", file=sys.stderr)
             return False
 
+    def _eval_lua_strict(self, lua_code: str) -> bool:
+        """Like _eval_lua, but only `ok` from hyprctl counts as success (catches Lua error())."""
+        if compositor_mutation_disabled():
+            return True
+        try:
+            _ensure_hyprland_instance()
+            res = subprocess.run(["hyprctl", "eval", lua_code], capture_output=True, text=True,
+                                 check=False, env=os.environ, timeout=3.0)
+            out = res.stdout.strip()
+            if res.returncode == 0 and out == "ok":
+                return True
+            print(f"Hyprland eval failed: {out}", file=sys.stderr)
+        except Exception as e:
+            print(f"Hyprland eval exception: {e}", file=sys.stderr)
+        return False
+
     def _reload_config_only(self, timeout: float = 3.0) -> bool:
         """Reloads compositor config and reports whether the mutation completed."""
         if compositor_mutation_disabled():
@@ -942,6 +989,41 @@ class OmniPalEngine:
             _debug(f"binds query failed: {e}")
         return counts
 
+    def _live_bind_details(self) -> Dict[Tuple[int, str], List[Dict[str, Any]]]:
+        """Live keyboard binds grouped by (modmask, KEY), with handler/arg/flags from hyprctl."""
+        out: Dict[Tuple[int, str], List[Dict[str, Any]]] = {}
+        if compositor_mutation_disabled():
+            return out
+        try:
+            _ensure_hyprland_instance()
+            res = subprocess.run(["hyprctl", "binds", "-j"], capture_output=True, text=True,
+                                 check=True, timeout=2.0, env=os.environ)
+            for b in json.loads(res.stdout or "[]"):
+                if not isinstance(b, dict) or b.get("mouse") or b.get("release") or b.get("submap"):
+                    continue
+                sig = (int(b.get("modmask", 0) or 0), str(b.get("key", "")).upper())
+                out.setdefault(sig, []).append(b)
+        except Exception as e:
+            _debug(f"binds detail query failed: {e}")
+        return out
+
+    def _native_details(self, own_overlay: Optional[List[Dict[str, Any]]] = None) -> Dict[Tuple[int, str], List[Dict[str, Any]]]:
+        """Live bind details minus binds OmniPal's own overlay injected (matched by description)."""
+        details = self._live_bind_details()
+        for b in own_overlay or []:
+            sig = combo_signature(b.get("combo", ""))
+            lst = details.get(sig)
+            if not lst:
+                continue
+            name = b.get("name", "")
+            for i, nb in enumerate(lst):
+                if (nb.get("description") or "") == name:
+                    del lst[i]
+                    break
+            else:
+                lst.pop()
+        return details
+
     def _native_counts(self, own_overlay: Optional[List[Dict[str, Any]]] = None) -> Dict[Tuple[int, str], int]:
         """Live binds minus the ones `own_overlay` (OmniPal's currently injected binds) put there."""
         counts = self._live_bind_counts()
@@ -952,13 +1034,15 @@ class OmniPalEngine:
         return counts
 
     def _build_bind_ops(self, target_bindings: List[Dict[str, Any]],
-                        native_counts: Optional[Dict[Tuple[int, str], int]] = None) -> Tuple[List[str], List[Dict[str, Any]]]:
+                        native_counts: Optional[Dict[Tuple[int, str], int]] = None,
+                        native_details: Optional[Dict[Tuple[int, str], List[Dict[str, Any]]]] = None) -> Tuple[List[str], List[Dict[str, Any]]]:
         """Builds unbind-then-bind Lua ops (incl. shortcut forwarding) and overlay records for bindings.
 
         native_counts (from _native_counts) marks combos that displace a live native Omarchy bind:
         those are unbound once per native bind (a combo can carry several, e.g. ALT + TAB) and the
         record gets native_unbound=True so restore() reloads Hyprland to bring the natives back."""
         native_counts = native_counts or {}
+        native_details = native_details or {}
         lua_ops: List[str] = []
         records: List[Dict[str, Any]] = []
         terminals = None
@@ -971,8 +1055,18 @@ class OmniPalEngine:
             if not key:
                 continue
             combo = format_combo(mod, key)
-            n_native = native_counts.get(combo_signature(combo), 0)
+            sig = combo_signature(combo)
+            n_native = native_counts.get(sig, 0)
             unbind_native = n_native > 0
+            # Stash the native handlers in the Lua registry before unbinding them, so restore()
+            # can rebind them exactly instead of reloading all of Hyprland (screen flash).
+            restorable = True
+            if n_native > 0:
+                stash = _native_stash_lua(combo, native_details.get(sig, []), n_native)
+                if stash:
+                    lua_ops.append(stash)
+                else:
+                    restorable = False
             # Extra unbinds for combos carrying more than one native bind (first one is below).
             for _ in range(max(0, n_native - 1)):
                 lua_ops.append(f'hl.unbind({lua_str(combo)})')
@@ -987,6 +1081,9 @@ class OmniPalEngine:
                 lua_ops.append(f'hl.unbind({lua_str(combo)})')
                 lua_ops.append(f'o.bind({lua_str(combo)}, {lua_str(name)}, {forward_lua(mods, fkey, terminals)})')
                 unbind_native = True
+                # With no live bind table we can't prove no native was dropped: keep the reload path.
+                if not native_counts:
+                    restorable = False
             elif action_id in LUA_DISPATCHERS:
                 lua_ops.append(f'hl.unbind({lua_str(combo)})')
                 lua_ops.append(f'o.bind({lua_str(combo)}, {lua_str(name)}, {LUA_DISPATCHERS[action_id]})')
@@ -999,6 +1096,7 @@ class OmniPalEngine:
                 "combo": combo,
                 "name": name,
                 **({"native_unbound": True} if unbind_native else {}),
+                **({"native_restorable": restorable, "native_count": n_native} if unbind_native else {}),
             })
         return lua_ops, records
 
@@ -1009,7 +1107,10 @@ class OmniPalEngine:
         target_profile = self.profiles[target_mode]
         target_bindings = target_profile.get("bindings", [])
         # Called after a config reload: the overlay is gone and natives are back, so live == native.
-        lua_ops, new_overlay_records = self._build_bind_ops(target_bindings, self._live_bind_counts())
+        live = self._live_bind_counts()
+        lua_ops, new_overlay_records = self._build_bind_ops(target_bindings, live, self._live_bind_details())
+        if lua_ops:
+            lua_ops.insert(0, 'debug.getregistry().omnipal_stash = nil')
 
         if lua_ops:
             ok = self._eval_lua("; ".join(lua_ops))
@@ -1678,10 +1779,17 @@ end
             if not self.baseline_bindings:
                 self._load_baseline_cache()
 
-            dynamic_lua = self._build_dynamic_restore_lua()
+            # Combos whose natives were stashed are rebound from the stash below; skip them here
+            # (their baseline registry refs were freed by the unbind and must not be reused).
+            stashed = {b.get("combo") for b in active_overlay
+                       if b.get("native_unbound") and b.get("native_count", 0) > 0}
+            filt = None
+            if stashed and self.baseline_bindings:
+                filt = set(self.baseline_bindings) - stashed
+            dynamic_lua = self._build_dynamic_restore_lua(filter_combos=filt)
             if dynamic_lua:
                 lua_lines.append(dynamic_lua)
-            else:
+            elif not stashed:
                 lua_lines.append(LUA_RESTORE_BASELINE)
 
             success = self._eval_lua("; ".join(lua_lines))
@@ -1709,10 +1817,17 @@ end
 
             self._write_state("omarchy", 0)
             # State is already "omarchy", so the reload watcher won't re-apply an overlay.
-            # A reload brings back natives that shortcut forwarding had unbound.
-            if any(b.get("native_unbound") for b in active_overlay):
-                return self._reload_hyprland()
-            return True
+            # Natives we unbound are rebound from the Lua stash; reload only if that isn't possible.
+            unbound = [b for b in active_overlay if b.get("native_unbound")]
+            if not unbound:
+                return True
+            if all(b.get("native_restorable", False) for b in unbound):
+                restore_ops = [_native_unstash_lua(b["combo"]) for b in unbound
+                               if b.get("native_count", 0) > 0]
+                if not restore_ops or self._eval_lua_strict("; ".join(restore_ops)):
+                    return True
+                print("Native rebind from stash failed; falling back to hyprctl reload", file=sys.stderr)
+            return self._reload_hyprland()
 
     def _reload_hyprland(self) -> bool:
         if compositor_mutation_disabled():
@@ -1769,7 +1884,7 @@ end
             target_profile = self.profiles[target_mode]
             target_bindings = target_profile.get("bindings", [])
 
-            # A previous overlay that unbound natives (forwarding) needs a full restore + reload first
+            # A previous overlay that unbound natives needs a restore first (exact rebind, reload only as fallback)
             if any(b.get("native_unbound") for b in self._get_active_overlay()):
                 if not self.restore():
                     return False
@@ -1805,7 +1920,8 @@ end
             # Stage 3: Unbind-before-bind for every target combo (incl. forwarded shortcuts)
             # Native binds = live binds minus those our current overlay injected.
             native_counts = self._native_counts(current_overlay)
-            bind_ops, new_overlay_records = self._build_bind_ops(target_bindings, native_counts)
+            native_details = self._native_details(current_overlay)
+            bind_ops, new_overlay_records = self._build_bind_ops(target_bindings, native_counts, native_details)
             lua_ops.extend(bind_ops)
 
             # Execute batch in single eval call (< 5ms)

@@ -2082,6 +2082,10 @@ class TestNativeConflicts(unittest.TestCase):
         e.record_switch = lambda *a, **k: None
         e.get_persistence_status = lambda: {"enabled": False}
         e._live_bind_counts = lambda: dict(self.live)
+        self.details = {}
+        e._live_bind_details = lambda: {k: [dict(x) for x in v] for k, v in self.details.items()}
+        self.strict_ok = True
+        e._eval_lua_strict = lambda code: self.evals.append(code) or self.strict_ok
         e._apply_window_policy = lambda *a, **k: True
 
     def test_combo_signature_matches_hyprctl_modmask(self):
@@ -2096,6 +2100,42 @@ class TestNativeConflicts(unittest.TestCase):
         rec = {b["combo"]: b for b in self.overlay}
         self.assertTrue(rec["SUPER + TAB"].get("native_unbound"))
         self.assertIn('hl.unbind("SUPER + TAB")', self.evals[-1])
+        self.assertTrue(self.engine.restore())
+        self.assertIn("reload", self.calls)
+
+    def test_lua_native_is_stashed_and_restored_without_reload(self):
+        self.live = {(64, "TAB"): 1}
+        self.details = {(64, "TAB"): [{"modmask": 64, "key": "Tab", "dispatcher": "__lua", "arg": "42",
+                                       "description": "Next workspace", "repeat": True}]}
+        self.assertTrue(self.engine.switch_mode("windows"))
+        code = self.evals[-1]
+        stash = code.index("omnipal_stash")
+        self.assertLess(stash, code.index('hl.unbind("SUPER + TAB")'))
+        self.assertIn("h = R[42]", code)
+        self.assertIn("repeating = true", code)
+        rec = {b["combo"]: b for b in self.overlay}
+        self.assertTrue(rec["SUPER + TAB"]["native_restorable"])
+        self.calls.clear()
+        self.assertTrue(self.engine.restore())
+        self.assertNotIn("reload", self.calls)
+        self.assertIn('hl.bind("SUPER + TAB", e.h, e.o)', self.evals[-1])
+
+    def test_unstash_failure_falls_back_to_reload(self):
+        self.live = {(64, "TAB"): 1}
+        self.details = {(64, "TAB"): [{"dispatcher": "__lua", "arg": "7", "description": "n"}]}
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.strict_ok = False
+        self.calls.clear()
+        self.assertTrue(self.engine.restore())
+        self.assertIn("reload", self.calls)
+
+    def test_non_lua_native_falls_back_to_reload(self):
+        self.live = {(64, "TAB"): 1}
+        self.details = {(64, "TAB"): [{"dispatcher": "workspace", "arg": "e+1", "description": "n"}]}
+        self.assertTrue(self.engine.switch_mode("windows"))
+        rec = {b["combo"]: b for b in self.overlay}
+        self.assertFalse(rec["SUPER + TAB"]["native_restorable"])
+        self.calls.clear()
         self.assertTrue(self.engine.restore())
         self.assertIn("reload", self.calls)
 
