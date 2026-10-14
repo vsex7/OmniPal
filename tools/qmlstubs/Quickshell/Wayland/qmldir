@@ -1,0 +1,3 @@
+module Quickshell.Wayland
+typeinfo wayland.qmltypes
+depends Quickshell

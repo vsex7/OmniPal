@@ -1,11 +1,13 @@
+pragma ComponentBehavior: Bound
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
+import "Icons.js" as Icons
 import "Model.js" as Model
-import "Tokens.js" as Tokens
 
 // OmniPal 窗口吸附反馈与 Snap Layouts 布局选择器 (omni.snap-feedback)
 //
@@ -21,6 +23,12 @@ import "Tokens.js" as Tokens
 Item {
   id: root
 
+  // ---- Theme ----------------------------------------------------------------
+  // Native first: qs.Commons Color/Style + qs.Ui widgets wherever Omarchy has one.
+  // `theme` (OmniTheme.qml) resolves the remaining custom-surface roles straight from
+  // qs.Commons; the colors.toml palette below only feeds the extended status hues.
+  readonly property OmniTheme theme: OmniTheme {}
+
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
   property var manifest: null
@@ -30,7 +38,16 @@ Item {
   property string zone: "left"
   property string hoveredZone: ""
 
-  readonly property color snapColor: (Color && Color.accent) ? Color.accent : Tokens.semantic.accent
+  // Native chrome straight from qs.Commons (no null-guards: the Omarchy shell is the only host).
+  //   flyout card  = [menu] surface (like omarchy.emojis / menu overlays)
+  //   snap HUD pill = [popups] surface (like bar panels / OSD)
+  readonly property color snapColor: Commons.Color.accent
+  readonly property int hudRadius: Style.cornerRadius
+  readonly property int hudBorder: Math.max(1, Style.space(2))
+  readonly property color hudBg: Commons.Color.popups.background
+  readonly property color hudBorderColor: Commons.Color.popups.border
+  readonly property var hudBorderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, root.hudBorder)
+  readonly property var flyoutBorderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, root.hudBorder)
 
   // 键盘与焦点导航状态
   property int focusedTemplateIndex: -1  // -1 表示未选模板，0~5 表示当前选中的模板
@@ -177,7 +194,8 @@ Item {
     stdout: StdioCollector {
       id: schemaCollector
       waitForEnd: true
-      onStreamFinished: function(raw) {
+      onStreamFinished: function() {
+        var raw = text  // streamFinished() carries no args; read StdioCollector.text
         var str = (raw && raw.trim() !== "") ? raw : (schemaCollector.text ? schemaCollector.text : "")
         if (str && str.trim() !== "") {
           Model.loadSchemaJson(str)
@@ -208,15 +226,13 @@ Item {
     running: false
   }
 
-  PanelWindow {
+  // Native qs.Ui OverlayWindow. The passive snap HUD must not steal focus, so keyboard
+  // focus is only Exclusive in interactive (Snap Layouts picker) mode.
+  OverlayWindow {
     id: panel
-    visible: root.opened
-    anchors { top: true; bottom: true; left: true; right: true }
-    color: "transparent"
+    shown: root.opened
+    shownKeyboardFocus: root.interactive ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     WlrLayershell.namespace: "omni-snap-feedback"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: (root.opened && root.interactive) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
-    exclusionMode: ExclusionMode.Ignore
 
     Item {
       id: inputLayer
@@ -228,9 +244,9 @@ Item {
     Rectangle {
       anchors.fill: parent
       visible: root.interactive
-      color: Util.alpha(Color.menu.scrim || "#000000", 0.55)
+      color: Commons.Color.menu.scrim
       opacity: root.interactive ? 1.0 : 0.0
-      Behavior on opacity { NumberAnimation { duration: 120 } }
+      Behavior on opacity { NumberAnimation { duration: root.theme.duration(90) } }
 
       MouseArea {
         anchors.fill: parent
@@ -260,7 +276,7 @@ Item {
         }
 
         // BackSpace 键：回退至模板选择
-        if (event.key === Qt.Key_BackSpace) {
+        if (event.key === Qt.Key_Backspace) {
           if (root.focusedTemplateIndex >= 0) {
             root.focusedTemplateIndex = -1
             root.focusedSlotIndex = 0
@@ -271,10 +287,11 @@ Item {
         }
 
         // 数字键 1-6 处理 (Windows 11 Snap Layouts 核心两阶逻辑：支持主键盘与小键盘)
+        // Qt has no Key_NumpadN: keypad digits arrive as Key_1..Key_6 + KeypadModifier,
+        // so this one range covers both rows.
         var isNumKey = (event.key >= Qt.Key_1 && event.key <= Qt.Key_6)
-        var isNumpadKey = (event.key >= Qt.Key_Numpad1 && event.key <= Qt.Key_Numpad6)
-        if (isNumKey || isNumpadKey) {
-          var num = isNumKey ? (event.key - Qt.Key_1 + 1) : (event.key - Qt.Key_Numpad1 + 1) // 1 ~ 6
+        if (isNumKey) {
+          var num = event.key - Qt.Key_1 + 1 // 1 ~ 6
 
           if (root.focusedTemplateIndex === -1) {
             // 阶段 1：未选模板时，按 1-6 选中对应模板，并默认聚焦到第 1 个分区
@@ -468,16 +485,11 @@ Item {
           y: slotGeom.y
           width: slotGeom.width
           height: slotGeom.height
-          radius: Style.cornerRadius ? Style.cornerRadius * 1.5 : 12
+          radius: root.hudRadius
 
-          color: Qt.rgba(1, 1, 1, 0.03)
-          border.width: 1
-          border.color: Util.alpha(root.snapColor, 0.22)
-
-          Behavior on x { NumberAnimation { duration: 80 } }
-          Behavior on y { NumberAnimation { duration: 80 } }
-          Behavior on width { NumberAnimation { duration: 80 } }
-          Behavior on height { NumberAnimation { duration: 80 } }
+          color: "transparent"
+          border.width: Math.max(1, Style.normalBorderWidth)
+          border.color: root.theme.line
         }
       }
 
@@ -489,47 +501,25 @@ Item {
         y: previewContainer.boxGeom.y
         width: previewContainer.boxGeom.width
         height: previewContainer.boxGeom.height
-        radius: Style.cornerRadius ? Style.cornerRadius * 1.5 : 12
+        radius: root.hudRadius
 
-        color: Util.alpha(root.snapColor, root.interactive ? 0.14 : 0.18)
-        border.width: 2
-        border.color: Util.alpha(root.snapColor, root.interactive ? 0.75 : 0.85)
+        color: Util.alpha(root.snapColor, 0.12)
+        border.width: root.hudBorder
+        border.color: root.snapColor
 
-        Behavior on x { NumberAnimation { duration: 80 } }
-        Behavior on y { NumberAnimation { duration: 80 } }
-        Behavior on width { NumberAnimation { duration: 80 } }
-        Behavior on height { NumberAnimation { duration: 80 } }
-
-        // 柔和外发光边框
-        Rectangle {
-          anchors.fill: parent
-          anchors.margins: -2
-          radius: parent.radius + 2
-          color: "transparent"
-          border.width: 1
-          border.color: Util.alpha(root.snapColor, 0.35)
-        }
 
         // 浮动指示徽章（展示区域图标、中文说明与物理像素分辨率）
-        Rectangle {
+        BorderSurface {
           id: infoPill
           anchors.centerIn: parent
-          implicitWidth: pillRow.implicitWidth + Style.space(24)
-          implicitHeight: pillRow.implicitHeight + Style.space(16)
-          radius: height / 2
-          color: Qt.rgba(0.06, 0.08, 0.12, 0.90)
-          border.color: Util.alpha(root.snapColor, 0.65)
-          border.width: 1
+          width: implicitWidth
+          height: implicitHeight
+          implicitWidth: pillRow.implicitWidth + Style.spacing.popupPadding * 2 + Border.left(root.hudBorderSpec) + Border.right(root.hudBorderSpec)
+          implicitHeight: pillRow.implicitHeight + Style.spacing.popupPadding + Border.top(root.hudBorderSpec) + Border.bottom(root.hudBorderSpec)
+          radius: root.hudRadius
+          color: root.hudBg
+          borderSpec: root.hudBorderSpec
 
-          // 徽章外发光
-          Rectangle {
-            anchors.fill: parent
-            anchors.margins: -1
-            radius: parent.radius + 1
-            color: "transparent"
-            border.width: 1
-            border.color: Util.alpha(root.snapColor, 0.30)
-          }
 
           Row {
             id: pillRow
@@ -537,9 +527,10 @@ Item {
             spacing: Style.space(10)
 
             Text {
+              font.family: Style.font.family
               anchors.verticalCenter: parent.verticalCenter
-              text: previewContainer.boxGeom.icon || "◧"
-              font.pixelSize: 18
+              text: Icons.glyph.snap
+              font.pixelSize: Style.font.iconLarge || 18
               color: root.snapColor
             }
 
@@ -555,25 +546,25 @@ Item {
                   text: previewContainer.boxGeom.label || ""
                   font.family: Style.font.family
                   font.pixelSize: Style.font.bodySmall
-                  font.bold: true
-                  color: "#ffffff"
+                  color: root.theme.textStrong
                 }
 
                 // 物理像素分辨率胶囊
-                Rectangle {
+                BorderSurface {
                   anchors.verticalCenter: parent.verticalCenter
-                  implicitWidth: dimLabel.implicitWidth + 8
-                  height: 16
-                  radius: 3
-                  color: Qt.rgba(1, 1, 1, 0.14)
+                  implicitWidth: dimLabel.implicitWidth + Style.space(10)
+                  width: implicitWidth
+                  height: dimLabel.implicitHeight + Style.space(4)
+                  radius: Style.cornerRadius
+                  color: "transparent"
+                  borderSpec: Border.controlSpec("normal", root.theme.text, root.snapColor)
 
                   Text {
                     id: dimLabel
                     anchors.centerIn: parent
                     text: previewContainer.boxGeom.dim || ""
                     font.family: Style.font.family
-                    font.pixelSize: 9
-                    font.bold: true
+                    font.pixelSize: Style.font.caption
                     color: Util.alpha(Color.foreground, 0.85)
                   }
                 }
@@ -583,7 +574,7 @@ Item {
                 visible: root.interactive
                 text: "按回车、点击或按对应数字直接吸附"
                 font.family: Style.font.family
-                font.pixelSize: 8
+                font.pixelSize: Style.font.caption
                 color: Util.alpha(Color.foreground, 0.6)
               }
             }
@@ -601,16 +592,16 @@ Item {
         property: "opacity"
         from: 0.0
         to: 1.0
-        duration: 100
+        duration: root.theme.duration(90)
         easing.type: Easing.OutCubic
       }
-      PauseAnimation { duration: 180 }
+      PauseAnimation { duration: root.theme.duration(200) }
       NumberAnimation {
         target: previewContainer
         property: "opacity"
         from: 1.0
         to: 0.0
-        duration: 140
+        duration: root.theme.duration(140)
         easing.type: Easing.InQuad
       }
     }
@@ -622,59 +613,27 @@ Item {
       anchors.centerIn: parent
       width: Math.min(Style.space(560), parent.width - Style.space(32))
       height: Math.min(Style.space(370), parent.height - Style.space(32))
-
-      scale: root.interactive ? 1.0 : 0.95
       opacity: root.interactive ? 1.0 : 0.0
-      Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutBack; easing.overshoot: 1.08 } }
-      Behavior on opacity { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+            Behavior on opacity { NumberAnimation { duration: root.theme.duration(140); easing.type: Easing.OutCubic } }
 
-      readonly property real cardRadius: Math.max(14, Style.cornerRadius ? Style.cornerRadius * 1.5 : 14)
+      readonly property real cardRadius: root.hudRadius
 
-      // 1. 深邃环境微光与漫反射阴影
-      Rectangle {
-        anchors.fill: parent
-        anchors.margins: -10
-        radius: flyoutWrapper.cardRadius + 10
-        color: "transparent"
-        border.color: Qt.rgba(0, 0, 0, 0.45)
-        border.width: 10
-      }
 
-      // 2. 交互激活微光光环
-      Rectangle {
-        anchors.fill: parent
-        anchors.margins: -1
-        radius: flyoutWrapper.cardRadius + 1
-        color: "transparent"
-        border.color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.42) : Qt.rgba(1, 1, 1, 0.08)
-        border.width: 1
-        Behavior on border.color { ColorAnimation { duration: 120 } }
-      }
 
-      // 3. 卡片主体 (Obsidian Acrylic Glass)
-      Rectangle {
+      // 卡片主体：Omarchy popup（实色主题背景 + 2px active-border，无阴影/玻璃）
+      BorderSurface {
         id: flyoutCard
         anchors.fill: parent
         radius: flyoutWrapper.cardRadius
-        color: Qt.rgba(0.07, 0.09, 0.13, 0.96)
-        border.color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.48) : Qt.rgba(1, 1, 1, 0.14)
-        border.width: 1
+        color: Commons.Color.menu.background
+        borderSpec: root.flyoutBorderSpec
         clip: true
-        Behavior on border.color { ColorAnimation { duration: 120 } }
 
         // 吸收卡片空白区点击，防止点击空白处透传穿透导致面板被全屏遮罩误关闭
         MouseArea {
           anchors.fill: parent
         }
 
-        // 顶端极光微反光线 (Specular Hairline)
-        Rectangle {
-          anchors.top: parent.top
-          anchors.left: parent.left
-          anchors.right: parent.right
-          height: 1
-          color: Qt.rgba(1, 1, 1, 0.14)
-        }
 
         // ============================================================
         // 头部极简上下文栏 (Hero Header: ~36px)
@@ -693,42 +652,30 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(8)
 
-            // 标志性视觉微徽标
-            Rectangle {
-              width: Style.space(24)
-              height: Style.space(24)
-              radius: 6
-              color: Util.alpha(root.snapColor, 0.16)
-              border.color: Util.alpha(root.snapColor, 0.40)
-              border.width: 1
+            // 标志性视觉微徽标 — plain Nerd glyph, no tinted tile
+            Text {
               anchors.verticalCenter: parent.verticalCenter
-
-              Text {
-                anchors.centerIn: parent
-                text: "⊞"
-                font.pixelSize: 13
-                font.bold: true
-                color: root.snapColor
-              }
+              font.family: Style.font.family
+              text: Icons.glyph.snap
+              font.pixelSize: Style.font.body
+              color: root.theme.text
             }
 
             Text {
               text: "Snap Layouts"
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
-              font.bold: true
-              color: "#ffffff"
+              color: root.theme.textStrong
               anchors.verticalCenter: parent.verticalCenter
             }
 
-            // 目标窗口芯片 (如有捕获)
-            Rectangle {
+            // 目标窗口芯片 (如有捕获) — PanelHero-style detail pill
+            BorderSurface {
               visible: (root.targetWindowTitle !== "" || root.targetWindowClass !== "" || root.targetWindowAddress !== "")
               height: Style.space(18)
-              radius: 4
-              color: Qt.rgba(1, 1, 1, 0.08)
-              border.color: Qt.rgba(1, 1, 1, 0.14)
-              border.width: 1
+              radius: Style.cornerRadius
+              color: "transparent"
+              borderSpec: Border.controlSpec("normal", root.theme.text, root.snapColor)
               anchors.verticalCenter: parent.verticalCenter
               implicitWidth: targetWinRow.implicitWidth + Style.space(10)
 
@@ -737,19 +684,10 @@ Item {
                 anchors.centerIn: parent
                 spacing: 4
 
-                Rectangle {
-                  width: 5
-                  height: 5
-                  radius: 3
-                  color: Tokens.semantic.ok
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-
                 Text {
                   text: root.targetWindowTitle || root.targetWindowClass || root.targetWindowAddress
                   font.family: Style.font.family
-                  font.pixelSize: 9
-                  font.bold: true
+                  font.pixelSize: Style.font.caption
                   color: Util.alpha(Color.foreground, 0.85)
                   elide: Text.ElideRight
                   maximumLineCount: 1
@@ -767,12 +705,11 @@ Item {
             spacing: Style.space(8)
 
             // 阶段提示药丸
-            Rectangle {
+            BorderSurface {
               height: Style.space(20)
-              radius: 4
-              color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.18) : Qt.rgba(0, 0, 0, 0.45)
-              border.color: root.focusedTemplateIndex !== -1 ? root.snapColor : Qt.rgba(1, 1, 1, 0.12)
-              border.width: 1
+              radius: Style.cornerRadius
+              color: root.focusedTemplateIndex !== -1 ? Style.selectedFillFor(root.theme.text, root.snapColor) : Style.normalFillFor(root.theme.text, root.snapColor)
+              borderSpec: Border.controlSpec(root.focusedTemplateIndex !== -1 ? "focus" : "normal", root.theme.text, root.snapColor)
               anchors.verticalCenter: parent.verticalCenter
               implicitWidth: stepBadgeRow.implicitWidth + Style.space(8)
 
@@ -784,39 +721,10 @@ Item {
                 Text {
                   text: root.focusedTemplateIndex === -1 ? "1~6 模板" : ("模板 [" + (root.focusedTemplateIndex + 1) + "] 就绪")
                   font.family: Style.font.family
-                  font.pixelSize: 8
-                  font.bold: true
+                  font.pixelSize: Style.font.caption
                   color: root.focusedTemplateIndex !== -1 ? root.snapColor : Util.alpha(Color.foreground, 0.70)
                   anchors.verticalCenter: parent.verticalCenter
                 }
-              }
-            }
-
-            // 关闭按钮
-            Rectangle {
-              width: Style.space(22)
-              height: Style.space(22)
-              radius: 5
-              color: closeMouse.containsMouse ? Tokens.semantic.danger : Qt.rgba(1, 1, 1, 0.06)
-              border.color: closeMouse.containsMouse ? "transparent" : Qt.rgba(1, 1, 1, 0.10)
-              border.width: 1
-              anchors.verticalCenter: parent.verticalCenter
-              Behavior on color { ColorAnimation { duration: 90 } }
-
-              Text {
-                anchors.centerIn: parent
-                text: "✕"
-                font.pixelSize: 10
-                font.bold: true
-                color: closeMouse.containsMouse ? "#ffffff" : Util.alpha(Color.foreground, 0.60)
-              }
-
-              MouseArea {
-                id: closeMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.dismiss()
               }
             }
           }
@@ -838,7 +746,9 @@ Item {
           Repeater {
             model: root.effectiveTemplates
 
-            delegate: Rectangle {
+            // Template card painted with the same Style state tokens as a bordered native
+            // Button: normal → hover-cursor → focus (selected template).
+            delegate: BorderSurface {
               id: tplCard
               required property var modelData
               required property int index
@@ -849,29 +759,15 @@ Item {
 
               width: (templatesGrid.width - templatesGrid.spacing * 2) / 3
               height: (templatesGrid.height - templatesGrid.spacing) / 2
-              radius: 8
-              color: isSelectedTpl
-                ? Qt.rgba(0.14, 0.19, 0.28, 0.92)
-                : (isCardHovered ? Qt.rgba(0.12, 0.15, 0.22, 0.82) : Qt.rgba(0.09, 0.11, 0.16, 0.65))
-              border.color: isSelectedTpl ? root.snapColor : (isCardHovered ? Qt.rgba(1, 1, 1, 0.30) : Qt.rgba(1, 1, 1, 0.10))
-              border.width: isSelectedTpl ? 2 : 1
+              radius: Style.cornerRadius
+              color: isSelectedTpl ? Style.selectedFillFor(root.theme.text, root.snapColor)
+                : (isCardHovered ? Style.hoverFillFor(root.theme.text, root.snapColor) : "transparent")
+              borderSpec: Border.controlSpec(isSelectedTpl ? "focus" : (isCardHovered ? "hover-cursor" : "normal"), root.theme.text, root.snapColor)
               opacity: isDimmed ? 0.45 : 1.0
 
-              Behavior on color { ColorAnimation { duration: 80 } }
-              Behavior on border.color { ColorAnimation { duration: 80 } }
-              Behavior on border.width { NumberAnimation { duration: 80 } }
-              Behavior on opacity { NumberAnimation { duration: 80 } }
+              Behavior on color { ColorAnimation { duration: root.theme.duration(120) } }
+              Behavior on opacity { NumberAnimation { duration: root.theme.duration(90) } }
 
-              // 选中外圈光晕
-              Rectangle {
-                anchors.fill: parent
-                anchors.margins: -2
-                radius: parent.radius + 2
-                color: "transparent"
-                border.width: 1
-                border.color: Util.alpha(root.snapColor, 0.45)
-                visible: tplCard.isSelectedTpl
-              }
 
               MouseArea {
                 id: cardMouse
@@ -904,16 +800,15 @@ Item {
                     Text {
                       text: tplCard.modelData.title
                       font.family: Style.font.family
-                      font.pixelSize: 9
-                      font.bold: true
-                      color: tplCard.isSelectedTpl ? "#ffffff" : (tplCard.isCardHovered ? "#ffffff" : Util.alpha(Color.foreground, 0.85))
+                      font.pixelSize: Style.font.caption
+                      color: tplCard.isSelectedTpl ? root.snapColor : root.theme.text
                       anchors.verticalCenter: parent.verticalCenter
                     }
 
                     Text {
                       text: tplCard.modelData.hint ? ("· " + tplCard.modelData.hint) : ""
                       font.family: Style.font.family
-                      font.pixelSize: 8
+                      font.pixelSize: Style.font.caption
                       color: Util.alpha(Color.foreground, 0.40)
                       anchors.verticalCenter: parent.verticalCenter
                       elide: Text.ElideRight
@@ -927,17 +822,17 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     width: 16
                     height: 14
-                    radius: 3
-                    color: tplCard.isSelectedTpl ? root.snapColor : Qt.rgba(0, 0, 0, 0.45)
-                    border.color: tplCard.isSelectedTpl ? "#ffffff" : Qt.rgba(1, 1, 1, 0.15)
+                    radius: Style.cornerRadius
+                    color: tplCard.isSelectedTpl ? root.snapColor : root.theme.chipFill
+                    border.color: tplCard.isSelectedTpl ? root.snapColor : Util.alpha(root.theme.text, 0.15)
                     border.width: 1
 
                     Text {
+                      font.family: Style.font.family
                       anchors.centerIn: parent
                       text: tplCard.modelData.key || String(tplCard.index + 1)
-                      font.pixelSize: 8
-                      font.bold: true
-                      color: tplCard.isSelectedTpl ? "#000000" : Util.alpha(Color.foreground, 0.75)
+                      font.pixelSize: Style.font.caption
+                      color: tplCard.isSelectedTpl ? root.theme.onAccent : Util.alpha(Color.foreground, 0.75)
                     }
                   }
                 }
@@ -947,9 +842,9 @@ Item {
                   id: miniCanvas
                   width: parent.width
                   height: parent.height - 21
-                  radius: 5
-                  color: Qt.rgba(0, 0, 0, 0.30)
-                  border.color: Qt.rgba(1, 1, 1, 0.06)
+                  radius: Style.cornerRadius
+                  color: root.theme.sunken
+                  border.color: Util.alpha(root.theme.text, 0.06)
                   border.width: 1
                   clip: true
 
@@ -975,14 +870,14 @@ Item {
                       y: slotY + 1
                       width: Math.max(10, slotW - 2)
                       height: Math.max(10, slotH - 2)
-                      radius: 3
+                      radius: Style.cornerRadius
 
-                      color: isHovered ? Util.alpha(root.snapColor, 0.40) : Qt.rgba(1, 1, 1, 0.08)
-                      border.color: isHovered ? root.snapColor : Qt.rgba(1, 1, 1, 0.16)
-                      border.width: isHovered ? 1.5 : 1
+                      color: isHovered ? Util.alpha(root.snapColor, 0.40) : Util.alpha(root.theme.text, 0.08)
+                      border.color: isHovered ? root.snapColor : Util.alpha(root.theme.text, 0.16)
+                      border.width: Math.max(1, Style.normalBorderWidth)
 
-                      Behavior on color { ColorAnimation { duration: 80 } }
-                      Behavior on border.color { ColorAnimation { duration: 80 } }
+                      Behavior on color { ColorAnimation { duration: root.theme.duration(90) } }
+                      Behavior on border.color { ColorAnimation { duration: root.theme.duration(90) } }
 
                       // 选中模板时的数字按键角标 [1]、[2]...
                       Rectangle {
@@ -990,17 +885,17 @@ Item {
                         anchors.centerIn: parent
                         width: 16
                         height: 16
-                        radius: 3
-                        color: slotRect.isSlotFocused ? root.snapColor : Qt.rgba(0, 0, 0, 0.7)
-                        border.color: slotRect.isSlotFocused ? "#ffffff" : Util.alpha(root.snapColor, 0.5)
+                        radius: Style.cornerRadius
+                        color: slotRect.isSlotFocused ? root.snapColor : root.theme.sunken
+                        border.color: slotRect.isSlotFocused ? root.snapColor : Util.alpha(root.snapColor, 0.5)
                         border.width: 1
 
                         Text {
+                          font.family: Style.font.family
                           anchors.centerIn: parent
                           text: String(slotRect.index + 1)
-                          font.pixelSize: 9
-                          font.bold: true
-                          color: slotRect.isSlotFocused ? "#000000" : "#ffffff"
+                          font.pixelSize: Style.font.caption
+                          color: slotRect.isSlotFocused ? root.theme.onAccent : root.theme.textStrong
                         }
                       }
 
@@ -1008,11 +903,10 @@ Item {
                       Text {
                         visible: !tplCard.isSelectedTpl && slotRect.isHovered
                         anchors.centerIn: parent
-                        text: modelData.label
+                        text: slotRect.modelData.label
                         font.family: Style.font.family
-                        font.pixelSize: 8
-                        font.bold: true
-                        color: "#ffffff"
+                        font.pixelSize: Style.font.caption
+                        color: root.theme.textStrong
                       }
 
                       MouseArea {
@@ -1022,15 +916,15 @@ Item {
                         cursorShape: Qt.PointingHandCursor
 
                         onEntered: {
-                          root.hoveredZone = modelData.id
+                          root.hoveredZone = slotRect.modelData.id
                         }
                         onExited: {
-                          if (root.hoveredZone === modelData.id) {
+                          if (root.hoveredZone === slotRect.modelData.id) {
                             root.hoveredZone = ""
                           }
                         }
                         onClicked: {
-                          root.executeSnap(modelData.id)
+                          root.executeSnap(slotRect.modelData.id)
                         }
                       }
                     }
@@ -1041,8 +935,8 @@ Item {
           }
         }
 
-        // 底部细线
-        Rectangle {
+        // 底部细线 — native PanelSeparator
+        PanelSeparator {
           id: footerSep
           anchors.bottom: flyoutFooter.top
           anchors.bottomMargin: Style.space(6)
@@ -1050,8 +944,7 @@ Item {
           anchors.right: parent.right
           anchors.leftMargin: Style.space(14)
           anchors.rightMargin: Style.space(14)
-          height: 1
-          color: Qt.rgba(1, 1, 1, 0.08)
+          foreground: Commons.Color.menu.text
         }
 
         // ============================================================
@@ -1075,7 +968,7 @@ Item {
             Rectangle {
               width: 5
               height: 5
-              radius: 3
+              radius: Style.cornerRadius
               color: root.hoveredZone !== "" ? root.snapColor : Util.alpha(Color.foreground, 0.4)
               anchors.verticalCenter: parent.verticalCenter
             }
@@ -1094,8 +987,7 @@ Item {
                 return "按 1–6 快捷跳选 · 悬停桌面高亮轮廓 · Esc 退出"
               }
               font.family: Style.font.family
-              font.pixelSize: 8
-              font.bold: root.hoveredZone !== ""
+              font.pixelSize: Style.font.caption
               color: root.hoveredZone !== "" ? root.snapColor : Util.alpha(Color.foreground, 0.60)
               anchors.verticalCenter: parent.verticalCenter
             }
@@ -1114,14 +1006,16 @@ Item {
                 { key: "Esc", desc: "退出" }
               ]
 
-              delegate: Rectangle {
+              // Key-hint chip: normal control fill/border tokens.
+              delegate: BorderSurface {
+                id: kbdChip
                 required property var modelData
-                height: 16
-                radius: 3
-                color: Qt.rgba(0, 0, 0, 0.45)
-                border.color: Qt.rgba(1, 1, 1, 0.12)
-                border.width: 1
-                implicitWidth: kbdRow.implicitWidth + 6
+                height: kbdRow.implicitHeight + Style.space(4)
+                radius: Style.cornerRadius
+                color: Style.normalFillFor(root.theme.text, root.snapColor)
+                borderSpec: Border.controlSpec("normal", root.theme.text, root.snapColor)
+                implicitWidth: kbdRow.implicitWidth + Style.space(8)
+                width: implicitWidth
 
                 Row {
                   id: kbdRow
@@ -1129,18 +1023,17 @@ Item {
                   spacing: 3
 
                   Text {
-                    text: modelData.key
+                    text: kbdChip.modelData.key
                     font.family: Style.font.family
-                    font.pixelSize: 8
-                    font.bold: true
-                    color: "#ffffff"
+                    font.pixelSize: Style.font.caption
+                    color: root.theme.textStrong
                     anchors.verticalCenter: parent.verticalCenter
                   }
 
                   Text {
-                    text: modelData.desc
+                    text: kbdChip.modelData.desc
                     font.family: Style.font.family
-                    font.pixelSize: 7
+                    font.pixelSize: Style.font.caption
                     color: Util.alpha(Color.foreground, 0.45)
                     anchors.verticalCenter: parent.verticalCenter
                   }

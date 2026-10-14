@@ -1,0 +1,25 @@
+import QtQuick.tooling 1.2
+Module {
+  Component {
+    file: "hy"; name: "QsHyprland"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell.Hyprland/Hyprland 1.0"]; isCreatable: false; isSingleton: true; exportMetaObjectRevisions: [256]
+    Property { name: "monitors"; type: "QObject"; isPointer: true; isReadonly: true }
+    Property { name: "workspaces"; type: "QObject"; isPointer: true; isReadonly: true }
+    Property { name: "toplevels"; type: "QObject"; isPointer: true; isReadonly: true }
+    Property { name: "focusedMonitor"; type: "QObject"; isPointer: true; isReadonly: true }
+    Property { name: "focusedWorkspace"; type: "QObject"; isPointer: true; isReadonly: true }
+    Signal { name: "rawEvent"; Parameter { name: "event"; type: "QObject"; isPointer: true } }
+    Method { name: "dispatch"; Parameter { name: "r"; type: "QString" } }
+    Method { name: "refreshMonitors" }
+    Method { name: "refreshWorkspaces" }
+    Method { name: "refreshToplevels" }
+    Method { name: "monitorFor"; type: "QObject"; isPointer: true; Parameter { name: "s"; type: "QVariant" } }
+  }
+  Component {
+    file: "hy"; name: "QsHyprlandFocusGrab"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell.Hyprland/HyprlandFocusGrab 1.0"]; exportMetaObjectRevisions: [256]
+    Property { name: "active"; type: "bool" }
+    Property { name: "windows"; type: "QObject"; isList: true }
+    Signal { name: "cleared" }
+  }
+}

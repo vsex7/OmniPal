@@ -13,6 +13,8 @@ git clone https://github.com/vsex7/OmniPal.git
 cd OmniPal && bash scripts/install.sh
 ```
 
+要求 **Omarchy 4.0.4 或更新版本**（每个插件的 `manifest.json` 里以 `minOmarchy` 声明）。安装脚本会通过 `pacman -Q omarchy`（或 `$OMARCHY_PATH/version`）检测版本：版本过旧会拒绝安装；无法检测时只给出警告并继续安装，装好后请运行 `omni-profile doctor`，其中「Omarchy 版本」一项会显示 正常 / 过旧 / 未知。
+
 装好后不要移动这个目录。卸载请运行 `bash scripts/uninstall.sh`，会删掉安装时加上的所有文件。
 
 ## 用法

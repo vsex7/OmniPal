@@ -1,11 +1,13 @@
+pragma ComponentBehavior: Bound
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import QtQuick.Layouts
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
-import "Tokens.js" as Tokens
+import "Icons.js" as Icons
 
 // OmniPal 设置与控制中心面板（omni.settings）
 //
@@ -18,6 +20,12 @@ import "Tokens.js" as Tokens
 // 交由 Engine 唯一执行，插件自身从不写任何 Hyprland 配置（AGENTS.md §2 / H-1）。
 Item {
   id: root
+
+  // ---- Theme ----------------------------------------------------------------
+  // Native first: qs.Commons Color/Style + qs.Ui widgets wherever Omarchy has one.
+  // `theme` (OmniTheme.qml) resolves the remaining custom-surface roles straight from
+  // qs.Commons; the colors.toml palette below only feeds the extended status hues.
+  readonly property OmniTheme theme: OmniTheme {}
 
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
@@ -91,62 +99,58 @@ Item {
   property var modeItems: [
     {
       id: "windows",
-      icon: "⊞",
+      icon: Icons.mode("windows"),
       name: "Windows 11 习惯模式",
       desc: "Alt+F4 关闭窗口 · Win+方向键智能吸附 · Win+E 文件管理器 · Win+Tab 任务视图",
       count: 19,
-      color: Tokens.mode.windows,
       source: "project",
       override: false
     },
     {
       id: "mac",
-      icon: "◆",
+      icon: Icons.mode("mac"),
       name: "macOS 习惯模式",
       desc: "Super+Q 退出程序 · Super+Space 聚焦搜索 · Super+Shift+3/4 截图 · Super+H 最小化",
       count: 42,
-      color: Tokens.mode.mac,
       source: "project",
       override: false
     },
     {
       id: "kde",
-      icon: "❖",
+      icon: Icons.mode("kde"),
       name: "KDE Plasma 习惯模式",
       desc: "Meta+方向键贴边 · Alt+Space 搜索 · Ctrl+Alt+L 锁屏 · Meta+W 概览",
       count: 19,
-      color: Tokens.mode.kde,
       source: "project",
       override: false
     },
     {
       id: "omarchy",
-      icon: "⊡",
+      icon: Icons.mode("omarchy"),
       name: "Omarchy 原生模式",
       desc: "",
       count: 0,
-      color: Tokens.mode.omarchy,
       source: "project",
       override: false
     }
   ]
 
-  // 主题样式令牌（严格对齐 Omarchy 菜单设计，不引入独立色板）
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  property color border: Color.menu.border
+  // 主题样式令牌：直接取 Omarchy Shell 的 qs.Commons（[menu] 表面，与 omarchy.menu /
+  // omarchy.emojis 一致）。卡片/芯片用 Style 的 normal 控件 fill/border 令牌（见 Card 组件）。
+  property color background: Commons.Color.menu.background
+  property color foreground: Commons.Color.menu.text
+  property color border: Commons.Color.menu.border
   property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
-  property color scrim: Color.menu.scrim
-  property color selectedBackground: Color.menu.selectedBackground
-  property color selectedText: Color.menu.selectedText
-  readonly property color glassColor: Util.alpha(Color.menu.background, 0.90)
+  property color scrim: Commons.Color.menu.scrim
+  property color selectedBackground: Commons.Color.menu.selectedBackground
+  property color selectedText: Commons.Color.menu.selectedText
+  readonly property color glassColor: root.background
   readonly property int cornerRadius: Style.cornerRadius
 
-  readonly property color accent: Color.accent || Tokens.semantic.accent
-  readonly property color okColor: Tokens.semantic.ok
-  readonly property color dangerColor: Tokens.semantic.danger
-  readonly property color hairline: Util.alpha(Color.menu.text, 0.10)
-  readonly property color chipColor: Util.alpha(Color.menu.text, 0.05)
+  readonly property color accent: Commons.Color.accent
+  readonly property color okColor: root.accent
+  readonly property color dangerColor: Commons.Color.urgent
+  readonly property color chipColor: Style.normalFillFor(root.foreground, root.accent)
 
   readonly property int cardWidth: Math.min(Style.space(680), panel.width - Style.space(48))
   readonly property int cardHeight: Math.min(Style.space(640), panel.height - Style.space(48))
@@ -174,6 +178,47 @@ Item {
   function toggle() {
     if (root.opened) root.dismiss()
     else root.open("{}")
+  }
+
+  // ---------- 确认 / 撤销状态 ----------
+  // confirmAction: "" | "restore" | "reset" — 破坏性操作先经 Ui.ConfirmDialog 确认
+  property string confirmAction: ""
+  // 模式切换后 ~5s 内可按 U 撤销（回到 undoMode；omarchy 由 engine 走 restore 路径）
+  property string undoMode: ""
+  property string toastText: ""
+
+  function askRestore() { root.confirmAction = "restore" }
+  function askResetStats() { if (!root.statsBusy) root.confirmAction = "reset" }
+  function cancelConfirm() { root.confirmAction = ""; Qt.callLater(function() { keyCatcher.forceActiveFocus() }) }
+  function acceptConfirm() {
+    var a = root.confirmAction
+    root.confirmAction = ""
+    if (a === "restore") root.restoreNative()
+    else if (a === "reset") root.resetStats()
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function switchModeWithUndo(targetMode) {
+    if (!targetMode || targetMode === root.currentMode) return
+    root.undoMode = root.currentMode
+    root.toastText = "已切换至 " + root.modeNameOf(targetMode) + " · U 撤销"
+    toastTimer.restart()
+    root.switchMode(targetMode)
+  }
+
+  function undoSwitch() {
+    if (!root.undoMode) return
+    var m = root.undoMode
+    root.undoMode = ""
+    root.toastText = "已撤销 · 回到 " + root.modeNameOf(m)
+    toastTimer.restart()
+    root.switchMode(m)
+  }
+
+  Timer {
+    id: toastTimer
+    interval: 5000
+    onTriggered: { root.undoMode = ""; root.toastText = "" }
   }
 
   function switchMode(targetMode) {
@@ -234,12 +279,8 @@ Item {
     return id
   }
 
-  function modeColorOf(id) {
-    for (var i = 0; i < root.modeItems.length; i++) {
-      if (root.modeItems[i].id === id) return root.modeItems[i].color
-    }
-    return root.accent
-  }
+  // Native colour discipline: every mode renders in accent; identity = glyph + name.
+  function modeColorOf(id) { return root.accent }
 
   function fmtTs(s) {
     if (!s) return ""
@@ -375,7 +416,7 @@ Item {
       waitForEnd: true
       onStreamFinished: function() {
         var t = (text || "").trim()
-        if (t.indexOf("❌") === 0) root.rulesError = t.replace("❌", "").trim()
+        if (t.indexOf("\u274C") === 0) root.rulesError = t.replace("\u274C", "").trim()
       }
     }
     onExited: rulesListProc.running = true
@@ -428,16 +469,12 @@ Item {
         try {
           var parsed = JSON.parse(data)
           if (Array.isArray(parsed) && parsed.length > 0) {
-            var iconMap = { "windows": "⊞", "mac": "◆", "kde": "❖", "omarchy": "⊡" }
-            var colorMap = { "windows": Tokens.mode.windows, "mac": Tokens.mode.mac, "kde": Tokens.mode.kde, "omarchy": Tokens.mode.omarchy }
-            var customColors = Tokens.mode.custom
             var items = []
             for (var i = 0; i < parsed.length; i++) {
               var p = parsed[i]
-              // 显示元数据取自 profile 的 display 块（单一事实源），本地仅保留兜底值
-              var disp = (p && p.display) || {}
-              var icon = disp.icon || "◇"
-              var color = disp.color || customColors[i % customColors.length]
+              // 名称/计数来自 profile（单一事实源）
+              // display.icon / display.color stay in the schema but are not rendered.
+              var icon = Icons.mode(p.id)
               var desc = p.description || (p.source === "user" ? "用户自定义配置模式" : "")
               items.push({
                 id: p.id,
@@ -445,7 +482,6 @@ Item {
                 name: p.name || p.id,
                 desc: desc,
                 count: p.bindings_count || 0,
-                color: color,
                 source: p.source || "project",
                 override: p.override || false
               })
@@ -513,7 +549,7 @@ Item {
 
     width: parent ? parent.width : 0
     implicitHeight: Style.space(32)
-    radius: 6
+    radius: Style.cornerRadius
     color: "transparent"
 
     Rectangle {
@@ -530,12 +566,12 @@ Item {
         : 0
       radius: parent.radius
       color: Util.alpha(rankRow.barColor, 0.22)
-      Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+      Behavior on width { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutCubic } }
     }
 
     Rectangle {
       anchors { left: parent.left; leftMargin: Style.space(4); verticalCenter: parent.verticalCenter }
-      width: Style.space(4); height: parent.height - Style.space(8); radius: 2
+      width: Style.space(4); height: parent.height - Style.space(8); radius: Style.cornerRadius
       color: rankRow.barColor
     }
 
@@ -545,7 +581,6 @@ Item {
       text: rankRow.entry.count + " 次"
       font.family: Style.font.family
       font.pixelSize: Style.font.bodySmall
-      font.bold: true
       color: rankRow.barColor
     }
 
@@ -563,56 +598,31 @@ Item {
     }
   }
 
-  // ---------- 内联组件：iOS/macOS 风格滑动开关 ----------
-  component ToggleSwitch: Item {
-    id: tgl
-    required property bool checked
-    signal toggled
-
-    width: Style.space(52)
-    height: Style.space(30)
-
-    Rectangle {
-      anchors.fill: parent
-      radius: height / 2
-      color: tgl.checked
-        ? Util.alpha(root.okColor, 0.85)
-        : Util.alpha(root.foreground, 0.16)
-      border.width: 1
-      border.color: tgl.checked
-        ? Util.alpha(root.okColor, 0.95)
-        : Util.alpha(root.foreground, 0.10)
-      Behavior on color { ColorAnimation { duration: 200 } }
-      Behavior on border.color { ColorAnimation { duration: 200 } }
-    }
-
-    Rectangle {
-      id: tglKnob
-      width: parent.height - Style.space(8)
-      height: width
-      radius: width / 2
-      color: "#ffffff"
-      x: tgl.checked ? parent.width - width - Style.space(4) : Style.space(4)
-      y: Style.space(4)
-      Behavior on x { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
-    }
-
-    MouseArea {
-      anchors.fill: parent
-      cursorShape: Qt.PointingHandCursor
-      onClicked: tgl.toggled()
-    }
+  // ---------- 内联组件：设置卡片 / 芯片 ----------
+  // Omarchy has no "card" widget; first-party panels paint grouped content with the
+  // shared control tokens, so a Card is a BorderSurface with Style normal fill/border.
+  component Card: BorderSurface {
+    radius: Style.cornerRadius
+    color: Style.normalFillFor(root.foreground, root.accent)
+    borderSpec: Border.none() // single border = the outer surface (designer gap list)
   }
 
-  PanelWindow {
+  // Bordered native Button used for every chip / action in this panel.
+  component Chip: Button {
+    bordered: true
+    foreground: root.foreground
+    accent: root.accent
+    fontSize: Style.font.bodySmall
+    verticalPadding: Style.spacing.xs
+  }
+
+  // (Toggle switches use the native qs.Ui ToggleSwitch.)
+
+  // Native qs.Ui OverlayWindow (focused monitor, Overlay layer, exclusive focus).
+  OverlayWindow {
     id: panel
-    visible: root.opened
-    anchors { top: true; bottom: true; left: true; right: true }
-    color: "transparent"
+    shown: root.opened
     WlrLayershell.namespace: "omni-settings"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-    exclusionMode: ExclusionMode.Ignore
 
     Rectangle {
       anchors.fill: parent
@@ -633,10 +643,8 @@ Item {
       color: root.glassColor
       borderSpec: root.borderSpec
       padding: Style.space(20)
-      scale: root.opened ? 1.0 : 0.96
       opacity: root.opened ? 1.0 : 0.0
-      Behavior on scale { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
-      Behavior on opacity { NumberAnimation { duration: 150 } }
+      Behavior on opacity { NumberAnimation { duration: root.theme.duration(140) } }
 
       MouseArea {
         anchors.fill: parent
@@ -650,17 +658,61 @@ Item {
 
         Keys.onEscapePressed: root.dismiss()
         Keys.onPressed: function(event) {
+          if (confirmDialog.opened) {
+            if (confirmDialog.handleKey(event)) event.accepted = true
+            return
+          }
           var num = event.key - Qt.Key_1
-          if (num >= 0 && num < root.modeItems.length) {
+          if (num >= 0 && num < 9 && num < root.modeItems.length) {
             root.activeTab = 0
-            root.switchMode(root.modeItems[num].id)
-          } else if (event.key === Qt.Key_R) {
-            root.restoreNative()
+            root.switchModeWithUndo(root.modeItems[num].id)
+            event.accepted = true
+          } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ShiftModifier)) {
+            root.askRestore()
+            event.accepted = true
+          } else if (event.key === Qt.Key_U && root.undoMode !== "") {
+            root.undoSwitch()
+            event.accepted = true
           } else if (event.key === Qt.Key_S) {
             root.openCheatSheet()
+            event.accepted = true
+          } else if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier))) {
+            root.activeTab = (root.activeTab + 3) % 4
+            event.accepted = true
           } else if (event.key === Qt.Key_Tab) {
             root.activeTab = (root.activeTab + 1) % 4
+            event.accepted = true
           }
+        }
+
+        // 模式切换提示条（可撤销 ~5s）
+        Text {
+          id: modeToast
+          z: 5
+          anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
+          text: root.toastText
+          visible: opacity > 0.0
+          opacity: root.toastText !== "" ? 1.0 : 0.0
+          Behavior on opacity { NumberAnimation { duration: root.theme.duration(140) } }
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          color: root.accent
+          textFormat: Text.PlainText
+          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.undoSwitch() }
+        }
+
+        ConfirmDialog {
+          id: confirmDialog
+          anchors.fill: parent
+          z: 10
+          opened: root.confirmAction !== ""
+          message: root.confirmAction === "restore"
+            ? "撤销全部绑定覆盖并恢复 Omarchy 原生快捷键？"
+            : "清空全部本地使用统计？此操作不可撤销。"
+          cancelText: "取消"
+          confirmText: root.confirmAction === "restore" ? "还原" : "重置"
+          onCanceled: root.cancelConfirm()
+          onConfirmed: root.acceptConfirm()
         }
 
         // ---------- 顶部固定区：标题 + Tab 栏 + 引擎状态 ----------
@@ -678,7 +730,6 @@ Item {
               text: "OmniPal 控制中心"
               font.family: Style.font.family
               font.pixelSize: Style.font.heading
-              font.bold: true
               color: root.foreground
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
@@ -689,146 +740,39 @@ Item {
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
               color: Util.alpha(root.foreground, 0.55)
-              anchors.right: closeBtn.left
+              anchors.right: parent.right
               anchors.rightMargin: Style.space(12)
               anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Rectangle {
-              id: closeBtn
-              width: Style.space(28)
-              height: Style.space(28)
-              radius: 4
-              color: closeHover.containsMouse ? Util.alpha(root.foreground, 0.12) : "transparent"
-              anchors.verticalCenter: parent.verticalCenter
-              anchors.right: parent.right
-
-              Text {
-                text: "✕"
-                font.pixelSize: Style.font.body
-                color: root.foreground
-                anchors.centerIn: parent
-              }
-
-              MouseArea {
-                id: closeHover
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.dismiss()
-              }
             }
           }
 
           // ---------- Tab 分类切换栏（平滑滑动指示器） ----------
-          Rectangle {
+          // Native ButtonGroup ("pick one of N"), same control the shell's own settings use.
+          ButtonGroup {
             id: tabBar
-            width: parent.width
-            height: Style.space(46)
-            radius: height / 2
-            color: root.chipColor
-            border.width: 1
-            border.color: root.hairline
-
-            readonly property int unit: width / 4
-
-            Rectangle {
-              id: tabPill
-              width: tabBar.unit - Style.space(8)
-              height: parent.height - Style.space(8)
-              radius: height / 2
-              color: Util.alpha(root.foreground, 0.10)
-              border.width: 1
-              border.color: Util.alpha(root.foreground, 0.08)
-              x: Style.space(4) + root.activeTab * tabBar.unit
-              y: Style.space(4)
-              Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-            }
-
-            Row {
-              x: Style.space(4)
-              y: 0
-              height: parent.height
-              Repeater {
-                model: ["🎯 模式方案", "⚙️ 高级选项", "📊 使用洞察", "🧩 应用规则"]
-                delegate: Item {
-                  id: tabCell
-                  required property var modelData
-                  required property int index
-                  width: tabBar.unit
-                  height: tabBar.height
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: tabCell.modelData
-                    font.family: Style.font.family
-                    font.pixelSize: root.activeTab === tabCell.index ? Style.font.body : Style.font.bodySmall
-                    font.bold: root.activeTab === tabCell.index
-                    color: root.activeTab === tabCell.index
-                      ? root.foreground
-                      : Util.alpha(root.foreground, 0.60)
-                    Behavior on color { ColorAnimation { duration: 160 } }
-                    Behavior on font.pixelSize { NumberAnimation { duration: 160 } }
-                  }
-
-                  MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.activeTab = tabCell.index
-                  }
-                }
-              }
-            }
+            readonly property var tabs: ["模式", "选项", "统计", "规则"]
+            options: tabs.map(function(t, i) { return { value: String(i), label: t } })
+            value: String(root.activeTab)
+            focusable: false
+            foreground: root.foreground
+            background: "transparent"
+            accent: root.accent
+            onChanged: function(v) { root.activeTab = parseInt(v, 10) }
           }
 
           // ---------- 引擎状态广播条 ----------
-          Rectangle {
+          Card {
             width: parent.width
             height: Style.space(40)
-            radius: Style.cornerRadius
-            color: Util.alpha(root.foreground, 0.04)
-            border.width: 1
-            border.color: Util.alpha(root.foreground, 0.08)
 
             Item {
               anchors.fill: parent
               anchors.margins: Style.space(12)
 
-              Rectangle {
-                id: engineDot
-                width: 8; height: 8; radius: 4
-                color: root.engineRunning ? root.okColor : root.dangerColor
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              Rectangle {
-                id: enginePill
-                anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                visible: root.engineRunning
-                width: enginePillText.implicitWidth + Style.space(14)
-                height: Style.space(22)
-                radius: height / 2
-                color: Util.alpha(root.okColor, 0.12)
-                border.width: 1
-                border.color: Util.alpha(root.okColor, 0.35)
-
-                Text {
-                  id: enginePillText
-                  anchors.centerIn: parent
-                  text: "● 内存热生效"
-                  font.family: Style.font.family
-                  font.pixelSize: 10
-                  font.bold: true
-                  color: root.okColor
-                }
-              }
-
               Text {
                 anchors {
-                  left: engineDot.right; leftMargin: Style.space(10)
-                  right: enginePill.left; rightMargin: Style.space(10)
+                  left: parent.left
+                  right: parent.right
                   verticalCenter: parent.verticalCenter
                 }
                 text: root.engineRunning
@@ -836,7 +780,7 @@ Item {
                   : "Engine 未检测到运行 · 执行 omni-profile daemon 启动常驻"
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
-                color: Util.alpha(root.foreground, 0.8)
+                color: root.engineRunning ? Qt.darker(root.foreground, 1.4) : root.dangerColor
                 elide: Text.ElideRight
               }
             }
@@ -859,10 +803,8 @@ Item {
             id: profilesTab
             anchors.fill: parent
             opacity: root.activeTab === 0 ? 1.0 : 0.0
-            scale: root.activeTab === 0 ? 1.0 : 0.985
             visible: root.activeTab === 0 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
-            Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
+            Behavior on opacity { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -883,11 +825,11 @@ Item {
                   color: Util.alpha(root.foreground, 0.7)
                 }
 
-                GridLayout {
+                // Single-column selectable rows (plugins/menu/Menu.qml style):
+                // no row border, selected = fg@0.08 fill + accent text, glyph in fg.
+                Column {
                   width: parent.width
-                  columns: 2
-                  rowSpacing: Style.space(10)
-                  columnSpacing: Style.space(10)
+                  spacing: Style.space(3)
 
                   Repeater {
                     model: root.modeItems
@@ -898,150 +840,73 @@ Item {
                       required property int index
 
                       readonly property bool isActive: root.currentMode === modelData.id
-                      Layout.fillWidth: true
-                      Layout.preferredHeight: Style.space(148)
+                      readonly property bool hot: modeCardHover.containsMouse
+                      readonly property color rowText: isActive ? root.accent : root.foreground
+                      width: parent.width
+                      height: Math.max(Style.space(50), modeCol.implicitHeight + Style.spacing.lg * 2)
                       radius: Style.cornerRadius
-                      color: isActive
-                        ? Util.alpha(modelData.color, 0.14)
-                        : modeCardHover.containsMouse
-                          ? Util.alpha(root.foreground, 0.07)
-                          : Util.alpha(root.foreground, 0.03)
-                      border.width: isActive ? 2 : 1
-                      border.color: isActive
-                        ? modelData.color
-                        : modeCardHover.containsMouse
-                          ? Util.alpha(modelData.color, 0.55)
-                          : Util.alpha(root.foreground, 0.12)
-                      scale: modeCardHover.containsMouse ? 1.015 : 1.0
-                      z: modeCardHover.containsMouse ? 2 : 1
-                      Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                      Behavior on color { ColorAnimation { duration: 140 } }
-                      Behavior on border.color { ColorAnimation { duration: 140 } }
-
-                      // 悬停阴影升起（伪影层，零 GPU 图层开销）
-                      Rectangle {
-                        anchors { fill: parent; topMargin: Style.space(6); margins: Style.space(3) }
-                        radius: parent.radius + 4
-                        color: "#000000"
-                        opacity: modeCardHover.containsMouse && !modeCard.isActive ? 0.25 : 0.0
-                        z: -1
-                        Behavior on opacity { NumberAnimation { duration: 170 } }
-                      }
+                      color: (isActive || hot) ? Util.alpha(root.foreground, 0.08) : "transparent"
 
                       MouseArea {
                         id: modeCardHover
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.switchMode(modelData.id)
+                        onClicked: root.switchMode(modeCard.modelData.id)
                       }
 
-                      // 图标徽章 + 序号键帽
-                      Rectangle {
+                      Text {
                         id: modeBadge
-                        x: Style.space(13); y: Style.space(13)
-                        width: Style.space(38); height: Style.space(38)
-                        radius: Style.cornerRadius
-                        color: Util.alpha(modelData.color, 0.25)
-                        border.width: 1
-                        border.color: Util.alpha(modelData.color, 0.35)
+                        anchors { left: parent.left; leftMargin: Style.spacing.rowPaddingX; verticalCenter: parent.verticalCenter }
+                        width: Style.space(28)
+                        text: Icons.mode(modeCard.modelData.id)
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.iconLarge
+                        color: modeCard.rowText
+                      }
+
+                      Column {
+                        id: modeCol
+                        anchors {
+                          left: modeBadge.right; leftMargin: Style.spacing.lg
+                          right: modeKeycap.left; rightMargin: Style.spacing.lg
+                          verticalCenter: parent.verticalCenter
+                        }
+                        spacing: Style.spacing.xxs
 
                         Text {
-                          text: modelData.icon
-                          font.pixelSize: 17
-                          font.bold: true
-                          color: modelData.color
-                          anchors.centerIn: parent
+                          id: modeNameText
+                          width: parent.width
+                          text: modeCard.modelData.name
+                          font.family: Style.font.menuFamily
+                          font.pixelSize: Style.font.body
+                          font.weight: Font.Medium
+                          color: modeCard.rowText
+                          elide: Text.ElideRight
+                        }
+
+                        Text {
+                          width: parent.width
+                          text: modeCard.modelData.count + " 组按键 · "
+                            + (modeCard.modelData.source === "user"
+                                ? (modeCard.modelData.override ? "用户自定义（覆盖内置）" : "用户自定义")
+                                : "内置")
+                            + (modeCard.modelData.desc ? " · " + modeCard.modelData.desc : "")
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.caption
+                          color: Qt.darker(root.foreground, 1.4)
+                          elide: Text.ElideRight
                         }
                       }
 
-                      Rectangle {
+                      // Number hint (1..N) or plain "active" in accent; no pill.
+                      Text {
                         id: modeKeycap
-                        anchors { right: parent.right; rightMargin: Style.space(11); top: parent.top; topMargin: Style.space(11) }
-                        width: Style.space(20); height: Style.space(20)
-                        radius: 4
-                        visible: !modeCard.isActive
-                        color: Util.alpha(root.foreground, 0.08)
-                        border.width: 1
-                        border.color: Util.alpha(root.foreground, 0.18)
-
-                        Text {
-                          anchors.centerIn: parent
-                          text: modeCard.index + 1
-                          font.family: Style.font.family
-                          font.pixelSize: 10
-                          font.bold: true
-                          color: Util.alpha(root.foreground, 0.75)
-                        }
-                      }
-
-                      // “当前激活”高亮标签
-                      Rectangle {
-                        id: activePill
-                        visible: modeCard.isActive
-                        anchors { right: parent.right; rightMargin: Style.space(11); top: parent.top; topMargin: Style.space(11) }
-                        width: activePillText.implicitWidth + Style.space(12)
-                        height: activePillText.implicitHeight + Style.space(6)
-                        radius: 4
-                        color: modelData.color
-
-                        Text {
-                          id: activePillText
-                          anchors.centerIn: parent
-                          text: "当前激活"
-                          font.family: Style.font.family
-                          font.pixelSize: 10
-                          font.bold: true
-                          color: "#ffffff"
-                        }
-                      }
-
-                      Text {
-                        id: modeNameText
-                        anchors {
-                          left: modeBadge.right; leftMargin: Style.space(10)
-                          right: parent.right; rightMargin: Style.space(11)
-                          top: parent.top; topMargin: Style.space(15)
-                        }
-                        text: modelData.name
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.body
-                        font.bold: true
-                        color: root.foreground
-                        elide: Text.ElideRight
-                      }
-
-                      Text {
-                        anchors {
-                          left: modeNameText.left
-                          top: modeNameText.bottom; topMargin: Style.space(3)
-                          right: parent.right; rightMargin: Style.space(11)
-                        }
-                        width: modeNameText.width
-                        text: "⌨ " + modelData.count + " 组生效按键 · "
-                          + (modelData.source === "user"
-                              ? (modelData.override ? "用户自定义（覆盖内置）" : "用户自定义")
-                              : "项目内置")
+                        anchors { right: parent.right; rightMargin: Style.spacing.rowPaddingX; verticalCenter: parent.verticalCenter }
+                        text: modeCard.isActive ? "active" : String(modeCard.index + 1)
                         font.family: Style.font.family
                         font.pixelSize: Style.font.caption
-                        color: Util.alpha(root.foreground, 0.65)
-                        elide: Text.ElideRight
-                      }
-
-                      Text {
-                        anchors {
-                          left: parent.left; leftMargin: Style.space(13)
-                          right: parent.right; rightMargin: Style.space(13)
-                          bottom: parent.bottom; bottomMargin: Style.space(12)
-                        }
-                        height: Style.space(30)
-                        text: modelData.desc
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        color: Util.alpha(root.foreground, 0.72)
-                        wrapMode: Text.Wrap
-                        maximumLineCount: 2
-                        elide: Text.ElideRight
+                        color: modeCard.isActive ? root.accent : Qt.darker(root.foreground, 1.4)
                       }
                     }
                   }
@@ -1055,10 +920,8 @@ Item {
             id: prefsTab
             anchors.fill: parent
             opacity: root.activeTab === 1 ? 1.0 : 0.0
-            scale: root.activeTab === 1 ? 1.0 : 0.985
             visible: root.activeTab === 1 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
-            Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
+            Behavior on opacity { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -1073,15 +936,11 @@ Item {
                 spacing: Style.space(10)
 
                 // --- 可选配置持久化控制卡片 ---
-                Rectangle {
+                Card {
                   id: persistCard
                   width: parent.width
                   height: persistCardBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
-                  color: Util.alpha(root.foreground, 0.04)
-                  border.width: 1
-                  border.color: root.persistEnabled ? Util.alpha(root.okColor, 0.45) : root.hairline
-                  Behavior on border.color { ColorAnimation { duration: 200 } }
+                  borderSpec: Border.controlSpec(root.persistEnabled ? "selected" : "normal", root.foreground, root.okColor)
 
                   Column {
                     id: persistCardBody
@@ -1102,8 +961,9 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
 
                         Text {
+                          font.family: Style.font.family
                           anchors.verticalCenter: parent.verticalCenter
-                          text: "💾"
+                          text: Icons.glyph.save
                           font.pixelSize: Style.font.body
                         }
                         Text {
@@ -1111,7 +971,6 @@ Item {
                           text: "配置持久化（关机/重启记忆）"
                           font.family: Style.font.family
                           font.pixelSize: Style.font.body
-                          font.bold: true
                           color: root.foreground
                         }
                       }
@@ -1120,9 +979,10 @@ Item {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         checked: root.persistEnabled
-                        enabled: !root.persistBusy
-                        opacity: root.persistBusy ? 0.55 : 1.0
-                        Behavior on opacity { NumberAnimation { duration: 150 } }
+                        busy: root.persistBusy
+                        interactive: !root.persistBusy
+                        foreground: root.foreground
+                        accent: root.okColor
                         onToggled: root.togglePersist()
                       }
                     }
@@ -1136,20 +996,19 @@ Item {
                       wrapMode: Text.Wrap
                     }
 
-                    Rectangle {
+                    Card {
                       width: parent.width
                       height: persistStatusText.implicitHeight + Style.space(12)
-                      radius: 6
-                      color: Util.alpha(root.foreground, 0.05)
+                      borderSpec: Border.none()
 
                       Text {
                         id: persistStatusText
                         anchors { fill: parent; leftMargin: Style.space(10); rightMargin: Style.space(10); topMargin: Style.space(6); bottomMargin: Style.space(6) }
                         text: root.persistBusy
-                          ? "⏳ 正在同步持久化状态…"
+                          ? "正在同步持久化状态…"
                           : (root.persistEnabled
-                              ? ("✅ 已启用 · 自动记忆关机前配置：" + root.modeNameOf(root.persistProfile) + "（" + root.persistProfile + "）" + (root.persistPolicy ? " · " + (root.persistPolicy === "floating" ? "浮动" : "平铺") : "") + (root.persistUpdatedAt ? " · 更新于 " + root.fmtTs(root.persistUpdatedAt) : ""))
-                              : "⏸ 已禁用 · 关机/重启恢复默认，磁盘零残留")
+                              ? ("已启用 · 自动记忆关机前配置：" + root.modeNameOf(root.persistProfile) + "（" + root.persistProfile + "）" + (root.persistPolicy ? " · " + (root.persistPolicy === "floating" ? "浮动" : "平铺") : "") + (root.persistUpdatedAt ? " · 更新于 " + root.fmtTs(root.persistUpdatedAt) : ""))
+                              : "已禁用 · 关机/重启恢复默认，磁盘零残留")
                         font.family: Style.font.family
                         font.pixelSize: Style.font.caption
                         color: root.persistEnabled ? root.okColor : Util.alpha(root.foreground, 0.65)
@@ -1162,13 +1021,9 @@ Item {
                 }
 
                 // --- 窗口吸附快捷操作卡片 ---
-                Rectangle {
+                Card {
                   width: parent.width
                   height: snapCardBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
-                  color: Util.alpha(root.foreground, 0.04)
-                  border.width: 1
-                  border.color: root.hairline
 
                   Column {
                     id: snapCardBody
@@ -1182,8 +1037,9 @@ Item {
                     Row {
                       spacing: Style.space(8)
                       Text {
+                        font.family: Style.font.family
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "🧲"
+                        text: Icons.glyph.magnet
                         font.pixelSize: Style.font.body
                       }
                       Text {
@@ -1191,7 +1047,6 @@ Item {
                         text: "窗口吸附快捷操作"
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
-                        font.bold: true
                         color: root.foreground
                       }
                     }
@@ -1205,45 +1060,25 @@ Item {
                       wrapMode: Text.Wrap
                     }
 
-                    Rectangle {
+                    Button {
                       width: parent.width
-                      height: Style.space(38)
-                      radius: Style.cornerRadius
-                      color: snapBtnHover.containsMouse ? Util.alpha(root.accent, 0.22) : Util.alpha(root.accent, 0.10)
-                      border.width: 1
-                      border.color: snapBtnHover.containsMouse ? root.accent : Util.alpha(root.accent, 0.4)
-                      Behavior on color { ColorAnimation { duration: 140 } }
-                      Behavior on border.color { ColorAnimation { duration: 140 } }
-
-                      Text {
-                        anchors.centerIn: parent
-                        text: "▦  呼出 Snap 布局菜单"
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.bodySmall
-                        font.bold: true
-                        color: root.accent
-                      }
-
-                      MouseArea {
-                        id: snapBtnHover
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.openSnapLayouts()
-                      }
+                      iconText: Icons.glyph.snap
+                      text: "呼出 Snap 布局菜单"
+                      bordered: true
+                      active: true
+                      foreground: root.foreground
+                      accent: root.accent
+                      verticalPadding: Style.space(10)
+                      onClicked: root.openSnapLayouts()
                     }
                   }
                 }
 
                 // --- 系统原生还原卡片 ---
-                Rectangle {
+                Card {
                   width: parent.width
                   height: restoreCardBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
-                  color: Util.alpha(root.foreground, 0.04)
-                  border.width: 1
-                  border.color: restoreCardHover.containsMouse ? Util.alpha(root.dangerColor, 0.5) : root.hairline
-                  Behavior on border.color { ColorAnimation { duration: 160 } }
+                  borderSpec: Border.controlSpec(restoreCardHover.containsMouse ? "hover-cursor" : "normal", root.foreground, root.dangerColor)
 
                   MouseArea {
                     id: restoreCardHover
@@ -1263,10 +1098,10 @@ Item {
                     Row {
                       spacing: Style.space(8)
                       Text {
+                        font.family: Style.font.family
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "↺"
+                        text: Icons.glyph.restore
                         font.pixelSize: Style.font.body
-                        font.bold: true
                         color: root.dangerColor
                       }
                       Text {
@@ -1274,23 +1109,17 @@ Item {
                         text: "恢复 Omarchy 原生"
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
-                        font.bold: true
                         color: root.foreground
                       }
                       Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "R"
                         font.family: Style.font.family
-                        font.pixelSize: 9
-                        font.bold: true
+                        font.pixelSize: Style.font.caption
                         color: Util.alpha(root.foreground, 0.55)
                         padding: 3
-                        Rectangle {
+                        Card {
                           anchors.fill: parent
-                          radius: 3
-                          color: Util.alpha(root.foreground, 0.08)
-                          border.width: 1
-                          border.color: Util.alpha(root.foreground, 0.18)
                         }
                       }
                     }
@@ -1304,61 +1133,30 @@ Item {
                       wrapMode: Text.Wrap
                     }
 
-                    Rectangle {
+                    // Destructive action: native Button tinted with Color.urgent
+                    // (same pattern as network's captive-portal button).
+                    Button {
                       width: parent.width
-                      height: Style.space(38)
-                      radius: Style.cornerRadius
-                      color: restoreBtnHover.containsMouse ? Util.alpha(root.dangerColor, 0.20) : Util.alpha(root.dangerColor, 0.08)
-                      border.width: 1
-                      border.color: restoreBtnHover.containsMouse ? root.dangerColor : Util.alpha(root.dangerColor, 0.4)
-                      Behavior on color { ColorAnimation { duration: 140 } }
-                      Behavior on border.color { ColorAnimation { duration: 140 } }
-
-                      Text {
-                        anchors.centerIn: parent
-                        text: "执行系统原生还原 (omni-profile restore)"
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.bodySmall
-                        font.bold: true
-                        color: root.dangerColor
-                      }
-
-                      MouseArea {
-                        id: restoreBtnHover
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.restoreNative()
-                      }
+                      text: "执行系统原生还原 (Shift+R)"
+                      bordered: true
+                      foreground: root.dangerColor
+                      accent: root.dangerColor
+                      verticalPadding: Style.space(10)
+                      onClicked: root.askRestore()
                     }
                   }
                 }
 
                 // --- 快捷键速查表入口 ---
-                Rectangle {
+                Button {
                   width: parent.width
-                  height: Style.space(38)
-                  radius: Style.cornerRadius
-                  color: sheetBtnHover.containsMouse ? Util.alpha(root.foreground, 0.12) : Util.alpha(root.foreground, 0.06)
-                  border.width: 1
-                  border.color: Util.alpha(root.foreground, 0.15)
-                  Behavior on color { ColorAnimation { duration: 140 } }
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: "📖 快捷键速查表 (S)"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.bodySmall
-                    color: root.foreground
-                  }
-
-                  MouseArea {
-                    id: sheetBtnHover
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.openCheatSheet()
-                  }
+                  iconText: Icons.glyph.cheat
+                  text: "快捷键速查表 (S)"
+                  bordered: true
+                  foreground: root.foreground
+                  accent: root.accent
+                  verticalPadding: Style.space(10)
+                  onClicked: root.openCheatSheet()
                 }
               }
             }
@@ -1369,10 +1167,8 @@ Item {
             id: analyticsTab
             anchors.fill: parent
             opacity: root.activeTab === 2 ? 1.0 : 0.0
-            scale: root.activeTab === 2 ? 1.0 : 0.985
             visible: root.activeTab === 2 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
-            Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
+            Behavior on opacity { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -1387,13 +1183,9 @@ Item {
                 spacing: Style.space(10)
 
                 // --- 概览摘要卡片 ---
-                Rectangle {
+                Card {
                   width: parent.width
                   height: statsSummaryBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
-                  color: Util.alpha(root.foreground, 0.04)
-                  border.width: 1
-                  border.color: root.hairline
 
                   Column {
                     id: statsSummaryBody
@@ -1407,8 +1199,9 @@ Item {
                     Row {
                       spacing: Style.space(8)
                       Text {
+                        font.family: Style.font.family
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "📈"
+                        text: Icons.glyph.stats
                         font.pixelSize: Style.font.body
                       }
                       Text {
@@ -1416,7 +1209,6 @@ Item {
                         text: "概览摘要"
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
-                        font.bold: true
                         color: root.foreground
                       }
                     }
@@ -1444,17 +1236,14 @@ Item {
                             value: root.statsLoaded
                               ? (root.statsLastReset ? root.fmtTs(root.statsLastReset) : "从未")
                               : "…",
-                            tint: root.persistEnabled ? Tokens.semantic.warn : Util.alpha(root.foreground, 0.6)
+                            tint: root.persistEnabled ? root.accent : Util.alpha(root.foreground, 0.6)
                           }
                         ]
-                        delegate: Rectangle {
+                        delegate: Card {
+                          id: statCard
                           required property var modelData
                           width: (analyticsCol.width - Style.space(28) - Style.space(16)) / 3
                           height: Style.space(72)
-                          radius: 8
-                          color: root.chipColor
-                          border.width: 1
-                          border.color: root.hairline
 
                           Column {
                             anchors.centerIn: parent
@@ -1462,17 +1251,16 @@ Item {
 
                             Text {
                               anchors.horizontalCenter: parent.horizontalCenter
-                              text: modelData.value
+                              text: statCard.modelData.value
                               font.family: Style.font.family
-                              font.pixelSize: modelData.label === "累计总操作数" ? Style.font.heading : Style.font.bodySmall
-                              font.bold: true
-                              color: modelData.tint
+                              font.pixelSize: statCard.modelData.label === "累计总操作数" ? Style.font.heading : Style.font.bodySmall
+                              color: statCard.modelData.tint
                             }
                             Text {
                               anchors.horizontalCenter: parent.horizontalCenter
-                              text: modelData.label
+                              text: statCard.modelData.label
                               font.family: Style.font.family
-                              font.pixelSize: 10
+                              font.pixelSize: Style.font.caption
                               color: Util.alpha(root.foreground, 0.6)
                             }
                           }
@@ -1483,13 +1271,9 @@ Item {
                 }
 
                 // --- 模式切换排行卡片 ---
-                Rectangle {
+                Card {
                   width: parent.width
                   height: switchRankBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
-                  color: Util.alpha(root.foreground, 0.04)
-                  border.width: 1
-                  border.color: root.hairline
 
                   Column {
                     id: switchRankBody
@@ -1508,8 +1292,9 @@ Item {
                         spacing: Style.space(8)
                         anchors.left: parent.left
                         Text {
+                          font.family: Style.font.family
                           anchors.verticalCenter: parent.verticalCenter
-                          text: "🔁"
+                          text: Icons.glyph.cycle
                           font.pixelSize: Style.font.bodySmall
                         }
                         Text {
@@ -1517,7 +1302,6 @@ Item {
                           text: "模式切换排行"
                           font.family: Style.font.family
                           font.pixelSize: Style.font.bodySmall
-                          font.bold: true
                           color: root.foreground
                         }
                       }
@@ -1526,7 +1310,7 @@ Item {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                         text: root.statsLoaded ? ("共 " + root.statsSwitchTotal + " 次") : ""
                         font.family: Style.font.family
-                        font.pixelSize: 10
+                        font.pixelSize: Style.font.caption
                         color: Util.alpha(root.foreground, 0.55)
                       }
                     }
@@ -1565,13 +1349,9 @@ Item {
                 }
 
                 // --- 常用吸附区域 Top 榜卡片 ---
-                Rectangle {
+                Card {
                   width: parent.width
                   height: snapRankBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
-                  color: Util.alpha(root.foreground, 0.04)
-                  border.width: 1
-                  border.color: root.hairline
 
                   Column {
                     id: snapRankBody
@@ -1590,8 +1370,9 @@ Item {
                         spacing: Style.space(8)
                         anchors.left: parent.left
                         Text {
+                          font.family: Style.font.family
                           anchors.verticalCenter: parent.verticalCenter
-                          text: "🧭"
+                          text: Icons.glyph.compass
                           font.pixelSize: Style.font.bodySmall
                         }
                         Text {
@@ -1599,7 +1380,6 @@ Item {
                           text: "常用吸附区域 Top 榜"
                           font.family: Style.font.family
                           font.pixelSize: Style.font.bodySmall
-                          font.bold: true
                           color: root.foreground
                         }
                       }
@@ -1608,7 +1388,7 @@ Item {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                         text: root.statsLoaded ? ("共 " + root.statsSnapTotal + " 次") : ""
                         font.family: Style.font.family
-                        font.pixelSize: 10
+                        font.pixelSize: Style.font.caption
                         color: Util.alpha(root.foreground, 0.55)
                       }
                     }
@@ -1646,40 +1426,22 @@ Item {
                 }
 
                 // --- 重置统计数据操作 ---
-                Rectangle {
+                Button {
                   width: parent.width
-                  height: Style.space(38)
-                  radius: Style.cornerRadius
-                  color: statsResetHover.containsMouse ? Util.alpha(root.dangerColor, 0.16) : "transparent"
-                  border.width: 1
-                  border.color: Util.alpha(root.dangerColor, 0.4)
+                  text: root.statsBusy ? "正在重置统计…" : "重置统计数据"
+                  bordered: true
                   enabled: !root.statsBusy
-                  Behavior on color { ColorAnimation { duration: 140 } }
-                  Behavior on border.color { ColorAnimation { duration: 140 } }
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: root.statsBusy ? "⏳ 正在重置统计…" : "🧹 重置统计数据"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.bodySmall
-                    font.bold: true
-                    color: root.dangerColor
-                  }
-
-                  MouseArea {
-                    id: statsResetHover
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.resetStats()
-                  }
+                  foreground: root.dangerColor
+                  accent: root.dangerColor
+                  verticalPadding: Style.space(10)
+                  onClicked: root.askResetStats()
                 }
 
                 Text {
                   width: parent.width
                   text: "统计仅为本机聚合计数（~/.config/omnipal/stats.json）· 零按键内容记录 · 零网络上传"
                   font.family: Style.font.family
-                  font.pixelSize: 10
+                  font.pixelSize: Style.font.caption
                   color: Util.alpha(root.foreground, 0.45)
                   wrapMode: Text.Wrap
                   horizontalAlignment: Text.AlignHCenter
@@ -1694,7 +1456,7 @@ Item {
             anchors.fill: parent
             opacity: root.activeTab === 3 ? 1.0 : 0.0
             visible: root.activeTab === 3 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutQuad } }
+            Behavior on opacity { NumberAnimation { duration: root.theme.duration(140); easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -1709,13 +1471,9 @@ Item {
                 spacing: Style.space(10)
 
                 // --- 总开关与默认模式 ---
-                Rectangle {
+                Card {
                   width: parent.width
                   height: Style.space(84)
-                  radius: Tokens.radius.md
-                  color: Util.alpha(root.foreground, 0.04)
-                  border.width: 1
-                  border.color: root.hairline
 
                   Column {
                     anchors { fill: parent; margins: Style.space(12) }
@@ -1728,27 +1486,21 @@ Item {
                         text: "按应用自动切换"
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
-                        font.bold: true
                         color: root.foreground
                       }
-                      Rectangle {
-                        width: Style.space(56); height: Style.space(22)
-                        radius: Tokens.radius.sm
-                        color: root.appRulesEnabled ? Util.alpha(root.okColor, 0.25) : root.chipColor
-                        border.width: 1
-                        border.color: root.appRulesEnabled ? root.okColor : root.hairline
-                        Text {
-                          anchors.centerIn: parent
-                          text: root.appRulesEnabled ? "已启用" : "已停用"
-                          font.family: Style.font.family
-                          font.pixelSize: Style.font.bodySmall
-                          color: root.foreground
-                        }
-                        MouseArea {
-                          anchors.fill: parent
-                          cursorShape: Qt.PointingHandCursor
-                          onClicked: root.runRules([root.appRulesEnabled ? "disable" : "enable"])
-                        }
+                      ToggleSwitch {
+                        anchors.verticalCenter: parent.verticalCenter
+                        checked: root.appRulesEnabled
+                        foreground: root.foreground
+                        accent: root.okColor
+                        onToggled: root.runRules([root.appRulesEnabled ? "disable" : "enable"])
+                      }
+                      Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: root.appRulesEnabled ? "已启用" : "已停用"
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.bodySmall
+                        color: Qt.darker(root.foreground, 1.4)
                       }
                     }
 
@@ -1762,28 +1514,13 @@ Item {
                         color: Util.alpha(root.foreground, 0.7)
                       }
                       Repeater {
-                        model: [{ id: "none", label: "手动选择的模式" }].concat(root.modeItems.map(function(m) { return { id: m.id, label: (m.icon ? m.icon + " " : "") + m.id } }))
-                        delegate: Rectangle {
+                        model: [{ id: "none", label: "手动选择的模式" }].concat(root.modeItems.map(function(m) { return { id: m.id, icon: Icons.mode(m.id), label: m.id } }))
+                        delegate: Chip {
+                          id: defChip
                           required property var modelData
-                          readonly property bool picked: (root.appRulesDefault || "none") === modelData.id
-                          width: defLabel.implicitWidth + Style.space(14); height: Style.space(22)
-                          radius: Tokens.radius.sm
-                          color: picked ? Util.alpha(root.accent, 0.22) : root.chipColor
-                          border.width: 1
-                          border.color: picked ? root.accent : root.hairline
-                          Text {
-                            id: defLabel
-                            anchors.centerIn: parent
-                            text: modelData.label
-                            font.family: Style.font.family
-                            font.pixelSize: Style.font.bodySmall
-                            color: root.foreground
-                          }
-                          MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.runRules(["default", modelData.id])
-                          }
+                          text: modelData.label
+                          selected: (root.appRulesDefault || "none") === modelData.id
+                          onClicked: root.runRules(["default", defChip.modelData.id])
                         }
                       }
                     }
@@ -1793,7 +1530,7 @@ Item {
                 // --- 规则列表 ---
                 Repeater {
                   model: root.appRules
-                  delegate: Rectangle {
+                  delegate: BorderSurface {
                     id: ruleRow
                     required property var modelData
                     required property int index
@@ -1801,10 +1538,9 @@ Item {
                       && root.appRuleMatch.rule["class"] === modelData["class"]
                     width: rulesCol.width
                     height: Style.space(40)
-                    radius: Tokens.radius.md
-                    color: active ? Util.alpha(root.accent, 0.12) : root.chipColor
-                    border.width: 1
-                    border.color: active ? root.accent : root.hairline
+                    radius: Style.cornerRadius
+                    color: active ? Style.selectedFillFor(root.foreground, root.accent) : Style.normalFillFor(root.foreground, root.accent)
+                    borderSpec: Border.controlSpec(active ? "focus" : "normal", root.foreground, root.accent)
                     opacity: modelData.enabled === false ? 0.5 : 1.0
 
                     Row {
@@ -1818,7 +1554,7 @@ Item {
                       }
                       Text {
                         text: ruleRow.modelData["class"]
-                        font.family: Tokens.font.mono
+                        font.family: Style.font.family
                         font.pixelSize: Style.font.body
                         color: root.foreground
                       }
@@ -1832,8 +1568,7 @@ Item {
                         text: "→ " + ruleRow.modelData.mode
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
-                        font.bold: true
-                        color: Tokens.modeColor(ruleRow.modelData.mode, ruleRow.index)
+                        color: root.accent
                       }
                     }
 
@@ -1845,28 +1580,13 @@ Item {
                           { label: ruleRow.modelData.enabled === false ? "启用" : "停用", args: ["toggle", ruleRow.modelData["class"]], danger: false },
                           { label: "删除", args: ["remove", ruleRow.modelData["class"]], danger: true }
                         ]
-                        delegate: Rectangle {
+                        delegate: Chip {
+                          id: ruleBtn
                           required property var modelData
-                          width: btnText.implicitWidth + Style.space(14); height: Style.space(24)
-                          radius: Tokens.radius.sm
-                          color: btnMouse.containsMouse ? Util.alpha(modelData.danger ? root.dangerColor : root.foreground, 0.15) : "transparent"
-                          border.width: 1
-                          border.color: modelData.danger ? root.dangerColor : root.hairline
-                          Text {
-                            id: btnText
-                            anchors.centerIn: parent
-                            text: modelData.label
-                            font.family: Style.font.family
-                            font.pixelSize: Style.font.bodySmall
-                            color: modelData.danger ? root.dangerColor : root.foreground
-                          }
-                          MouseArea {
-                            id: btnMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.runRules(modelData.args)
-                          }
+                          text: modelData.label
+                          foreground: modelData.danger ? root.dangerColor : root.foreground
+                          accent: modelData.danger ? root.dangerColor : root.accent
+                          onClicked: root.runRules(ruleBtn.modelData.args)
                         }
                       }
                     }
@@ -1884,13 +1604,9 @@ Item {
                 }
 
                 // --- 添加规则 ---
-                Rectangle {
+                Card {
                   width: parent.width
                   height: Style.space(84)
-                  radius: Tokens.radius.md
-                  color: Util.alpha(root.foreground, 0.04)
-                  border.width: 1
-                  border.color: root.hairline
 
                   Column {
                     anchors { fill: parent; margins: Style.space(12) }
@@ -1898,75 +1614,30 @@ Item {
 
                     Row {
                       spacing: Style.space(8)
-                      Rectangle {
-                        width: Style.space(180); height: Style.space(26)
-                        radius: Tokens.radius.sm
-                        color: root.chipColor
-                        border.width: 1
-                        border.color: classInput.activeFocus ? root.accent : root.hairline
-                        TextInput {
-                          id: classInput
-                          anchors { fill: parent; leftMargin: Style.space(8); rightMargin: Style.space(8) }
-                          verticalAlignment: TextInput.AlignVCenter
-                          text: root.newRuleClass
-                          onTextEdited: root.newRuleClass = text
-                          font.family: Tokens.font.mono
-                          font.pixelSize: Style.font.body
-                          color: root.foreground
-                          clip: true
-                          Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            visible: classInput.text === ""
-                            text: "窗口类名"
-                            font: classInput.font
-                            color: Util.alpha(root.foreground, 0.35)
-                          }
-                        }
+                      // Native qs.Ui TextField
+                      TextField {
+                        id: classInput
+                        width: Style.space(180)
+                        text: root.newRuleClass
+                        onTextEdited: root.newRuleClass = text
+                        placeholderText: "窗口类名"
+                        foreground: root.foreground
+                        accent: root.accent
                       }
-                      Rectangle {
-                        width: curText.implicitWidth + Style.space(14); height: Style.space(26)
-                        radius: Tokens.radius.sm
-                        color: root.chipColor
-                        border.width: 1
-                        border.color: root.hairline
-                        Text {
-                          id: curText
-                          anchors.centerIn: parent
-                          text: "填入当前应用"
-                          font.family: Style.font.family
-                          font.pixelSize: Style.font.bodySmall
-                          color: root.foreground
-                        }
-                        MouseArea {
-                          anchors.fill: parent
-                          cursorShape: Qt.PointingHandCursor
-                          onClicked: activeWinProc.running = true
-                        }
+                      Chip {
+                        text: "填入当前应用"
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: activeWinProc.running = true
                       }
-                      Repeater {
-                        model: [{ id: "exact", label: "精确" }, { id: "prefix", label: "前缀" }, { id: "regex", label: "正则" }]
-                        delegate: Rectangle {
-                          required property var modelData
-                          readonly property bool picked: root.newRuleMatch === modelData.id
-                          width: mText.implicitWidth + Style.space(14); height: Style.space(26)
-                          radius: Tokens.radius.sm
-                          color: picked ? Util.alpha(root.accent, 0.22) : root.chipColor
-                          border.width: 1
-                          border.color: picked ? root.accent : root.hairline
-                          Text {
-                            id: mText
-                            anchors.centerIn: parent
-                            text: modelData.label
-                            font.family: Style.font.family
-                            font.pixelSize: Style.font.bodySmall
-                            color: root.foreground
-                          }
-                          MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.newRuleMatch = modelData.id
-                          }
-                        }
+                      ButtonGroup {
+                        anchors.verticalCenter: parent.verticalCenter
+                        options: [{ value: "exact", label: "精确" }, { value: "prefix", label: "前缀" }, { value: "regex", label: "正则" }]
+                        value: root.newRuleMatch
+                        foreground: root.foreground
+                        background: "transparent"
+                        accent: root.accent
+                        fontSize: Style.font.bodySmall
+                        onChanged: function(v) { root.newRuleMatch = v }
                       }
                     }
 
@@ -1974,53 +1645,26 @@ Item {
                       spacing: Style.space(6)
                       Repeater {
                         model: root.modeItems
-                        delegate: Rectangle {
+                        delegate: Chip {
+                          id: modeChip
                           required property var modelData
                           required property int index
-                          readonly property bool picked: root.newRuleMode === modelData.id
-                          width: nmText.implicitWidth + Style.space(14); height: Style.space(26)
-                          radius: Tokens.radius.sm
-                          color: picked ? Util.alpha((modelData.color || Tokens.modeColor(modelData.id, index)), 0.25) : root.chipColor
-                          border.width: 1
-                          border.color: picked ? (modelData.color || Tokens.modeColor(modelData.id, index)) : root.hairline
-                          Text {
-                            id: nmText
-                            anchors.centerIn: parent
-                            text: (modelData.icon ? modelData.icon + " " : "") + modelData.id
-                            font.family: Style.font.family
-                            font.pixelSize: Style.font.bodySmall
-                            color: root.foreground
-                          }
-                          MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.newRuleMode = modelData.id
-                          }
+                          iconText: Icons.mode(modelData.id)
+                          text: modelData.id
+                          selected: root.newRuleMode === modelData.id
+                          onClicked: root.newRuleMode = modeChip.modelData.id
                         }
                       }
-                      Rectangle {
+                      Chip {
                         readonly property bool ready: root.newRuleClass.trim() !== "" && root.newRuleMode !== ""
-                        width: addText.implicitWidth + Style.space(18); height: Style.space(26)
-                        radius: Tokens.radius.sm
-                        color: ready ? root.accent : root.chipColor
+                        text: "添加"
+                        iconText: Icons.glyph.plus
+                        active: ready
+                        enabled: ready
                         opacity: ready ? 1.0 : 0.5
-                        Text {
-                          id: addText
-                          anchors.centerIn: parent
-                          text: "添加"
-                          font.family: Style.font.family
-                          font.pixelSize: Style.font.bodySmall
-                          font.bold: true
-                          color: parent.ready ? Tokens.base.bg : root.foreground
-                        }
-                        MouseArea {
-                          anchors.fill: parent
-                          enabled: parent.ready
-                          cursorShape: Qt.PointingHandCursor
-                          onClicked: {
-                            root.runRules(["add", root.newRuleClass.trim(), root.newRuleMode, "--match", root.newRuleMatch])
-                            root.newRuleClass = ""
-                          }
+                        onClicked: {
+                          root.runRules(["add", root.newRuleClass.trim(), root.newRuleMode, "--match", root.newRuleMatch])
+                          root.newRuleClass = ""
                         }
                       }
                     }
@@ -2030,7 +1674,7 @@ Item {
                 // --- 当前匹配 ---
                 Text {
                   width: parent.width
-                  text: root.rulesError !== "" ? ("⚠ " + root.rulesError)
+                  text: root.rulesError !== "" ? root.rulesError
                     : (root.appRuleMatch && root.appRuleMatch.window_class
                       ? ("当前应用 " + root.appRuleMatch.window_class + "：" + (root.appRuleMatch.rule
                           ? ("命中规则，切到 " + root.appRuleMatch.rule.mode) : "没有命中规则"))

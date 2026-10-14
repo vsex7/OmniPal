@@ -1008,11 +1008,16 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertEqual(res.returncode, 0, f"Node execution error: {res.stderr}")
 
     def test_mode_indicator_qml_and_ipc_structure(self):
-        """Validates that BarWidget.qml embeds PopupCard with window policy controls and IPC."""
+        """Validates that BarWidget.qml is a native qs.Ui Panel with window policy controls and IPC."""
         qml_file = PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "BarWidget.qml"
         self.assertTrue(qml_file.exists())
         content = qml_file.read_text(encoding="utf-8")
-        self.assertIn("PopupCard", content)
+        self.assertIn("import qs.Ui", content)
+        self.assertIn("KeyboardPanel", content)
+        self.assertIn("BarIconButton", content)
+        self.assertIn("IpcHandler", content)
+        self.assertNotIn("ShellIpc", content)  # absent on Omarchy 4.0.4
+        self.assertNotIn("PopupCard", content)
         self.assertIn("windowPolicy", content)
         self.assertIn("effectiveWindowMode", content)
         self.assertIn("compositorConnected", content)
@@ -1023,7 +1028,7 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertIn("getEffectiveWindowMode", content)
         self.assertIn("setWindowPolicy", content)
         self.assertIn("closePanel", content)
-        self.assertIn("releasePopout", content)
+        self.assertIn("panelOpen", content)
 
     def test_mode_indicator_manifest(self):
         """Validates manifest compliance and metadata."""
@@ -1246,25 +1251,16 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertNotIn("0xfff", code)
 
     def test_qml_syntax_via_qmllint(self):
-        """Verifies all locally modified QML entry points with Qt6 qmllint."""
-        qmllint_bin = "/usr/lib/qt6/bin/qmllint"
-        if not os.path.exists(qmllint_bin):
+        """Lints every plugin QML against the Omarchy shell (qs.*) + Quickshell stubs."""
+        if not os.path.exists("/usr/lib/qt6/bin/qmllint"):
             self.skipTest("qmllint not installed on system")
-
-        targets = [
-            ("omni.mode-indicator", "BarWidget.qml"),
-            ("omni.settings", "SettingsPanel.qml"),
-        ]
-        for plugin, filename in targets:
-            with self.subTest(plugin=plugin):
-                plugin_dir = PROJECT_ROOT / "plugins" / plugin
-                p = subprocess.run([
-                    qmllint_bin,
-                    "-I", "/usr/share/omarchy/shell",
-                    "-I", str(plugin_dir),
-                    str(plugin_dir / filename)
-                ], capture_output=True, text=True)
-                self.assertEqual(p.returncode, 0, f"qmllint failed: {p.stderr}")
+        shells = [os.environ.get("OMARCHY_SHELL", ""), "/workspace/ref/omarchy/shell",
+                  "/usr/share/omarchy/shell"]
+        if not any(s and os.path.isdir(os.path.join(s, "Commons")) for s in shells):
+            self.skipTest("Omarchy shell source (qs.Commons/qs.Ui) not available")
+        p = subprocess.run(["bash", str(PROJECT_ROOT / "scripts" / "qmllint.sh")],
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, f"qmllint failed: {p.stdout}{p.stderr}")
 
     def test_normalize_policy_safeguards_in_node(self):
         """Verifies that Model.js normalizePolicy safely defaults to tiled for corrupted/unknown inputs."""
@@ -1957,3 +1953,62 @@ class TestForwardShortcut(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSettingsPanelKeys(unittest.TestCase):
+    """Settings panel destructive keys need confirm; mode switch is undoable; Shift+Tab goes back."""
+    def setUp(self):
+        self.qml = (PROJECT_ROOT / "plugins" / "omni.settings" / "SettingsPanel.qml").read_text(encoding="utf-8")
+
+    def test_restore_requires_shift_and_confirm(self):
+        self.assertRegex(self.qml, r"Qt\.Key_R && \(event\.modifiers & Qt\.ShiftModifier\)\)\s*\{\s*root\.askRestore\(\)")
+        self.assertIn("ConfirmDialog {", self.qml)
+        self.assertNotRegex(self.qml, r"onClicked:\s*root\.(restoreNative|resetStats)\(\)")
+
+    def test_mode_switch_undo_and_backtab(self):
+        self.assertIn("root.switchModeWithUndo(root.modeItems[num].id)", self.qml)
+        self.assertIn("Qt.Key_U", self.qml)
+        self.assertIn("Qt.Key_Backtab", self.qml)
+
+    def test_manifests_declare_min_omarchy(self):
+        for mf in (PROJECT_ROOT / "plugins").glob("omni.*/manifest.json"):
+            self.assertEqual(json.loads(mf.read_text(encoding="utf-8")).get("minOmarchy"), "4.0.4", mf)
+
+
+class TestOmarchyVersionGate(unittest.TestCase):
+    """Shared Omarchy version detection used by install.sh and doctor."""
+    def _check(self, version):
+        from engine import omarchy_version as ov
+        old = {k: os.environ.get(k) for k in ("OMNIPAL_OMARCHY_VERSION", "OMARCHY_PATH", "PATH")}
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                os.environ["OMARCHY_PATH"] = tmp  # no version file
+                os.environ["PATH"] = tmp          # no pacman
+                if version is None:
+                    os.environ.pop("OMNIPAL_OMARCHY_VERSION", None)
+                else:
+                    os.environ["OMNIPAL_OMARCHY_VERSION"] = version
+                return ov.check_omarchy_version(PROJECT_ROOT)
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    def test_statuses(self):
+        self.assertEqual(self._check("4.0.4")["status"], "ok")
+        self.assertEqual(self._check("4.1.0-2")["status"], "ok")
+        self.assertEqual(self._check("4.0.3")["status"], "too_old")
+        r = self._check(None)
+        self.assertEqual(r["status"], "unknown")
+        self.assertEqual(r["minimum"], "4.0.4")
+
+    def test_install_warns_on_unknown_and_points_to_doctor(self):
+        sh = (PROJECT_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("engine/omarchy_version.py", sh)
+        unknown = sh.split("*)", 1)[1].split("esac", 1)[0]
+        self.assertIn("omni-profile doctor", unknown)
+        self.assertNotIn("exit 1", unknown)
+        too_old = sh.split("too_old)", 1)[1].split(";;", 1)[0]
+        self.assertIn("exit 1", too_old)

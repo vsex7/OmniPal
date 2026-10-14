@@ -1,0 +1,12 @@
+import QtQuick.tooling 1.2
+Module {
+  Component {
+    file: "w"; name: "QsIconImage"; accessSemantics: "reference"; prototype: "QQuickItem"
+    exports: ["Quickshell.Widgets/IconImage 1.0"]; exportMetaObjectRevisions: [256]
+    Property { name: "source"; type: "QString" }
+    Property { name: "implicitSize"; type: "double" }
+    Property { name: "asynchronous"; type: "bool" }
+    Property { name: "mipmap"; type: "bool" }
+    Property { name: "status"; type: "int"; isReadonly: true }
+  }
+}

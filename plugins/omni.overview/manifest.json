@@ -3,6 +3,7 @@
   "id": "omni.overview",
   "name": "OmniPal Multi-Tasking Overview",
   "version": "0.4.0",
+  "minOmarchy": "4.0.4",
   "author": "OmniPal",
   "license": "MIT",
   "description": "现代多任务全景概览与窗口空间切换器（Exposé / Windows 11 Task View 风格），支持矢量线框骨架图与全键盘流盲操。",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copies plugins/shared/Tokens.js (the single source) into every plugin dir.
+"""Copies plugins/shared/{Tokens.js,OmniTheme.qml} (single sources) into every plugin dir.
 
 Each plugin ships its own copy because plugins are installed as individual
 symlinks, so a relative import like "../shared/Tokens.js" is not reliable.
@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "plugins" / "shared" / "Tokens.js"
+SHARED_FILES = ("Tokens.js", "OmniTheme.qml", "Icons.js", "OverlayWindow.qml")
 
 
 def plugin_dirs():
@@ -17,16 +17,17 @@ def plugin_dirs():
 
 
 def out_of_sync(root: Path = ROOT):
-    src = (root / "plugins" / "shared" / "Tokens.js")
-    if not src.exists():
-        return []
-    data = src.read_bytes()
     bad = []
-    for p in sorted((root / "plugins").glob("omni.*")):
-        if p.is_dir():
-            copy = p / "Tokens.js"
-            if not copy.exists() or copy.read_bytes() != data:
-                bad.append(copy)
+    for name in SHARED_FILES:
+        src = root / "plugins" / "shared" / name
+        if not src.exists():
+            continue
+        data = src.read_bytes()
+        for p in sorted((root / "plugins").glob("omni.*")):
+            if p.is_dir():
+                copy = p / name
+                if not copy.exists() or copy.read_bytes() != data:
+                    bad.append(copy)
     return bad
 
 
@@ -34,12 +35,13 @@ def main():
     if "--check" in sys.argv:
         bad = out_of_sync()
         for b in bad:
-            print(f"❌ Tokens.js out of sync: {b.relative_to(ROOT)}")
+            print(f"❌ out of sync: {b.relative_to(ROOT)}")
         sys.exit(1 if bad else 0)
-    data = SOURCE.read_bytes()
-    for p in plugin_dirs():
-        (p / "Tokens.js").write_bytes(data)
-        print(f"✅ synced {p.name}/Tokens.js")
+    for name in SHARED_FILES:
+        data = (ROOT / "plugins" / "shared" / name).read_bytes()
+        for p in plugin_dirs():
+            (p / name).write_bytes(data)
+            print(f"✅ synced {p.name}/{name}")
 
 
 if __name__ == "__main__":

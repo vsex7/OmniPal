@@ -2385,6 +2385,18 @@ end"""
             report["issues"].append(item["problem"])
         report["fixes"] = [item["fix"] for item in install["problems"]]
 
+        # 4.5 Omarchy version gate (shared with scripts/install.sh)
+        try:
+            from engine.omarchy_version import check_omarchy_version
+        except ImportError:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from omarchy_version import check_omarchy_version  # type: ignore
+        ov = check_omarchy_version(self.root_dir)
+        report["omarchy"] = ov
+        if ov["status"] == "too_old":
+            report["issues"].append(f"Omarchy {ov['detected']} is older than required {ov['minimum']}; plugins will fail to load")
+            report["fixes"].append("Run omarchy-update to upgrade Omarchy")
+
         # 4. Consistency check
         # Run quietly so `omni-profile doctor --json` stays pure JSON on stdout.
         try:

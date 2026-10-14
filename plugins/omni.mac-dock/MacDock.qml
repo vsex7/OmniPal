@@ -1,10 +1,12 @@
+pragma ComponentBehavior: Bound
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
-import "Tokens.js" as Tokens
+import "Icons.js" as Icons
 
 // OmniPal macOS 风格底部 Dock 栏（omni.mac-dock）
 //
@@ -17,6 +19,12 @@ import "Tokens.js" as Tokens
 Item {
   id: root
 
+  // ---- Theme ----------------------------------------------------------------
+  // Native first: qs.Commons Color/Style + qs.Ui widgets wherever Omarchy has one.
+  // `theme` (OmniTheme.qml) resolves the remaining custom-surface roles straight from
+  // qs.Commons; the colors.toml palette below only feeds the extended status hues.
+  readonly property OmniTheme theme: OmniTheme {}
+
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
   property var manifest: null
@@ -24,13 +32,17 @@ Item {
   property bool opened: false
   readonly property string pluginId: (root.manifest && root.manifest.id) || "omni.mac-dock"
 
+  // Native Omarchy has no magnification/bounce; keep the macOS feel strictly opt-in
+  // (OMNI_DOCK_MAGNIFY=1). Default = static icons, hover fill only.
+  readonly property bool magnify: Quickshell.env("OMNI_DOCK_MAGNIFY") === "1"
+
   // 默认常用应用
   readonly property var defaultFavorites: [
-    { id: "term", name: "终端", icon: "", exec: "xdg-terminal-exec", matchClass: ["kitty", "alacritty", "foot", "terminal"] },
-    { id: "browser", name: "浏览器", icon: "🌐", exec: "google-chrome", matchClass: ["google-chrome", "firefox", "chromium", "zen"] },
-    { id: "files", name: "访达/文件", icon: "📁", exec: "omarchy-file-manager", matchClass: ["thunar", "nautilus", "dolphin", "org.gnome.nautilus"] },
-    { id: "code", name: "代码编辑", icon: "", exec: "code", matchClass: ["code", "cursor", "vscodium"] },
-    { id: "settings", name: "Omni 控制中心", icon: "⚙", exec: "omarchy-shell shell toggle omni.settings", matchClass: [] }
+    { id: "term", name: "终端", icon: Icons.glyph.terminal, exec: "xdg-terminal-exec", matchClass: ["kitty", "alacritty", "foot", "terminal"] },
+    { id: "browser", name: "浏览器", icon: Icons.glyph.browser, exec: "google-chrome", matchClass: ["google-chrome", "firefox", "chromium", "zen"] },
+    { id: "files", name: "访达/文件", icon: Icons.glyph.folder, exec: "omarchy-file-manager", matchClass: ["thunar", "nautilus", "dolphin", "org.gnome.nautilus"] },
+    { id: "code", name: "代码编辑", icon: Icons.glyph.code, exec: "code", matchClass: ["code", "cursor", "vscodium"] },
+    { id: "settings", name: "Omni 控制中心", icon: Icons.glyph.settings, exec: "omarchy-shell shell toggle omni.settings", matchClass: [] }
   ]
 
   property var runningClients: []
@@ -53,8 +65,10 @@ Item {
   property real contextCenterX: 0
 
   // ---------- 设计令牌 ----------
-  readonly property color dangerColor: Tokens.semantic.danger
-  readonly property color hairline: Util.alpha(Color.menu.text, 0.10)
+  // Chrome mirrors omarchy.dock (shell/plugins/dock/DockWindow.qml): [popups] surface
+  // for the bar and its context menu, Style state fills, Color.urgent for alerts.
+  readonly property color dangerColor: Commons.Color.urgent
+  readonly property var popupBorderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
 
   function open(payloadJson) {
     root.opened = true
@@ -163,16 +177,16 @@ Item {
     var acts = []
     if (!item) return acts
     if (item.isRunning && item.windowCount > 0) {
-      acts.push({ key: "focus", icon: "🎯", label: "聚焦前台窗口", danger: false })
+      acts.push({ key: "focus", icon: Icons.glyph.focus, label: "聚焦", danger: false })
       if (item.windowCount > 1) {
-        acts.push({ key: "cycle", icon: "🔁", label: "轮转下一窗口 (" + item.windowCount + " 实例)", danger: false })
+        acts.push({ key: "cycle", icon: Icons.glyph.cycle, label: "下一窗口 (" + item.windowCount + ")", danger: false })
       }
     }
     if (item.exec) {
-      acts.push({ key: "new", icon: "➕", label: item.isRunning ? "新开实例" : "启动应用", danger: false })
+      acts.push({ key: "new", icon: Icons.glyph.plus, label: item.isRunning ? "新建" : "启动", danger: false })
     }
     if (item.isRunning && item.windowCount > 0) {
-      acts.push({ key: "close", icon: "✕", label: "关闭该应用", danger: true })
+      acts.push({ key: "close", icon: Icons.glyph.close, label: "关闭", danger: true })
     }
     return acts
   }
@@ -195,17 +209,7 @@ Item {
   }
 
   function resolveAppGlyph(cls) {
-    if (!cls) return "🗔"
-    var c = cls.toLowerCase()
-    if (c.indexOf("kitty") !== -1 || c.indexOf("alacritty") !== -1 || c.indexOf("term") !== -1 || c.indexOf("foot") !== -1 || c.indexOf("ghostty") !== -1) return ""
-    if (c.indexOf("chrome") !== -1 || c.indexOf("firefox") !== -1 || c.indexOf("chromium") !== -1 || c.indexOf("zen") !== -1 || c.indexOf("edge") !== -1 || c.indexOf("brave") !== -1) return "🌐"
-    if (c.indexOf("thunar") !== -1 || c.indexOf("nautilus") !== -1 || c.indexOf("dolphin") !== -1 || c.indexOf("file") !== -1) return "📁"
-    if (c.indexOf("code") !== -1 || c.indexOf("cursor") !== -1 || c.indexOf("vscodium") !== -1 || c.indexOf("sublime") !== -1 || c.indexOf("neovim") !== -1 || c.indexOf("nvim") !== -1) return ""
-    if (c.indexOf("settings") !== -1 || c.indexOf("control") !== -1 || c.indexOf("pavucontrol") !== -1) return "⚙"
-    if (c.indexOf("spotify") !== -1 || c.indexOf("music") !== -1 || c.indexOf("sound") !== -1) return "🎵"
-    if (c.indexOf("discord") !== -1 || c.indexOf("telegram") !== -1 || c.indexOf("wechat") !== -1 || c.indexOf("slack") !== -1 || c.indexOf("qq") !== -1) return "💬"
-    if (c.indexOf("image") !== -1 || c.indexOf("gimp") !== -1 || c.indexOf("photo") !== -1) return "🖼"
-    return cls.charAt(0).toUpperCase()
+    return Icons.appForClass(cls)
   }
 
   function rebuildItems() {
@@ -267,7 +271,7 @@ Item {
       items.push({
         id: "app:" + clsKey,
         classKey: clsKey,
-        name: clsKey.charAt(0).toUpperCase() + clsKey.slice(1),
+        name: clsKey.charAt(0) + clsKey.slice(1),
         icon: root.resolveAppGlyph(clsKey),
         exec: "",
         isRunning: true,
@@ -289,7 +293,8 @@ Item {
     running: false
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: function(raw) {
+      onStreamFinished: function() {
+        var raw = text  // streamFinished() carries no args; read StdioCollector.text
         if (!raw || raw.trim() === "") return
         try {
           var parsed = JSON.parse(raw)
@@ -330,27 +335,17 @@ Item {
     exclusionMode: ExclusionMode.Ignore
 
     // 居中 Dock 胶囊条
-    Rectangle {
+    BorderSurface {
       id: dockBar
       anchors.bottom: parent.bottom
       anchors.bottomMargin: Style.space(12)
       anchors.horizontalCenter: parent.horizontalCenter
       width: contentRow.implicitWidth + Style.space(24)
       height: Style.space(64)
-      radius: Style.space(18)
-      color: Util.alpha(Color.menu.background, 0.88)
-      border.width: 1
-      border.color: Util.alpha(Color.menu.border, 0.5)
+      radius: Style.cornerRadius
+      color: Commons.Color.popups.background
+      borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Style.normalBorderWidth)
 
-      // 阴影微发光
-      Rectangle {
-        anchors.fill: parent
-        anchors.margins: -1
-        radius: parent.radius + 1
-        color: "transparent"
-        border.width: 1
-        border.color: Util.alpha(Color.menu.text, 0.08)
-      }
 
       Row {
         id: contentRow
@@ -375,7 +370,7 @@ Item {
               var sigma = Style.space(54)
               return Math.exp(-(d * d) / (2 * sigma * sigma))
             }
-            readonly property real iconScale: 1.0 + 0.35 * dockItemWrapper.waveFalloff
+            readonly property real iconScale: root.magnify ? 1.0 + 0.35 * dockItemWrapper.waveFalloff : 1.0
 
             width: Style.space(50)
             height: Style.space(56)
@@ -387,7 +382,7 @@ Item {
             }
 
             function bounce() {
-              bounceAnim.restart()
+              if (root.magnify && !root.theme.reduceMotion) bounceAnim.restart()
             }
 
             // 纵向弹性起跳槽：点击/激活时整槽上跳，带阻尼回落
@@ -401,7 +396,7 @@ Item {
                   target: bounceSlot
                   property: "y"
                   to: -Style.space(13)
-                  duration: 130
+                  duration: root.theme.duration(140)
                   easing.type: Easing.OutCubic
                 }
                 NumberAnimation {
@@ -410,29 +405,29 @@ Item {
                   to: 0
                   duration: 430
                   easing.type: Easing.OutElastic
-                  easing.overshoot: 1.3
                 }
               }
 
               // 图标容器（底边固定，鱼眼缩放向上生长）
-              Rectangle {
+              BorderSurface {
                 id: iconBox
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: Style.space(6)
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: Style.space(42) * dockItemWrapper.iconScale
                 height: width
-                radius: Style.space(10)
+                radius: Style.cornerRadius
                 color: dockItemWrapper.waveFalloff > 0.02
-                  ? Util.alpha(Color.menu.text, 0.16)
-                  : Util.alpha(Color.menu.text, 0.08)
-                Behavior on width { SpringAnimation { spring: 3.2; damping: 0.62; epsilon: 0.001 } }
-                Behavior on color { ColorAnimation { duration: 140 } }
+                  ? Style.hoverFillFor(Commons.Color.popups.text, Commons.Color.accent)
+                  : Style.normalFillFor(Commons.Color.popups.text, Commons.Color.accent)
+                borderSpec: Border.controlSpec(dockItemWrapper.waveFalloff > 0.5 ? "hover-cursor" : "normal", Commons.Color.popups.text, Commons.Color.accent)
+                Behavior on width { enabled: root.magnify; SpringAnimation { spring: 3.2; damping: 0.62; epsilon: 0.001 } }
 
                 Text {
+                  font.family: Style.font.family
                   text: dockItemWrapper.modelData.icon
                   font.pixelSize: Math.max(10, Math.round(iconBox.width * 0.43))
-                  color: Color.menu.text
+                  color: Commons.Color.popups.text
                   anchors.centerIn: parent
                 }
 
@@ -448,19 +443,16 @@ Item {
                   }
                   width: Math.max(Style.space(16), badgeText.implicitWidth + Style.space(8))
                   height: Style.space(16)
-                  radius: height / 2
-                  color: root.dangerColor
-                  border.width: 1
-                  border.color: Util.alpha(Color.menu.background, 0.85)
+                  radius: Style.cornerRadius
+                  color: Commons.Color.accent
 
                   Text {
                     id: badgeText
                     anchors.centerIn: parent
                     text: dockItemWrapper.modelData.windowCount
                     font.family: Style.font.family
-                    font.pixelSize: 9
-                    font.bold: true
-                    color: "#ffffff"
+                    font.pixelSize: Style.font.caption
+                    color: Commons.Color.background
                   }
                 }
               }
@@ -473,28 +465,31 @@ Item {
               anchors.horizontalCenter: parent.horizontalCenter
               width: Style.space(4)
               height: Style.space(4)
-              radius: Style.space(2)
-              color: Color.menu.text
+              radius: Style.cornerRadius
+              color: Commons.Color.popups.text
             }
 
-            // 悬停提示（卡片打开时让位）
-            Rectangle {
+            // 悬停提示（卡片打开时让位）— same [tooltip] chrome native Button/PanelToolTip paint
+            BorderSurface {
+              id: tip
+              readonly property var spec: Border.surfaceSpec("tooltip", "border", Commons.Color.tooltip.border, Math.max(1, Style.normalBorderWidth))
               visible: itemHover.containsMouse && root.contextItem === null
               anchors.bottom: iconBox.top
               anchors.bottomMargin: Style.space(8)
               anchors.horizontalCenter: parent.horizontalCenter
-              width: tipText.implicitWidth + Style.space(12)
-              height: tipText.implicitHeight + Style.space(6)
-              radius: 4
-              color: Util.alpha(Color.menu.background, 0.95)
-              border.width: 1
-              border.color: Util.alpha(Color.menu.border, 0.4)
+              width: tipText.implicitWidth + Style.spacing.controlPaddingX * 2 + Border.left(spec) + Border.right(spec)
+              height: tipText.implicitHeight + Style.spacing.controlPaddingY * 2 + Border.top(spec) + Border.bottom(spec)
+              radius: 0
+              color: Commons.Color.tooltip.background
+              borderSpec: spec
 
               Text {
                 id: tipText
+                textFormat: Text.PlainText
                 text: dockItemWrapper.modelData.name
-                font.pixelSize: Style.font.caption
-                color: Color.menu.text
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                color: Commons.Color.tooltip.text
                 anchors.centerIn: parent
               }
             }
@@ -550,147 +545,72 @@ Item {
       Keys.onEscapePressed: root.closeContextCard()
     }
 
-    Rectangle {
+    // Context menu card = omarchy.dock's menu chrome: [popups] BorderSurface + native rows.
+    BorderSurface {
       id: contextCard
       property var shown: root.contextShown
       property var actions: root.contextActions(root.contextItem || root.contextShown)
       property real anchorX: root.contextCenterX
 
       width: Style.space(238)
-      height: contextCardCol.implicitHeight + Style.space(18)
+      height: contextCardCol.implicitHeight + contentTopInset + contentBottomInset
       // 悬于 Dock 胶囊条正上方（bar 高 64 + 底边距 12 + 间隙 10），并防止贴边溢出
       x: Math.max(Style.space(10), Math.min(anchorX - width / 2, cardPanel.width - width - Style.space(10)))
       y: cardPanel.height - Style.space(86) - height
-      radius: Style.space(14)
-      color: Util.alpha(Color.menu.background, 0.97)
-      border.width: 1
-      border.color: Util.alpha(Color.menu.border, 0.6)
+      radius: Style.cornerRadius
+      color: Commons.Color.popups.background
+      borderSpec: root.popupBorderSpec
+      padding: Style.spacing.sm
       opacity: root.contextItem !== null ? 1 : 0
-      scale: root.contextItem !== null ? 1 : 0.92
       visible: root.contextItem !== null || opacity > 0
-      Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
-      Behavior on scale { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
+      Behavior on opacity { NumberAnimation { duration: root.theme.duration(140); easing.type: Easing.OutQuad } }
 
-      // 卡片投影
-      Rectangle {
-        anchors { fill: parent; margins: Style.space(3); topMargin: Style.space(8) }
-        radius: parent.radius + 6
-        color: "#000000"
-        opacity: 0.30
-        z: -1
-      }
 
       Column {
         id: contextCardCol
-        x: Style.space(9)
-        y: Style.space(9)
-        width: parent.width - Style.space(18)
-        spacing: Style.space(4)
+        x: contextCard.contentLeftInset
+        y: contextCard.contentTopInset
+        width: contextCard.width - contextCard.contentLeftInset - contextCard.contentRightInset
+        spacing: Style.spacing.sm
 
-        // 头部：应用图标 + 全称 + 运行状态
-        Item {
-          width: parent.width
-          height: Style.space(44)
-
-          Rectangle {
-            id: cardGlyph
-            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-            width: Style.space(32)
-            height: Style.space(32)
-            radius: Style.space(8)
-            color: Util.alpha(Color.menu.text, 0.09)
-            border.width: 1
-            border.color: Util.alpha(Color.menu.text, 0.10)
-
-            Text {
-              anchors.centerIn: parent
-              text: contextCard.shown ? contextCard.shown.icon : ""
-              font.pixelSize: 15
-              color: Color.menu.text
-            }
+        // 头部：应用图标 + 全称 + 运行状态 — native PanelHero
+        PanelHero {
+          foreground: Commons.Color.popups.text
+          title: contextCard.shown ? contextCard.shown.name : ""
+          meta: {
+            if (!contextCard.shown) return ""
+            if (!contextCard.shown.isRunning) return "未运行"
+            var n = contextCard.shown.windowCount || 1
+            var t = (contextCard.shown.windowTitles && contextCard.shown.windowTitles[0]) || ""
+            return "运行中 · " + n + " 个窗口" + (t ? " · " + t : "")
           }
-
-          Column {
-            anchors {
-              left: cardGlyph.right; leftMargin: Style.space(10)
-              right: parent.right; rightMargin: Style.space(2)
-              verticalCenter: parent.verticalCenter
-            }
-            spacing: 2
-
-            Text {
-              width: parent.width
-              text: contextCard.shown ? contextCard.shown.name : ""
-              font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
-              font.bold: true
-              color: Color.menu.text
-              elide: Text.ElideRight
-            }
-
-            Text {
-              width: parent.width
-              text: {
-                if (!contextCard.shown) return ""
-                if (!contextCard.shown.isRunning) return "未运行"
-                var n = contextCard.shown.windowCount || 1
-                var t = (contextCard.shown.windowTitles && contextCard.shown.windowTitles[0]) || ""
-                return "运行中 · " + n + " 个窗口" + (t ? " · " + t : "")
-              }
-              font.family: Style.font.family
-              font.pixelSize: 10
-              color: Util.alpha(Color.menu.text, 0.55)
-              elide: Text.ElideRight
-            }
+          iconComponent: Text {
+            textFormat: Text.PlainText
+            text: contextCard.shown ? contextCard.shown.icon : ""
+            font.family: Style.font.family
+            font.pixelSize: Style.font.display
+            color: Commons.Color.popups.text
           }
         }
 
-        Rectangle {
-          width: parent.width
-          height: 1
-          color: root.hairline
-        }
+        PanelSeparator { foreground: Commons.Color.popups.text }
 
-        // 快捷动作行
+        // 快捷动作行 — native Button rows (danger rows tinted with Color.urgent)
         Repeater {
           model: contextCard.actions
 
-          delegate: Rectangle {
+          delegate: Button {
+            id: actionRow
             required property var modelData
-            width: parent.width
-            height: Style.space(30)
-            radius: 8
-            color: cardRowHover.containsMouse
-              ? Util.alpha(modelData.danger ? root.dangerColor : Color.menu.text, modelData.danger ? 0.14 : 0.09)
-              : "transparent"
-            Behavior on color { ColorAnimation { duration: 120 } }
-
-            Row {
-              anchors { left: parent.left; leftMargin: Style.space(9); verticalCenter: parent.verticalCenter }
-              spacing: Style.space(8)
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: modelData.icon
-                font.pixelSize: Style.font.caption
-                color: modelData.danger ? root.dangerColor : Util.alpha(Color.menu.text, 0.8)
-              }
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: modelData.label
-                font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
-                color: modelData.danger ? root.dangerColor : Color.menu.text
-              }
-            }
-
-            MouseArea {
-              id: cardRowHover
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.runContextAction(modelData.key)
-            }
+            width: contextCardCol.width
+            leftAlign: true
+            iconText: modelData.icon
+            text: modelData.label
+            fontSize: Style.font.bodySmall
+            iconSize: Style.font.caption
+            foreground: modelData.danger ? root.dangerColor : Commons.Color.popups.text
+            accent: modelData.danger ? root.dangerColor : Commons.Color.accent
+            onClicked: root.runContextAction(actionRow.modelData.key)
           }
         }
       }

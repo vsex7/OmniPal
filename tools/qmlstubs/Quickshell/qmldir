@@ -1,0 +1,3 @@
+module Quickshell
+typeinfo quickshell.qmltypes
+depends QtQuick

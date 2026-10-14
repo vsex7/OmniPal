@@ -1,0 +1,21 @@
+import QtQuick.tooling 1.2
+Module {
+  Component {
+    file: "wl"; name: "QsWlrLayershell"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell.Wayland/WlrLayershell 1.0"]; isCreatable: false; exportMetaObjectRevisions: [256]
+    attachedType: "QsWlrLayershell"
+    Property { name: "layer"; type: "int" }
+    Property { name: "keyboardFocus"; type: "int" }
+    Property { name: "namespace"; type: "QString" }
+  }
+  Component {
+    file: "wl"; name: "QsWlrLayer"; accessSemantics: "none"
+    exports: ["Quickshell.Wayland/WlrLayer 1.0"]; isCreatable: false; exportMetaObjectRevisions: [256]
+    Enum { name: "Enum"; values: ["Background", "Bottom", "Top", "Overlay"] }
+  }
+  Component {
+    file: "wl"; name: "QsWlrKeyboardFocus"; accessSemantics: "none"
+    exports: ["Quickshell.Wayland/WlrKeyboardFocus 1.0"]; isCreatable: false; exportMetaObjectRevisions: [256]
+    Enum { name: "Enum"; values: ["None", "Exclusive", "OnDemand"] }
+  }
+}
