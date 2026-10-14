@@ -961,6 +961,83 @@ end"""
 
         return results
 
+    def check_installation(self, home: Optional[Path] = None) -> Dict[str, Any]:
+        """Checks what install.sh set up and returns each problem with a concrete fix."""
+        home = Path(home) if home else Path.home()
+        root = self.root_dir.resolve()
+        reinstall = f"bash {root}/scripts/install.sh"
+        problems: List[Dict[str, str]] = []
+        info: Dict[str, Any] = {"cli": "missing", "plugins": {}, "service": "missing", "tokens_in_sync": True}
+
+        # CLI link
+        cli = home / ".local" / "bin" / "omni-profile"
+        if cli.is_symlink() or cli.exists():
+            if not cli.exists():
+                info["cli"] = "broken"
+                problems.append({"problem": f"CLI link {cli} is broken (points to a moved or deleted checkout)", "fix": reinstall})
+            elif cli.resolve() != (root / "bin" / "omni-profile"):
+                info["cli"] = "other"
+                problems.append({"problem": f"CLI link {cli} points to another checkout: {cli.resolve()}", "fix": reinstall})
+            else:
+                info["cli"] = "ok"
+        else:
+            problems.append({"problem": f"CLI link {cli} is missing", "fix": reinstall})
+
+        # Plugin links
+        plugins_dir = home / ".config" / "omarchy" / "plugins"
+        for src in sorted((root / "plugins").glob("omni.*")):
+            if not src.is_dir():
+                continue
+            link = plugins_dir / src.name
+            if not (link.is_symlink() or link.exists()):
+                state = "missing"
+            elif not link.exists():
+                state = "broken"
+            elif link.resolve() != src:
+                state = "other"
+            else:
+                state = "ok"
+            info["plugins"][src.name] = state
+            if state != "ok":
+                problems.append({"problem": f"Plugin {src.name} link is {state} in {plugins_dir}", "fix": reinstall})
+
+        # systemd user unit
+        unit = home / ".config" / "systemd" / "user" / "omnipal.service"
+        if unit.exists():
+            text = unit.read_text(encoding="utf-8", errors="replace")
+            if str(root / "bin" / "omni-profile") not in text:
+                info["service"] = "stale"
+                problems.append({"problem": f"{unit} points to a different checkout path", "fix": reinstall})
+            else:
+                info["service"] = "installed"
+                try:
+                    res = subprocess.run(["systemctl", "--user", "is-active", "omnipal.service"],
+                                         capture_output=True, text=True, timeout=3)
+                    status = res.stdout.strip()
+                    if status in ("active", "inactive", "failed", "activating", "deactivating"):
+                        info["service"] = status
+                    if status == "failed":
+                        problems.append({"problem": "omnipal.service is in failed state",
+                                         "fix": "journalctl --user -u omnipal.service -n 50; systemctl --user restart omnipal.service"})
+                except Exception as e:
+                    _debug(f"systemctl query failed: {e}")
+        # A missing unit is fine: the daemon is optional.
+
+        # Tokens.js copies
+        try:
+            from scripts.sync_tokens import out_of_sync
+            bad = out_of_sync(root)
+        except Exception as e:
+            _debug(f"token sync check failed: {e}")
+            bad = []
+        if bad:
+            info["tokens_in_sync"] = False
+            problems.append({"problem": f"Tokens.js out of sync in {len(bad)} plugin(s)",
+                             "fix": f"python3 {root}/scripts/sync_tokens.py"})
+
+        info["problems"] = problems
+        return info
+
     def doctor(self) -> Dict[str, Any]:
         """Runs comprehensive diagnostics on daemon, sockets, live binds, and state consistency."""
         report: Dict[str, Any] = {
@@ -972,7 +1049,8 @@ end"""
             "state": self.get_state(),
             "overlay": {"count": 0, "verified_in_hyprland": 0, "missing": []},
             "consistency": False,
-            "issues": []
+            "issues": [],
+            "fixes": []
         }
 
         # 1. Check daemon PID
@@ -1022,6 +1100,13 @@ end"""
                     report["issues"].append(f"Mismatch: {len(report['overlay']['missing'])} binds declared in overlay are absent from compositor")
             except Exception as e:
                 report["issues"].append(f"Failed to query hyprctl binds: {e}")
+
+        # 4. Installation self-check (CLI link, plugin links, systemd unit, token copies)
+        install = self.check_installation()
+        report["install"] = install
+        for item in install["problems"]:
+            report["issues"].append(item["problem"])
+        report["fixes"] = [item["fix"] for item in install["problems"]]
 
         # 4. Consistency check
         from scripts.check_consistency import check_consistency

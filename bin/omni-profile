@@ -184,11 +184,25 @@ def cmd_doctor(engine: OmniPalEngine, args):
 
     print(f"  • Schema 与 Profile 一致性: {'✅ 100% 校验通过' if diag.get('consistency') else '❌ 校验失败'}")
 
+    inst = diag.get("install", {})
+    if inst:
+        plugins = inst.get("plugins", {})
+        ok_plugins = sum(1 for v in plugins.values() if v == "ok")
+        print(f"  • 命令行链接: {'✅ 正常' if inst.get('cli') == 'ok' else '❌ ' + str(inst.get('cli'))}")
+        print(f"  • 插件链接: {ok_plugins}/{len(plugins)} 正常")
+        print(f"  • 后台服务: {inst.get('service')}")
+        print(f"  • 颜色 Token: {'✅ 已同步' if inst.get('tokens_in_sync') else '❌ 未同步'}")
+
     issues = diag.get("issues", [])
     if issues:
         print("\n⚠️ 诊断发现的问题:")
         for iss in issues:
             print(f"    - {iss}")
+        fixes = list(dict.fromkeys(diag.get("fixes", [])))
+        if fixes:
+            print("\n🔧 建议修复:")
+            for fx in fixes:
+                print(f"    $ {fx}")
         sys.exit(1)
     else:
         print("\n🎉 系统运行良好，无冲突与异常。")

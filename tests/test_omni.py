@@ -1040,5 +1040,50 @@ class TestProfileExportImport(unittest.TestCase):
         self.assertIn("echo hi", r.stdout)
         self.assertEqual(self.run_cli("import", "-", "--yes", stdin=prof).returncode, 0)
 
+
+class TestDoctorInstallCheck(unittest.TestCase):
+    """doctor's installation self-check: CLI/plugin links, systemd unit, token copies, with fixes."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.root = PROJECT_ROOT.resolve()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _install_links(self):
+        (self.home / ".local" / "bin").mkdir(parents=True)
+        (self.home / ".local" / "bin" / "omni-profile").symlink_to(self.root / "bin" / "omni-profile")
+        pdir = self.home / ".config" / "omarchy" / "plugins"
+        pdir.mkdir(parents=True)
+        for src in sorted((self.root / "plugins").glob("omni.*")):
+            (pdir / src.name).symlink_to(src)
+        return pdir
+
+    def test_fresh_home_reports_missing_with_reinstall_fix(self):
+        info = self.engine.check_installation(home=self.home)
+        self.assertEqual(info["cli"], "missing")
+        self.assertTrue(all(v == "missing" for v in info["plugins"].values()))
+        self.assertTrue(info["problems"])
+        self.assertTrue(all("install.sh" in p["fix"] for p in info["problems"]))
+
+    def test_clean_install_has_no_problems(self):
+        self._install_links()
+        info = self.engine.check_installation(home=self.home)
+        self.assertEqual(info["cli"], "ok")
+        self.assertEqual(info["problems"], [])
+
+    def test_broken_plugin_link_detected(self):
+        pdir = self._install_links()
+        victim = sorted(pdir.iterdir())[0]
+        victim.unlink()
+        victim.symlink_to(self.home / "gone")
+        info = self.engine.check_installation(home=self.home)
+        self.assertEqual(info["plugins"][victim.name], "broken")
+        self.assertEqual(len(info["problems"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
