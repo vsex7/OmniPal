@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import Quickshell 1.0
 import Quickshell.Io 1.0
+import "Tokens.js" as Tokens
 
 Item {
     id: root
@@ -23,9 +24,9 @@ Item {
         "omarchy": "⊡"
     })
     readonly property var modeColors: ({
-        "windows": "#0078d4",
-        "mac":     "#a2aaad",
-        "omarchy": "#a3be8c"
+        "windows": Tokens.mode.windows,
+        "mac":     Tokens.mode.mac,
+        "omarchy": Tokens.mode.omarchy
     })
     readonly property var modeNames: ({
         "windows": "Windows 11 习惯模式",
@@ -100,7 +101,7 @@ Item {
     }
 
     // --- Derived ---
-    property color currentColor: root.modeColors[root.currentMode] || "#a3be8c"
+    property color currentColor: root.modeColors[root.currentMode] || Tokens.mode.omarchy
 
     // --- Helpers ---
 
@@ -140,7 +141,7 @@ Item {
             font.family: "monospace"
             font.pixelSize: 14
             font.bold: true
-            color: root.engineRunning ? root.currentColor : "#bf616a"
+            color: root.engineRunning ? root.currentColor : Tokens.semantic.danger
             anchors.verticalCenter: parent.verticalCenter
         }
 

@@ -2,6 +2,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "Tokens.js" as Tokens
 
 Item {
   id: root
@@ -17,7 +18,7 @@ Item {
   signal closeRequested(var windowData)
 
   readonly property bool isDark: (Color.background.r * 0.299 + Color.background.g * 0.587 + Color.background.b * 0.114) < 0.5
-  readonly property color accentColor: Color.accent || "#88c0d0"
+  readonly property color accentColor: Color.accent || Tokens.semantic.accent
   readonly property string appClass: (root.windowData && (root.windowData.initialClass || root.windowData.class)) || ""
   readonly property string appTitle: (root.windowData && (root.windowData.title || root.appClass)) || "Window"
   readonly property bool isFloating: (root.windowData && root.windowData.floating) === true
@@ -130,7 +131,7 @@ Item {
           width: titleBar.height - 4
           height: titleBar.height - 4
           radius: 2
-          color: closeMouse.containsMouse ? "#bf616a" : "transparent"
+          color: closeMouse.containsMouse ? Tokens.semantic.danger : "transparent"
 
           Text {
             text: "✕"
@@ -180,7 +181,7 @@ Item {
         height: 14
         radius: 2
         color: Qt.rgba(0.82, 0.53, 0.44, 0.25)
-        border.color: "#d08770"
+        border.color: Tokens.semantic.warn
         border.width: 1
 
         Text {
@@ -188,7 +189,7 @@ Item {
           text: "浮动"
           font.pixelSize: 8
           font.bold: true
-          color: "#d08770"
+          color: Tokens.semantic.warn
           anchors.centerIn: parent
         }
       }

@@ -5,6 +5,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "Tokens.js" as Tokens
 
 // OmniPal 窗口吸附反馈与 Snap Layouts 布局选择器 (omni.snap-feedback)
 //
@@ -29,7 +30,7 @@ Item {
   property string zone: "left"
   property string hoveredZone: ""
 
-  readonly property color snapColor: (Color && Color.accent) ? Color.accent : "#3b82f6"
+  readonly property color snapColor: (Color && Color.accent) ? Color.accent : Tokens.semantic.accent
 
   // 键盘与焦点导航状态
   property int focusedTemplateIndex: -1  // -1 表示未选模板，0~5 表示当前选中的模板
@@ -716,7 +717,7 @@ Item {
                   width: 5
                   height: 5
                   radius: 3
-                  color: "#a3be8c"
+                  color: Tokens.semantic.ok
                   anchors.verticalCenter: parent.verticalCenter
                 }
 
@@ -772,7 +773,7 @@ Item {
               width: Style.space(22)
               height: Style.space(22)
               radius: 5
-              color: closeMouse.containsMouse ? "#bf616a" : Qt.rgba(1, 1, 1, 0.06)
+              color: closeMouse.containsMouse ? Tokens.semantic.danger : Qt.rgba(1, 1, 1, 0.06)
               border.color: closeMouse.containsMouse ? "transparent" : Qt.rgba(1, 1, 1, 0.10)
               border.width: 1
               anchors.verticalCenter: parent.verticalCenter

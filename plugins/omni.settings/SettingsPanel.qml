@@ -5,6 +5,7 @@ import QtQuick
 import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
+import "Tokens.js" as Tokens
 
 // OmniPal 设置与控制中心面板（omni.settings）
 //
@@ -67,7 +68,7 @@ Item {
       name: "Windows 11 习惯模式",
       desc: "Alt+F4 关闭窗口 · Win+方向键智能吸附 · Win+E 文件管理器 · Ctrl+Shift+Esc 任务管理器",
       count: 13,
-      color: "#0078d4",
+      color: Tokens.mode.windows,
       source: "project",
       override: false
     },
@@ -77,7 +78,7 @@ Item {
       name: "macOS 习惯模式",
       desc: "Super+Q 退出程序 · Super+Space 聚焦搜索 · Super+Shift+3/4 截图 · Super+H 最小化",
       count: 12,
-      color: "#a2aaad",
+      color: Tokens.mode.mac,
       source: "project",
       override: false
     },
@@ -87,7 +88,7 @@ Item {
       name: "Omarchy 原生模式",
       desc: "纯粹的 Hyprland 原生平铺体验 · 无任何按键拦截与覆盖 · 极简高效",
       count: 0,
-      color: "#a3be8c",
+      color: Tokens.mode.omarchy,
       source: "project",
       override: false
     }
@@ -104,9 +105,9 @@ Item {
   readonly property color glassColor: Util.alpha(Color.menu.background, 0.90)
   readonly property int cornerRadius: Style.cornerRadius
 
-  readonly property color accent: Color.accent || "#88c0d0"
-  readonly property color okColor: "#a3be8c"
-  readonly property color dangerColor: "#bf616a"
+  readonly property color accent: Color.accent || Tokens.semantic.accent
+  readonly property color okColor: Tokens.semantic.ok
+  readonly property color dangerColor: Tokens.semantic.danger
   readonly property color hairline: Util.alpha(Color.menu.text, 0.10)
   readonly property color chipColor: Util.alpha(Color.menu.text, 0.05)
 
@@ -325,8 +326,8 @@ Item {
           var parsed = JSON.parse(data)
           if (Array.isArray(parsed) && parsed.length > 0) {
             var iconMap = { "windows": "⊞", "mac": "◆", "omarchy": "⊡" }
-            var colorMap = { "windows": "#0078d4", "mac": "#a2aaad", "omarchy": "#a3be8c" }
-            var customColors = ["#b48ead", "#ebcb8b", "#88c0d0", "#d08770", "#81a1c1"]
+            var colorMap = { "windows": Tokens.mode.windows, "mac": Tokens.mode.mac, "omarchy": Tokens.mode.omarchy }
+            var customColors = Tokens.mode.custom
             var items = []
             for (var i = 0; i < parsed.length; i++) {
               var p = parsed[i]
@@ -1338,7 +1339,7 @@ Item {
                             value: root.statsLoaded
                               ? (root.statsLastReset ? root.fmtTs(root.statsLastReset) : "从未")
                               : "…",
-                            tint: root.persistEnabled ? "#ebcb8b" : Util.alpha(root.foreground, 0.6)
+                            tint: root.persistEnabled ? Tokens.semantic.warn : Util.alpha(root.foreground, 0.6)
                           }
                         ]
                         delegate: Rectangle {

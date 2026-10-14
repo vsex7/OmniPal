@@ -5,6 +5,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "CheatSheetData.js" as SheetData
+import "Tokens.js" as Tokens
 
 // OmniPal 快捷键 HUD（omni.cheat-sheet）
 //
@@ -483,7 +484,7 @@ Item {
                   width: Style.space(5)
                   height: Style.space(5)
                   radius: 3
-                  color: "#a3be8c"
+                  color: Tokens.semantic.ok
                   anchors.verticalCenter: parent.verticalCenter
                 }
               }

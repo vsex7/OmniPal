@@ -5,6 +5,7 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "Tokens.js" as Tokens
 
 // OmniPal 任务视图与空间多工作区概览 (omni.overview)
 //
@@ -340,7 +341,7 @@ Item {
           implicitWidth: headerText.implicitWidth + Style.space(24)
           radius: Style.cornerRadius
           color: Qt.rgba(0.08, 0.10, 0.13, 0.85)
-          border.color: Util.alpha(Color.accent || "#88c0d0", 0.4)
+          border.color: Util.alpha(Color.accent || Tokens.semantic.accent, 0.4)
           border.width: 1
 
           Row {
@@ -395,7 +396,7 @@ Item {
           width: searchInput.activeFocus || searchInput.text !== "" ? Style.space(240) : Style.space(130)
           radius: Style.cornerRadius
           color: Qt.rgba(0.08, 0.10, 0.13, 0.85)
-          border.color: searchInput.activeFocus ? (Color.accent || "#88c0d0") : Qt.rgba(1, 1, 1, 0.15)
+          border.color: searchInput.activeFocus ? (Color.accent || Tokens.semantic.accent) : Qt.rgba(1, 1, 1, 0.15)
           border.width: 1
 
           Behavior on width { NumberAnimation { duration: 120 } }
