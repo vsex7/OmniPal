@@ -567,7 +567,7 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                   implicitWidth: dimLabel.implicitWidth + 8
                   height: 16
-                  radius: Tokens.radius.chip
+                  radius: Tokens.corner(Style)
                   color: Tokens.alpha(root.theme.text, 0.14)
 
                   Text {
@@ -672,7 +672,7 @@ Item {
             Rectangle {
               width: Style.space(24)
               height: Style.space(24)
-              radius: Tokens.radius.chip
+              radius: Tokens.corner(Style)
               color: Util.alpha(root.snapColor, 0.16)
               border.color: Util.alpha(root.snapColor, 0.40)
               border.width: 1
@@ -701,7 +701,7 @@ Item {
             Rectangle {
               visible: (root.targetWindowTitle !== "" || root.targetWindowClass !== "" || root.targetWindowAddress !== "")
               height: Style.space(18)
-              radius: Tokens.radius.chip
+              radius: Tokens.corner(Style)
               color: Tokens.alpha(root.theme.text, 0.08)
               border.color: Tokens.alpha(root.theme.text, 0.14)
               border.width: 1
@@ -716,7 +716,7 @@ Item {
                 Rectangle {
                   width: 5
                   height: 5
-                  radius: Tokens.radius.chip
+                  radius: Tokens.corner(Style)
                   color: root.theme.ok
                   anchors.verticalCenter: parent.verticalCenter
                 }
@@ -745,7 +745,7 @@ Item {
             // 阶段提示药丸
             Rectangle {
               height: Style.space(20)
-              radius: Tokens.radius.chip
+              radius: Tokens.corner(Style)
               color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.18) : root.theme.chipFill
               border.color: root.focusedTemplateIndex !== -1 ? root.snapColor : Tokens.alpha(root.theme.text, 0.12)
               border.width: 1
@@ -772,7 +772,7 @@ Item {
             Rectangle {
               width: Style.space(22)
               height: Style.space(22)
-              radius: Tokens.radius.chip
+              radius: Tokens.corner(Style)
               color: closeMouse.containsMouse ? root.theme.danger : Tokens.alpha(root.theme.text, 0.06)
               border.color: closeMouse.containsMouse ? "transparent" : Tokens.alpha(root.theme.text, 0.10)
               border.width: 1
@@ -826,7 +826,7 @@ Item {
 
               width: (templatesGrid.width - templatesGrid.spacing * 2) / 3
               height: (templatesGrid.height - templatesGrid.spacing) / 2
-              radius: Tokens.radius.chip
+              radius: Tokens.corner(Style)
               color: isSelectedTpl ? Tokens.alpha(root.theme.text, 0.08) : (isCardHovered ? root.theme.hoverFill : "transparent")
               border.color: isSelectedTpl ? root.snapColor : (isCardHovered ? root.theme.lineStrong : root.theme.line)
               border.width: isSelectedTpl ? root.hudBorder : Tokens.border.hair
@@ -892,7 +892,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     width: 16
                     height: 14
-                    radius: Tokens.radius.chip
+                    radius: Tokens.corner(Style)
                     color: tplCard.isSelectedTpl ? root.snapColor : root.theme.chipFill
                     border.color: tplCard.isSelectedTpl ? root.snapColor : Tokens.alpha(root.theme.text, 0.15)
                     border.width: 1
@@ -913,7 +913,7 @@ Item {
                   id: miniCanvas
                   width: parent.width
                   height: parent.height - 21
-                  radius: Tokens.radius.chip
+                  radius: Tokens.corner(Style)
                   color: root.theme.sunken
                   border.color: Tokens.alpha(root.theme.text, 0.06)
                   border.width: 1
@@ -941,7 +941,7 @@ Item {
                       y: slotY + 1
                       width: Math.max(10, slotW - 2)
                       height: Math.max(10, slotH - 2)
-                      radius: Tokens.radius.chip
+                      radius: Tokens.corner(Style)
 
                       color: isHovered ? Util.alpha(root.snapColor, 0.40) : Tokens.alpha(root.theme.text, 0.08)
                       border.color: isHovered ? root.snapColor : Tokens.alpha(root.theme.text, 0.16)
@@ -956,7 +956,7 @@ Item {
                         anchors.centerIn: parent
                         width: 16
                         height: 16
-                        radius: Tokens.radius.chip
+                        radius: Tokens.corner(Style)
                         color: slotRect.isSlotFocused ? root.snapColor : root.theme.sunken
                         border.color: slotRect.isSlotFocused ? root.snapColor : Util.alpha(root.snapColor, 0.5)
                         border.width: 1
@@ -1042,7 +1042,7 @@ Item {
             Rectangle {
               width: 5
               height: 5
-              radius: Tokens.radius.chip
+              radius: Tokens.corner(Style)
               color: root.hoveredZone !== "" ? root.snapColor : Util.alpha(Color.foreground, 0.4)
               anchors.verticalCenter: parent.verticalCenter
             }
@@ -1084,7 +1084,7 @@ Item {
               delegate: Rectangle {
                 required property var modelData
                 height: 16
-                radius: Tokens.radius.chip
+                radius: Tokens.corner(Style)
                 color: root.theme.chipFill
                 border.color: Tokens.alpha(root.theme.text, 0.12)
                 border.width: 1

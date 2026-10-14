@@ -494,7 +494,7 @@ Item {
           ctx.beginPath()
           ctx.arc(cx, cy, 475, 0, 2 * Math.PI)
           ctx.arc(cx, cy, 195, 0, 2 * Math.PI, true)
-          ctx.fillStyle = "rgba(10, 13, 18, 0.45)"
+          ctx.fillStyle = Tokens.alpha(root.theme.bg, Tokens.popup.scrimAlpha)
           ctx.fill()
 
           // 1.2 绘制每个真实活动窗口扇区
@@ -512,20 +512,13 @@ Item {
 
             if (isSel) {
               // 选中态：GTA 5 标志性战术亮橙高能渐变填充
-              var grad = ctx.createRadialGradient(cx, cy, rIn, cx, cy, rOut)
-              grad.addColorStop(0, "rgba(255, 119, 0, 0.32)")
-              grad.addColorStop(0.65, "rgba(255, 119, 0, 0.48)")
-              grad.addColorStop(1, "rgba(255, 140, 0, 0.65)")
-              ctx.fillStyle = grad
+                            ctx.fillStyle = root.theme.selectedFill
               ctx.fill()
 
-              // 亮橙色加粗高光描边 (带强烈外发光)
-              ctx.lineWidth = 4.0
+              // Omarchy 选中态：2px accent 描边，无外发光
+              ctx.lineWidth = Tokens.border.focus
               ctx.strokeStyle = root.theme.accent
-              ctx.shadowColor = root.theme.accent
-              ctx.shadowBlur = 28
               ctx.stroke()
-              ctx.shadowBlur = 0
 
               // 扇区两端高光刻度线 (GTA 武器槽位精密咬合锁扣)
               var midA = item.midAngle
@@ -540,21 +533,18 @@ Item {
 
             } else {
               // 普通活动窗口槽位：深灰黑哑光硬质机甲表面
-              var normalGrad = ctx.createRadialGradient(cx, cy, rIn, cx, cy, rOut)
-              normalGrad.addColorStop(0, "rgba(22, 27, 36, 0.94)")
-              normalGrad.addColorStop(1, "rgba(16, 19, 26, 0.96)")
-              ctx.fillStyle = normalGrad
+                            ctx.fillStyle = root.theme.popupBg
               ctx.fill()
 
-              ctx.lineWidth = 1.5
-              ctx.strokeStyle = "rgba(255, 255, 255, 0.14)"
+              ctx.lineWidth = Tokens.border.hair
+              ctx.strokeStyle = root.theme.line
               ctx.stroke()
             }
           }
 
           // 1.3 绘制外圈 GTA 5 战术准星圆点与刻度 (Crosshair Reticles)
           if (total > 0) {
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.35)"
+            ctx.strokeStyle = root.theme.lineStrong
             ctx.lineWidth = 1.2
             var reticleR = 490
             var angles = [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2]
@@ -588,20 +578,11 @@ Item {
           anchors.fill: parent
           radius: width / 2
           color: root.theme.sunken
-          border.width: 2.5
+          border.width: Tokens.border.normal
           border.color: root.currentSelectedWin ? root.theme.accent : Tokens.alpha(root.theme.text, 0.18)
 
           Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
 
-          // 内圈微妙科技暗线
-          Rectangle {
-            anchors.fill: parent
-            anchors.margins: 6
-            radius: width / 2
-            color: "transparent"
-            border.width: 1
-            border.color: Tokens.alpha(root.theme.text, 0.06)
-          }
 
           // 核心内容排版
           Column {
@@ -614,7 +595,7 @@ Item {
               height: 24
               width: parent.width
               color: root.theme.surface
-              radius: Tokens.radius.chip
+              radius: Tokens.corner(Style)
               border.width: 1
               border.color: root.currentSelectedWin ? Tokens.alpha(root.theme.accent, 0.3) : Tokens.alpha(root.theme.text, 0.08)
 
@@ -622,9 +603,9 @@ Item {
                 anchors.centerIn: parent
                 text: "ACTIVE: [" + (root.currentSelectedWin ? root.currentSelectedWin.activeName : "NONE") + "]"
                 color: root.theme.accent
-                font.pixelSize: 11
+                font.pixelSize: Style.font.bodySmall
                 font.bold: true
-                font.family: Tokens.font.mono
+                font.family: Style.font.family
                 elide: Text.ElideRight
                 width: parent.width - 16
                 horizontalAlignment: Text.AlignHCenter
@@ -642,7 +623,7 @@ Item {
                 anchors.centerIn: parent
                 width: 48
                 height: 48
-                radius: 24
+                radius: Tokens.corner(Style)
                 color: root.currentSelectedWin ? Tokens.alpha(root.theme.accent, 0.12) : "transparent"
               }
 
@@ -659,7 +640,7 @@ Item {
             Text {
               text: (root.currentSelectedWin && (root.currentSelectedWin.title || root.currentSelectedWin.appName)) ? String(root.currentSelectedWin.title || root.currentSelectedWin.appName) : "No Window Selected"
               color: root.theme.textStrong
-              font.pixelSize: 13
+              font.pixelSize: Style.font.body
               font.bold: true
               font.family: Style.font.family
               horizontalAlignment: Text.AlignHCenter
@@ -679,17 +660,17 @@ Item {
               Row {
                 width: parent.width
                 spacing: 8
-                Text { text: "WORKSPACE:"; color: root.theme.textMuted; font.pixelSize: 9; font.bold: true; font.family: Tokens.font.mono; width: 85 }
+                Text { text: "WORKSPACE:"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family; width: 85 }
                 Rectangle {
                   height: 6
                   width: parent.width - 93
-                  radius: Tokens.radius.chip
+                  radius: Tokens.corner(Style)
                   color: root.theme.surfaceAlt
                   anchors.verticalCenter: parent.verticalCenter
                   Rectangle {
                     height: parent.height
                     width: parent.width * 0.85
-                    radius: Tokens.radius.chip
+                    radius: Tokens.corner(Style)
                     color: root.theme.accent
                   }
                 }
@@ -699,17 +680,17 @@ Item {
               Row {
                 width: parent.width
                 spacing: 8
-                Text { text: "LAYOUT MODE:"; color: root.theme.textMuted; font.pixelSize: 9; font.bold: true; font.family: Tokens.font.mono; width: 85 }
+                Text { text: "LAYOUT MODE:"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family; width: 85 }
                 Rectangle {
                   height: 6
                   width: parent.width - 93
-                  radius: Tokens.radius.chip
+                  radius: Tokens.corner(Style)
                   color: root.theme.surfaceAlt
                   anchors.verticalCenter: parent.verticalCenter
                   Rectangle {
                     height: parent.height
                     width: root.currentSelectedWin && root.currentSelectedWin.layoutMode === "FLOAT" ? parent.width * 0.45 : parent.width * 0.95
-                    radius: Tokens.radius.chip
+                    radius: Tokens.corner(Style)
                     color: root.theme.info
                   }
                 }
@@ -719,13 +700,13 @@ Item {
               Row {
                 width: parent.width
                 spacing: 8
-                Text { text: "PROCESS PID:"; color: root.theme.textMuted; font.pixelSize: 9; font.bold: true; font.family: Tokens.font.mono; width: 85 }
+                Text { text: "PROCESS PID:"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family; width: 85 }
                 Text {
                   text: root.currentSelectedWin ? (String(root.currentSelectedWin.pid) + " · " + (root.currentSelectedWin.resolutionStr || "1280×800")) : "-"
                   color: root.theme.text
-                  font.pixelSize: 9
+                  font.pixelSize: Style.font.caption
                   font.bold: true
-                  font.family: Tokens.font.mono
+                  font.family: Style.font.family
                   anchors.verticalCenter: parent.verticalCenter
                 }
               }
@@ -779,8 +760,8 @@ Item {
         visible: root.isDraggingCard && root.draggedSlotData !== null
         width: 155
         height: 82
-        radius: 12
-        color: portalHole.isDragOver ? Tokens.alpha(root.theme.danger, 0.55) : Tokens.alpha(root.theme.surface, 0.90)
+        radius: Tokens.corner(Style)
+        color: portalHole.isDragOver ? Tokens.alpha(root.theme.danger, 0.55) : root.theme.popupBg
         border.width: 2
         border.color: portalHole.isDragOver ? root.theme.danger : root.theme.info
         z: 999
@@ -788,7 +769,7 @@ Item {
         x: root.dragGlobalX - width / 2
         y: root.dragGlobalY - height / 2
 
-        scale: portalHole.isDragOver ? 0.65 : 1.08
+        scale: portalHole.isDragOver ? 0.65 : 1.0
         Behavior on scale { NumberAnimation { duration: Tokens.motion.fast; easing.type: Easing.OutCubic } }
         Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
 
@@ -810,7 +791,7 @@ Item {
             Text {
               text: root.draggedSlotData ? String(root.draggedSlotData.appName || "").toUpperCase() : ""
               color: root.theme.textStrong
-              font.pixelSize: 11
+              font.pixelSize: Style.font.bodySmall
               font.bold: true
               font.family: Style.font.family
               elide: Text.ElideRight
@@ -819,9 +800,9 @@ Item {
             Text {
               text: portalHole.isDragOver ? "ENTERING HOLE..." : "DRAGGING"
               color: portalHole.isDragOver ? root.theme.danger : root.theme.info
-              font.pixelSize: 9
+              font.pixelSize: Style.font.caption
               font.bold: true
-              font.family: Tokens.font.mono
+              font.family: Style.font.family
             }
           }
         }
@@ -836,7 +817,7 @@ Item {
         anchors.bottomMargin: 28
         anchors.horizontalCenter: parent.horizontalCenter
         height: 32
-        radius: 16
+        radius: Tokens.corner(Style)
         color: root.theme.surface
         border.width: 1
         border.color: Tokens.alpha(root.theme.text, 0.12)
@@ -849,40 +830,40 @@ Item {
 
           Row {
             spacing: 6
-            Text { text: "MOUSE"; color: root.theme.accent; font.pixelSize: 10; font.bold: true; font.family: Tokens.font.mono }
-            Text { text: "FLICK TO SELECT"; color: root.theme.textMuted; font.pixelSize: 10; font.family: Style.font.family }
+            Text { text: "MOUSE"; color: root.theme.accent; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family }
+            Text { text: "FLICK TO SELECT"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: 11 }
+          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
 
           Row {
             spacing: 6
-            Text { text: "DRAG → HOLE"; color: root.theme.danger; font.pixelSize: 10; font.bold: true; font.family: Tokens.font.mono }
-            Text { text: "MOVE TO WORKSPACE [" + root.targetTransferWorkspaceId + "]"; color: root.theme.textMuted; font.pixelSize: 10; font.family: Style.font.family }
+            Text { text: "DRAG → HOLE"; color: root.theme.danger; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family }
+            Text { text: "MOVE TO WORKSPACE [" + root.targetTransferWorkspaceId + "]"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: 11 }
+          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
 
           Row {
             spacing: 6
-            Text { text: "[M]"; color: root.theme.info; font.pixelSize: 10; font.bold: true; font.family: Tokens.font.mono }
-            Text { text: "QUICK TRANSFER"; color: root.theme.textMuted; font.pixelSize: 10; font.family: Style.font.family }
+            Text { text: "[M]"; color: root.theme.info; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family }
+            Text { text: "QUICK TRANSFER"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: 11 }
+          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
 
           Row {
             spacing: 6
-            Text { text: "ENTER / CLICK"; color: root.theme.textStrong; font.pixelSize: 10; font.bold: true; font.family: Tokens.font.mono }
-            Text { text: "EQUIP / FOCUS"; color: root.theme.textMuted; font.pixelSize: 10; font.family: Style.font.family }
+            Text { text: "ENTER / CLICK"; color: root.theme.textStrong; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family }
+            Text { text: "EQUIP / FOCUS"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: 11 }
+          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
 
           Row {
             spacing: 6
-            Text { text: "ESC"; color: root.theme.textStrong; font.pixelSize: 10; font.bold: true; font.family: Tokens.font.mono }
-            Text { text: "CANCEL"; color: root.theme.textMuted; font.pixelSize: 10; font.family: Style.font.family }
+            Text { text: "ESC"; color: root.theme.textStrong; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family }
+            Text { text: "CANCEL"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
           }
         }
       }

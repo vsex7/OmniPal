@@ -67,6 +67,8 @@ var type = { caption: 10, small: 11, body: 13, title: 15, display: 20 };
 // Omarchy shell.toml [popups]/[menu]: border = hyprland active-border (accent), border_size 2,
 // solid background (alpha 1.0), scrim = background @ 0.5, popup-padding 14.
 var popup = { border: 2, padding: 14, scrimAlpha: 0.5 };
+// Corner radius mirrors Hyprland decoration:rounding (host Style.cornerRadius; Omarchy default 0).
+function corner(Style) { return (Style && Style.cornerRadius > 0) ? Style.cornerRadius : radius.none; }
 var motion = { fast: 90, normal: 140, slow: 200 };
 var font = { mono: "JetBrainsMono Nerd Font", fallback: "monospace" };
 
@@ -98,7 +100,15 @@ function build(Color, palette) {
     ok: p.green, warn: p.yellow, danger: p.red, info: p.cyan,
     special: p.magenta, highlight: p.orange,
     onDanger: p.darker_background,
-    white: p.white, black: p.black
+    white: p.white, black: p.black,
+    // Omarchy native popup chrome (shell.toml [popups]/[menu]); host Color wins, palette is the fallback.
+    popupBg: (Color && Color.popups && Color.popups.background) ? Color.popups.background : bg,
+    popupText: (Color && Color.popups && Color.popups.text) ? Color.popups.text : fg,
+    popupBorder: (Color && Color.popups && Color.popups.border) ? Color.popups.border : acc,
+    menuScrim: (Color && Color.menu && Color.menu.scrim) ? Color.menu.scrim : alpha(bg, popup.scrimAlpha),
+    selectedFill: alpha(fg, 0.08),
+    selectedText: acc,
+    selectedBorder: acc
   };
 }
 

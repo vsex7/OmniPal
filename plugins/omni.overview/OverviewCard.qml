@@ -28,7 +28,7 @@ Item {
   height: 100
 
   // 选中态微凸起动效 (GTA 5 扇区浮升感与高亮)
-  scale: (cardRoot.isSelected ? 1.10 : 1.0) * cardRoot.cardScale
+  scale: cardRoot.cardScale
   Behavior on scale { NumberAnimation { duration: Tokens.motion.fast; easing.type: Easing.OutCubic } }
 
   Column {
@@ -41,13 +41,15 @@ Item {
       height: 44
       anchors.horizontalCenter: parent.horizontalCenter
 
-      // 选中时的微弱环境背光
+      // 选中态：Omarchy selected fill
       Rectangle {
         anchors.centerIn: parent
         width: 38
         height: 38
-        radius: 19
-        color: cardRoot.isSelected ? Tokens.alpha(theme.text, 0.12) : "transparent"
+        radius: Tokens.corner(Style)
+        color: cardRoot.isSelected ? theme.selectedFill : "transparent"
+        border.width: cardRoot.isSelected ? Tokens.border.focus : 0
+        border.color: theme.selectedBorder
       }
 
       Image {
@@ -63,7 +65,7 @@ Item {
     Text {
       text: cardRoot.appName
       color: cardRoot.isSelected ? theme.textStrong : theme.text
-      font.pixelSize: 13
+      font.pixelSize: Style.font.body
       font.bold: true
       font.family: Style.font.family
       font.letterSpacing: 0.8
@@ -76,9 +78,9 @@ Item {
     Text {
       text: cardRoot.isSelected ? "ACTIVE" : ("[" + cardRoot.shortcutKey + "]")
       color: cardRoot.isSelected ? theme.accent : theme.textMuted
-      font.pixelSize: 10
+      font.pixelSize: Style.font.caption
       font.bold: true
-      font.family: Tokens.font.mono
+      font.family: Style.font.family
       font.letterSpacing: 1
       anchors.horizontalCenter: parent.horizontalCenter
     }

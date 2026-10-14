@@ -150,11 +150,11 @@ Item {
   property color background: Color.menu.background
   property color foreground: Color.menu.text
   property color border: Color.menu.border
-  property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
-  property color scrim: Color.menu.scrim
+  property var borderSpec: Border.surfaceSpec("popups", "border", root.theme.popupBorder, Tokens.popup.border)
+  property color scrim: root.theme.menuScrim
   property color selectedBackground: Color.menu.selectedBackground
   property color selectedText: Color.menu.selectedText
-  readonly property color glassColor: Util.alpha(Color.menu.background, 0.90)
+  readonly property color glassColor: root.theme.popupBg  // Omarchy popups: opaque
   readonly property int cornerRadius: Style.cornerRadius
 
   readonly property color accent: Color.accent || root.theme.accent
@@ -528,7 +528,7 @@ Item {
 
     width: parent ? parent.width : 0
     implicitHeight: Style.space(32)
-    radius: Tokens.radius.chip
+    radius: Tokens.corner(Style)
     color: "transparent"
 
     Rectangle {
@@ -550,7 +550,7 @@ Item {
 
     Rectangle {
       anchors { left: parent.left; leftMargin: Style.space(4); verticalCenter: parent.verticalCenter }
-      width: Style.space(4); height: parent.height - Style.space(8); radius: Tokens.radius.chip
+      width: Style.space(4); height: parent.height - Style.space(8); radius: Tokens.corner(Style)
       color: rankRow.barColor
     }
 
@@ -589,7 +589,7 @@ Item {
 
     Rectangle {
       anchors.fill: parent
-      radius: height / 2
+      radius: Tokens.corner(Style)
       color: tgl.checked
         ? Util.alpha(root.okColor, 0.85)
         : Util.alpha(root.foreground, 0.16)
@@ -648,9 +648,8 @@ Item {
       color: root.glassColor
       borderSpec: root.borderSpec
       padding: Style.space(20)
-      scale: root.opened ? 1.0 : 0.96
+      scale: 1.0
       opacity: root.opened ? 1.0 : 0.0
-      Behavior on scale { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutCubic } }
       Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal } }
 
       MouseArea {
@@ -713,12 +712,13 @@ Item {
               id: closeBtn
               width: Style.space(28)
               height: Style.space(28)
-              radius: Tokens.radius.chip
+              radius: Tokens.corner(Style)
               color: closeHover.containsMouse ? Util.alpha(root.foreground, 0.12) : "transparent"
               anchors.verticalCenter: parent.verticalCenter
               anchors.right: parent.right
 
               Text {
+                font.family: Style.font.family
                 text: "✕"
                 font.pixelSize: Style.font.body
                 color: root.foreground
@@ -740,7 +740,7 @@ Item {
             id: tabBar
             width: parent.width
             height: Style.space(46)
-            radius: height / 2
+            radius: Tokens.corner(Style)
             color: root.chipColor
             border.width: 1
             border.color: root.hairline
@@ -751,10 +751,10 @@ Item {
               id: tabPill
               width: tabBar.unit - Style.space(8)
               height: parent.height - Style.space(8)
-              radius: height / 2
-              color: Util.alpha(root.foreground, 0.10)
-              border.width: 1
-              border.color: Util.alpha(root.foreground, 0.08)
+              radius: Tokens.corner(Style)
+              color: root.theme.selectedFill
+              border.width: Tokens.border.focus
+              border.color: root.theme.selectedBorder
               x: Style.space(4) + root.activeTab * tabBar.unit
               y: Style.space(4)
               Behavior on x { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutCubic } }
@@ -780,7 +780,7 @@ Item {
                     font.pixelSize: root.activeTab === tabCell.index ? Style.font.body : Style.font.bodySmall
                     font.bold: root.activeTab === tabCell.index
                     color: root.activeTab === tabCell.index
-                      ? root.foreground
+                      ? root.theme.selectedText
                       : Util.alpha(root.foreground, 0.60)
                     Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
                     Behavior on font.pixelSize { NumberAnimation { duration: Tokens.motion.normal } }
@@ -801,7 +801,7 @@ Item {
           Rectangle {
             width: parent.width
             height: Style.space(40)
-            radius: Style.cornerRadius
+            radius: Tokens.corner(Style)
             color: Util.alpha(root.foreground, 0.04)
             border.width: 1
             border.color: Util.alpha(root.foreground, 0.08)
@@ -812,7 +812,7 @@ Item {
 
               Rectangle {
                 id: engineDot
-                width: 8; height: 8; radius: Tokens.radius.chip
+                width: 8; height: 8; radius: Tokens.corner(Style)
                 color: root.engineRunning ? root.okColor : root.dangerColor
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
@@ -824,7 +824,7 @@ Item {
                 visible: root.engineRunning
                 width: enginePillText.implicitWidth + Style.space(14)
                 height: Style.space(22)
-                radius: height / 2
+                radius: Tokens.corner(Style)
                 color: Util.alpha(root.okColor, 0.12)
                 border.width: 1
                 border.color: Util.alpha(root.okColor, 0.35)
@@ -834,7 +834,7 @@ Item {
                   anchors.centerIn: parent
                   text: "● 内存热生效"
                   font.family: Style.font.family
-                  font.pixelSize: 10
+                  font.pixelSize: Style.font.caption
                   font.bold: true
                   color: root.okColor
                 }
@@ -874,10 +874,9 @@ Item {
             id: profilesTab
             anchors.fill: parent
             opacity: root.activeTab === 0 ? 1.0 : 0.0
-            scale: root.activeTab === 0 ? 1.0 : 0.985
+            scale: 1.0
             visible: root.activeTab === 0 || opacity > 0.0
             Behavior on opacity { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
-            Behavior on scale { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -915,9 +914,9 @@ Item {
                       readonly property bool isActive: root.currentMode === modelData.id
                       Layout.fillWidth: true
                       Layout.preferredHeight: Style.space(148)
-                      radius: Style.cornerRadius
+                      radius: Tokens.corner(Style)
                       color: isActive
-                        ? Util.alpha(modelData.color, 0.14)
+                        ? root.theme.selectedFill
                         : modeCardHover.containsMouse
                           ? Util.alpha(root.foreground, 0.07)
                           : Util.alpha(root.foreground, 0.03)
@@ -927,21 +926,11 @@ Item {
                         : modeCardHover.containsMouse
                           ? Util.alpha(modelData.color, 0.55)
                           : Util.alpha(root.foreground, 0.12)
-                      scale: modeCardHover.containsMouse ? 1.015 : 1.0
+                      scale: 1.0
                       z: modeCardHover.containsMouse ? 2 : 1
-                      Behavior on scale { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutCubic } }
                       Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
                       Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
-                      // 悬停阴影升起（伪影层，零 GPU 图层开销）
-                      Rectangle {
-                        anchors { fill: parent; topMargin: Style.space(6); margins: Style.space(3) }
-                        radius: parent.radius
-                        color: root.theme.shadow
-                        opacity: modeCardHover.containsMouse && !modeCard.isActive ? 0.25 : 0.0
-                        z: -1
-                        Behavior on opacity { NumberAnimation { duration: Tokens.motion.slow } }
-                      }
 
                       MouseArea {
                         id: modeCardHover
@@ -956,14 +945,15 @@ Item {
                         id: modeBadge
                         x: Style.space(13); y: Style.space(13)
                         width: Style.space(38); height: Style.space(38)
-                        radius: Style.cornerRadius
+                        radius: Tokens.corner(Style)
                         color: Util.alpha(modelData.color, 0.25)
                         border.width: 1
                         border.color: Util.alpha(modelData.color, 0.35)
 
                         Text {
+                          font.family: Style.font.family
                           text: modelData.icon
-                          font.pixelSize: 17
+                          font.pixelSize: Style.font.heading
                           font.bold: true
                           color: modelData.color
                           anchors.centerIn: parent
@@ -974,7 +964,7 @@ Item {
                         id: modeKeycap
                         anchors { right: parent.right; rightMargin: Style.space(11); top: parent.top; topMargin: Style.space(11) }
                         width: Style.space(20); height: Style.space(20)
-                        radius: Tokens.radius.chip
+                        radius: Tokens.corner(Style)
                         visible: !modeCard.isActive
                         color: Util.alpha(root.foreground, 0.08)
                         border.width: 1
@@ -984,7 +974,7 @@ Item {
                           anchors.centerIn: parent
                           text: modeCard.index + 1
                           font.family: Style.font.family
-                          font.pixelSize: 10
+                          font.pixelSize: Style.font.caption
                           font.bold: true
                           color: Util.alpha(root.foreground, 0.75)
                         }
@@ -997,7 +987,7 @@ Item {
                         anchors { right: parent.right; rightMargin: Style.space(11); top: parent.top; topMargin: Style.space(11) }
                         width: activePillText.implicitWidth + Style.space(12)
                         height: activePillText.implicitHeight + Style.space(6)
-                        radius: Tokens.radius.chip
+                        radius: Tokens.corner(Style)
                         color: modelData.color
 
                         Text {
@@ -1005,7 +995,7 @@ Item {
                           anchors.centerIn: parent
                           text: "当前激活"
                           font.family: Style.font.family
-                          font.pixelSize: 10
+                          font.pixelSize: Style.font.caption
                           font.bold: true
                           color: root.theme.onAccent
                         }
@@ -1070,10 +1060,9 @@ Item {
             id: prefsTab
             anchors.fill: parent
             opacity: root.activeTab === 1 ? 1.0 : 0.0
-            scale: root.activeTab === 1 ? 1.0 : 0.985
+            scale: 1.0
             visible: root.activeTab === 1 || opacity > 0.0
             Behavior on opacity { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
-            Behavior on scale { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -1092,7 +1081,7 @@ Item {
                   id: persistCard
                   width: parent.width
                   height: persistCardBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
+                  radius: Tokens.corner(Style)
                   color: Util.alpha(root.foreground, 0.04)
                   border.width: 1
                   border.color: root.persistEnabled ? Util.alpha(root.okColor, 0.45) : root.hairline
@@ -1117,6 +1106,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
 
                         Text {
+                          font.family: Style.font.family
                           anchors.verticalCenter: parent.verticalCenter
                           text: "💾"
                           font.pixelSize: Style.font.body
@@ -1154,7 +1144,7 @@ Item {
                     Rectangle {
                       width: parent.width
                       height: persistStatusText.implicitHeight + Style.space(12)
-                      radius: Tokens.radius.chip
+                      radius: Tokens.corner(Style)
                       color: Util.alpha(root.foreground, 0.05)
 
                       Text {
@@ -1180,7 +1170,7 @@ Item {
                 Rectangle {
                   width: parent.width
                   height: snapCardBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
+                  radius: Tokens.corner(Style)
                   color: Util.alpha(root.foreground, 0.04)
                   border.width: 1
                   border.color: root.hairline
@@ -1197,6 +1187,7 @@ Item {
                     Row {
                       spacing: Style.space(8)
                       Text {
+                        font.family: Style.font.family
                         anchors.verticalCenter: parent.verticalCenter
                         text: "🧲"
                         font.pixelSize: Style.font.body
@@ -1223,7 +1214,7 @@ Item {
                     Rectangle {
                       width: parent.width
                       height: Style.space(38)
-                      radius: Style.cornerRadius
+                      radius: Tokens.corner(Style)
                       color: snapBtnHover.containsMouse ? Util.alpha(root.accent, 0.22) : Util.alpha(root.accent, 0.10)
                       border.width: 1
                       border.color: snapBtnHover.containsMouse ? root.accent : Util.alpha(root.accent, 0.4)
@@ -1254,7 +1245,7 @@ Item {
                 Rectangle {
                   width: parent.width
                   height: restoreCardBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
+                  radius: Tokens.corner(Style)
                   color: Util.alpha(root.foreground, 0.04)
                   border.width: 1
                   border.color: restoreCardHover.containsMouse ? Util.alpha(root.dangerColor, 0.5) : root.hairline
@@ -1278,6 +1269,7 @@ Item {
                     Row {
                       spacing: Style.space(8)
                       Text {
+                        font.family: Style.font.family
                         anchors.verticalCenter: parent.verticalCenter
                         text: "↺"
                         font.pixelSize: Style.font.body
@@ -1296,13 +1288,13 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "R"
                         font.family: Style.font.family
-                        font.pixelSize: 9
+                        font.pixelSize: Style.font.caption
                         font.bold: true
                         color: Util.alpha(root.foreground, 0.55)
                         padding: 3
                         Rectangle {
                           anchors.fill: parent
-                          radius: Tokens.radius.chip
+                          radius: Tokens.corner(Style)
                           color: Util.alpha(root.foreground, 0.08)
                           border.width: 1
                           border.color: Util.alpha(root.foreground, 0.18)
@@ -1322,7 +1314,7 @@ Item {
                     Rectangle {
                       width: parent.width
                       height: Style.space(38)
-                      radius: Style.cornerRadius
+                      radius: Tokens.corner(Style)
                       color: restoreBtnHover.containsMouse ? Util.alpha(root.dangerColor, 0.20) : Util.alpha(root.dangerColor, 0.08)
                       border.width: 1
                       border.color: restoreBtnHover.containsMouse ? root.dangerColor : Util.alpha(root.dangerColor, 0.4)
@@ -1353,7 +1345,7 @@ Item {
                 Rectangle {
                   width: parent.width
                   height: Style.space(38)
-                  radius: Style.cornerRadius
+                  radius: Tokens.corner(Style)
                   color: sheetBtnHover.containsMouse ? Util.alpha(root.foreground, 0.12) : Util.alpha(root.foreground, 0.06)
                   border.width: 1
                   border.color: Util.alpha(root.foreground, 0.15)
@@ -1384,10 +1376,9 @@ Item {
             id: analyticsTab
             anchors.fill: parent
             opacity: root.activeTab === 2 ? 1.0 : 0.0
-            scale: root.activeTab === 2 ? 1.0 : 0.985
+            scale: 1.0
             visible: root.activeTab === 2 || opacity > 0.0
             Behavior on opacity { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
-            Behavior on scale { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -1405,7 +1396,7 @@ Item {
                 Rectangle {
                   width: parent.width
                   height: statsSummaryBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
+                  radius: Tokens.corner(Style)
                   color: Util.alpha(root.foreground, 0.04)
                   border.width: 1
                   border.color: root.hairline
@@ -1422,6 +1413,7 @@ Item {
                     Row {
                       spacing: Style.space(8)
                       Text {
+                        font.family: Style.font.family
                         anchors.verticalCenter: parent.verticalCenter
                         text: "📈"
                         font.pixelSize: Style.font.body
@@ -1466,7 +1458,7 @@ Item {
                           required property var modelData
                           width: (analyticsCol.width - Style.space(28) - Style.space(16)) / 3
                           height: Style.space(72)
-                          radius: Tokens.radius.chip
+                          radius: Tokens.corner(Style)
                           color: root.chipColor
                           border.width: 1
                           border.color: root.hairline
@@ -1487,7 +1479,7 @@ Item {
                               anchors.horizontalCenter: parent.horizontalCenter
                               text: modelData.label
                               font.family: Style.font.family
-                              font.pixelSize: 10
+                              font.pixelSize: Style.font.caption
                               color: Util.alpha(root.foreground, 0.6)
                             }
                           }
@@ -1501,7 +1493,7 @@ Item {
                 Rectangle {
                   width: parent.width
                   height: switchRankBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
+                  radius: Tokens.corner(Style)
                   color: Util.alpha(root.foreground, 0.04)
                   border.width: 1
                   border.color: root.hairline
@@ -1523,6 +1515,7 @@ Item {
                         spacing: Style.space(8)
                         anchors.left: parent.left
                         Text {
+                          font.family: Style.font.family
                           anchors.verticalCenter: parent.verticalCenter
                           text: "🔁"
                           font.pixelSize: Style.font.bodySmall
@@ -1541,7 +1534,7 @@ Item {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                         text: root.statsLoaded ? ("共 " + root.statsSwitchTotal + " 次") : ""
                         font.family: Style.font.family
-                        font.pixelSize: 10
+                        font.pixelSize: Style.font.caption
                         color: Util.alpha(root.foreground, 0.55)
                       }
                     }
@@ -1583,7 +1576,7 @@ Item {
                 Rectangle {
                   width: parent.width
                   height: snapRankBody.implicitHeight + Style.space(28)
-                  radius: Style.cornerRadius
+                  radius: Tokens.corner(Style)
                   color: Util.alpha(root.foreground, 0.04)
                   border.width: 1
                   border.color: root.hairline
@@ -1605,6 +1598,7 @@ Item {
                         spacing: Style.space(8)
                         anchors.left: parent.left
                         Text {
+                          font.family: Style.font.family
                           anchors.verticalCenter: parent.verticalCenter
                           text: "🧭"
                           font.pixelSize: Style.font.bodySmall
@@ -1623,7 +1617,7 @@ Item {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                         text: root.statsLoaded ? ("共 " + root.statsSnapTotal + " 次") : ""
                         font.family: Style.font.family
-                        font.pixelSize: 10
+                        font.pixelSize: Style.font.caption
                         color: Util.alpha(root.foreground, 0.55)
                       }
                     }
@@ -1664,7 +1658,7 @@ Item {
                 Rectangle {
                   width: parent.width
                   height: Style.space(38)
-                  radius: Style.cornerRadius
+                  radius: Tokens.corner(Style)
                   color: statsResetHover.containsMouse ? Util.alpha(root.dangerColor, 0.16) : "transparent"
                   border.width: 1
                   border.color: Util.alpha(root.dangerColor, 0.4)
@@ -1694,7 +1688,7 @@ Item {
                   width: parent.width
                   text: "统计仅为本机聚合计数（~/.config/omnipal/stats.json）· 零按键内容记录 · 零网络上传"
                   font.family: Style.font.family
-                  font.pixelSize: 10
+                  font.pixelSize: Style.font.caption
                   color: Util.alpha(root.foreground, 0.45)
                   wrapMode: Text.Wrap
                   horizontalAlignment: Text.AlignHCenter
@@ -1727,7 +1721,7 @@ Item {
                 Rectangle {
                   width: parent.width
                   height: Style.space(84)
-                  radius: Tokens.radius.md
+                  radius: Tokens.corner(Style)
                   color: Util.alpha(root.foreground, 0.04)
                   border.width: 1
                   border.color: root.hairline
@@ -1748,7 +1742,7 @@ Item {
                       }
                       Rectangle {
                         width: Style.space(56); height: Style.space(22)
-                        radius: Tokens.radius.sm
+                        radius: Tokens.corner(Style)
                         color: root.appRulesEnabled ? Util.alpha(root.okColor, 0.25) : root.chipColor
                         border.width: 1
                         border.color: root.appRulesEnabled ? root.okColor : root.hairline
@@ -1782,7 +1776,7 @@ Item {
                           required property var modelData
                           readonly property bool picked: (root.appRulesDefault || "none") === modelData.id
                           width: defLabel.implicitWidth + Style.space(14); height: Style.space(22)
-                          radius: Tokens.radius.sm
+                          radius: Tokens.corner(Style)
                           color: picked ? Util.alpha(root.accent, 0.22) : root.chipColor
                           border.width: 1
                           border.color: picked ? root.accent : root.hairline
@@ -1816,7 +1810,7 @@ Item {
                       && root.appRuleMatch.rule["class"] === modelData["class"]
                     width: rulesCol.width
                     height: Style.space(40)
-                    radius: Tokens.radius.md
+                    radius: Tokens.corner(Style)
                     color: active ? Util.alpha(root.accent, 0.12) : root.chipColor
                     border.width: 1
                     border.color: active ? root.accent : root.hairline
@@ -1833,7 +1827,7 @@ Item {
                       }
                       Text {
                         text: ruleRow.modelData["class"]
-                        font.family: Tokens.font.mono
+                        font.family: Style.font.family
                         font.pixelSize: Style.font.body
                         color: root.foreground
                       }
@@ -1863,7 +1857,7 @@ Item {
                         delegate: Rectangle {
                           required property var modelData
                           width: btnText.implicitWidth + Style.space(14); height: Style.space(24)
-                          radius: Tokens.radius.sm
+                          radius: Tokens.corner(Style)
                           color: btnMouse.containsMouse ? Util.alpha(modelData.danger ? root.dangerColor : root.foreground, 0.15) : "transparent"
                           border.width: 1
                           border.color: modelData.danger ? root.dangerColor : root.hairline
@@ -1902,7 +1896,7 @@ Item {
                 Rectangle {
                   width: parent.width
                   height: Style.space(84)
-                  radius: Tokens.radius.md
+                  radius: Tokens.corner(Style)
                   color: Util.alpha(root.foreground, 0.04)
                   border.width: 1
                   border.color: root.hairline
@@ -1915,7 +1909,7 @@ Item {
                       spacing: Style.space(8)
                       Rectangle {
                         width: Style.space(180); height: Style.space(26)
-                        radius: Tokens.radius.sm
+                        radius: Tokens.corner(Style)
                         color: root.chipColor
                         border.width: 1
                         border.color: classInput.activeFocus ? root.accent : root.hairline
@@ -1925,11 +1919,12 @@ Item {
                           verticalAlignment: TextInput.AlignVCenter
                           text: root.newRuleClass
                           onTextEdited: root.newRuleClass = text
-                          font.family: Tokens.font.mono
+                          font.family: Style.font.family
                           font.pixelSize: Style.font.body
                           color: root.foreground
                           clip: true
                           Text {
+                            font.family: Style.font.family
                             anchors.verticalCenter: parent.verticalCenter
                             visible: classInput.text === ""
                             text: "窗口类名"
@@ -1940,7 +1935,7 @@ Item {
                       }
                       Rectangle {
                         width: curText.implicitWidth + Style.space(14); height: Style.space(26)
-                        radius: Tokens.radius.sm
+                        radius: Tokens.corner(Style)
                         color: root.chipColor
                         border.width: 1
                         border.color: root.hairline
@@ -1964,7 +1959,7 @@ Item {
                           required property var modelData
                           readonly property bool picked: root.newRuleMatch === modelData.id
                           width: mText.implicitWidth + Style.space(14); height: Style.space(26)
-                          radius: Tokens.radius.sm
+                          radius: Tokens.corner(Style)
                           color: picked ? Util.alpha(root.accent, 0.22) : root.chipColor
                           border.width: 1
                           border.color: picked ? root.accent : root.hairline
@@ -1994,7 +1989,7 @@ Item {
                           required property int index
                           readonly property bool picked: root.newRuleMode === modelData.id
                           width: nmText.implicitWidth + Style.space(14); height: Style.space(26)
-                          radius: Tokens.radius.sm
+                          radius: Tokens.corner(Style)
                           color: picked ? Util.alpha((modelData.color || Tokens.modeColor(modelData.id, index)), 0.25) : root.chipColor
                           border.width: 1
                           border.color: picked ? (modelData.color || Tokens.modeColor(modelData.id, index)) : root.hairline
@@ -2016,7 +2011,7 @@ Item {
                       Rectangle {
                         readonly property bool ready: root.newRuleClass.trim() !== "" && root.newRuleMode !== ""
                         width: addText.implicitWidth + Style.space(18); height: Style.space(26)
-                        radius: Tokens.radius.sm
+                        radius: Tokens.corner(Style)
                         color: ready ? root.accent : root.chipColor
                         opacity: ready ? 1.0 : 0.5
                         Text {

@@ -69,29 +69,23 @@ Item {
       from: 0.4
       to: 1.0
       duration: 350
-      easing.type: Easing.OutBack
+      easing.type: Easing.OutCubic
     }
   }
 
-  // 1. 引力场背光辉光 (Gravitational Glow)
+  // 1. 投放目标环（平面描边，无辉光）
   Rectangle {
     anchors.centerIn: parent
     width: blackHoleRoot.isDragOver ? 260 : 200
     height: width
     radius: width / 2
     color: "transparent"
-    border.width: blackHoleRoot.isDragOver ? 3 : 1
+    border.width: blackHoleRoot.isDragOver ? Tokens.border.focus : Tokens.border.hair
     border.color: blackHoleRoot.isDragOver ? theme.danger : Tokens.alpha(theme.special, 0.25)
 
     Behavior on width { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutCubic } }
     Behavior on border.color { ColorAnimation { duration: Tokens.motion.slow } }
 
-    Rectangle {
-      anchors.fill: parent
-      radius: width / 2
-      color: blackHoleRoot.isDragOver ? Tokens.alpha(theme.danger, 0.15) : Tokens.alpha(theme.special, 0.06)
-      Behavior on color { ColorAnimation { duration: Tokens.motion.slow } }
-    }
   }
 
   // 2. 动态旋转吸积盘 (Accretion Disk Canvas)
@@ -116,22 +110,11 @@ Item {
       ctx.clearRect(0, 0, w, h)
 
       var isOver = blackHoleRoot.isDragOver
-      var grad = ctx.createRadialGradient(cx, cy, 35, cx, cy, 115)
-      if (isOver) {
-        grad.addColorStop(0, "rgba(255, 0, 128, 0.9)")
-        grad.addColorStop(0.3, "rgba(255, 119, 0, 0.7)")
-        grad.addColorStop(0.7, "rgba(168, 85, 247, 0.4)")
-        grad.addColorStop(1, "rgba(0, 0, 0, 0)")
-      } else {
-        grad.addColorStop(0, "rgba(168, 85, 247, 0.6)")
-        grad.addColorStop(0.4, "rgba(59, 130, 246, 0.4)")
-        grad.addColorStop(0.8, "rgba(236, 72, 153, 0.2)")
-        grad.addColorStop(1, "rgba(0, 0, 0, 0)")
-      }
+      var fill = isOver ? Tokens.alpha(theme.danger, 0.12) : Tokens.alpha(theme.special, 0.08)
 
       ctx.beginPath()
       ctx.arc(cx, cy, 115, 0, 2 * Math.PI)
-      ctx.fillStyle = grad
+      ctx.fillStyle = fill
       ctx.fill()
 
       // 绘制引力透镜弯曲弧线
@@ -141,7 +124,7 @@ Item {
         var a = (i * Math.PI * 2) / arcCount
         ctx.beginPath()
         ctx.arc(cx, cy, 75 + (i % 3) * 10, a, a + Math.PI * 0.45)
-        ctx.strokeStyle = isOver ? "rgba(255, 230, 180, 0.8)" : "rgba(192, 132, 252, 0.5)"
+        ctx.strokeStyle = isOver ? theme.danger : Tokens.alpha(theme.special, 0.6)
         ctx.stroke()
       }
     }
@@ -153,7 +136,7 @@ Item {
     anchors.centerIn: parent
     width: 160
     height: 160
-    radius: 80
+    radius: width / 2
     color: "transparent"
     border.width: 3
     border.color: theme.info
@@ -168,20 +151,20 @@ Item {
     height: width
     radius: width / 2
     color: theme.sunken
-    border.width: blackHoleRoot.isDragOver ? 3.5 : 2
+    border.width: Tokens.border.normal
     border.color: blackHoleRoot.isDragOver ? theme.info : theme.textStrong
 
     Behavior on width { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutCubic } }
     Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
-    // 中心微型光子环 (Photon Ring)
+    // 中心内环
     Rectangle {
       anchors.centerIn: parent
       width: parent.width * 0.55
       height: width
       radius: width / 2
-      color: theme.shadow
-      border.width: 1.5
+      color: theme.sunken
+      border.width: Tokens.border.hair
       border.color: blackHoleRoot.isDragOver ? theme.accent : Tokens.alpha(theme.text, 0.4)
     }
   }
@@ -200,7 +183,7 @@ Item {
       Rectangle {
         width: 7
         height: 7
-        radius: 3.5
+        radius: Tokens.corner(Style)
         color: blackHoleRoot.isDragOver ? theme.danger : theme.special
         anchors.verticalCenter: parent.verticalCenter
         SequentialAnimation on opacity {
@@ -214,9 +197,9 @@ Item {
       Text {
         text: blackHoleRoot.isDragOver ? "EVENT HORIZON CAPTURE" : "BLACK HOLE PORTAL"
         color: blackHoleRoot.isDragOver ? theme.danger : theme.text
-        font.pixelSize: 11
+        font.pixelSize: Style.font.bodySmall
         font.bold: true
-        font.family: Tokens.font.mono
+        font.family: Style.font.family
       }
     }
 
@@ -224,7 +207,7 @@ Item {
       anchors.horizontalCenter: parent.horizontalCenter
       text: blackHoleRoot.isDragOver ? ("RELEASE → MOVE TO WORKSPACE [" + blackHoleRoot.targetWorkspaceId + "]") : ("DRAG HERE → WORKSPACE [" + blackHoleRoot.targetWorkspaceId + "]")
       color: blackHoleRoot.isDragOver ? theme.info : theme.textMuted
-      font.pixelSize: 10
+      font.pixelSize: Style.font.caption
       font.bold: true
       font.family: Style.font.family
     }

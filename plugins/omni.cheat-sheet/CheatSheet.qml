@@ -138,10 +138,10 @@ Item {
   // ShaderEffect 通道，避免常驻 GPU 开销。
   property color foreground: Color.menu.text
   property color border: Color.menu.border
-  property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
-  property color scrim: Color.menu.scrim
+  property var borderSpec: Border.surfaceSpec("popups", "border", root.theme.popupBorder, Tokens.popup.border)
+  property color scrim: root.theme.menuScrim
   property color accent: Color.menu.selectedText
-  readonly property color glassColor: Util.alpha(Color.menu.background, 0.86)
+  readonly property color glassColor: root.theme.popupBg  // Omarchy popups: opaque
   readonly property color hairline: Util.alpha(Color.menu.text, 0.14)
   readonly property color chipColor: Util.alpha(Color.menu.text, 0.07)
   readonly property string fontFamily: Style.font.menuFamily
@@ -494,11 +494,11 @@ Item {
 
               height: Style.space(26)
               width: pillInner.implicitWidth + Style.space(16)
-              radius: height / 2
-              color: selected ? Util.alpha(root.accent, 0.18)
+              radius: Tokens.corner(Style)
+              color: selected ? root.theme.selectedFill
                 : pillHover.containsMouse ? Util.alpha(root.foreground, 0.08) : "transparent"
-              border.width: 1
-              border.color: selected ? Util.alpha(root.accent, 0.6) : root.hairline
+              border.width: selected ? Tokens.border.focus : Tokens.border.hair
+              border.color: selected ? root.theme.selectedBorder : root.hairline
               Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
               Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
@@ -522,7 +522,7 @@ Item {
                   visible: previewPill.engineActive
                   width: Style.space(5)
                   height: Style.space(5)
-                  radius: Tokens.radius.chip
+                  radius: Tokens.corner(Style)
                   color: root.theme.ok
                   anchors.verticalCenter: parent.verticalCenter
                 }
@@ -571,7 +571,7 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           width: Style.space(160)
           height: Style.space(26)
-          radius: height / 2
+          radius: Tokens.corner(Style)
           color: Util.alpha(root.foreground, 0.06)
           borderSpec: root.borderSpec
           padding: Style.space(4)
@@ -581,8 +581,9 @@ Item {
             spacing: Style.space(6)
 
             Text {
+              font.family: Style.font.family
               text: "🔍"
-              font.pixelSize: 10
+              font.pixelSize: Style.font.caption
               color: Util.alpha(root.foreground, 0.5)
               anchors.verticalCenter: parent.verticalCenter
             }
@@ -654,11 +655,11 @@ Item {
 
               width: catPillRow.implicitWidth + Style.space(14)
               height: Style.space(24)
-              radius: height / 2
-              color: selected ? Util.alpha(root.accent, 0.16)
+              radius: Tokens.corner(Style)
+              color: selected ? root.theme.selectedFill
                 : catPillHover.containsMouse ? Util.alpha(root.foreground, 0.07) : "transparent"
-              border.width: 1
-              border.color: selected ? Util.alpha(root.accent, 0.55) : root.hairline
+              border.width: selected ? Tokens.border.focus : Tokens.border.hair
+              border.color: selected ? root.theme.selectedBorder : root.hairline
               Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
               Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
@@ -681,7 +682,7 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                   width: Math.max(Style.space(15), catCountLabel.implicitWidth + Style.space(6))
                   height: Style.space(14)
-                  radius: Tokens.radius.chip
+                  radius: Tokens.corner(Style)
                   color: catPill.selected ? Util.alpha(root.accent, 0.25) : root.chipColor
 
                   Text {
@@ -751,7 +752,7 @@ Item {
                 Rectangle {
                   width: Style.space(3)
                   height: Style.font.subtitle
-                  radius: Math.min(2, width / 2)
+                  radius: Tokens.corner(Style)
                   anchors.verticalCenter: parent.verticalCenter
                   color: Util.alpha(root.accent, 0.75)
                 }
@@ -824,7 +825,7 @@ Item {
                           width: keyLabel.implicitWidth + Style.space(13)
                           height: Math.max(Style.space(21), Style.font.body + Style.space(7))
                           // Omarchy key-cap chip (Tokens): flat fill, 1px border, accent when held
-                          radius: Tokens.radius.chip
+                          radius: Tokens.corner(Style)
                           border.width: keyCap.capLive ? Tokens.border.focus : Tokens.border.hair
                           border.color: keyCap.capLive ? root.theme.accent : root.theme.chipBorder
                           color: keyCap.capLive ? root.theme.selectionFill : root.theme.chipFill

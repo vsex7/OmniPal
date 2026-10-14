@@ -351,20 +351,11 @@ Item {
       anchors.horizontalCenter: parent.horizontalCenter
       width: contentRow.implicitWidth + Style.space(24)
       height: Style.space(64)
-      radius: Style.space(18)
-      color: Util.alpha(Color.menu.background, 0.88)
-      border.width: 1
-      border.color: Util.alpha(Color.menu.border, 0.5)
+      radius: Tokens.corner(Style)
+      color: root.theme.popupBg
+      border.width: Tokens.border.hair
+      border.color: root.theme.line
 
-      // 阴影微发光
-      Rectangle {
-        anchors.fill: parent
-        anchors.margins: -1
-        radius: parent.radius
-        color: "transparent"
-        border.width: 1
-        border.color: Util.alpha(Color.menu.text, 0.08)
-      }
 
       Row {
         id: contentRow
@@ -424,7 +415,6 @@ Item {
                   to: 0
                   duration: 430
                   easing.type: Easing.OutElastic
-                  easing.overshoot: 1.3
                 }
               }
 
@@ -436,7 +426,7 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: Style.space(42) * dockItemWrapper.iconScale
                 height: width
-                radius: Style.space(10)
+                radius: Tokens.corner(Style)
                 color: dockItemWrapper.waveFalloff > 0.02
                   ? Util.alpha(Color.menu.text, 0.16)
                   : Util.alpha(Color.menu.text, 0.08)
@@ -444,6 +434,7 @@ Item {
                 Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
 
                 Text {
+                  font.family: Style.font.family
                   text: dockItemWrapper.modelData.icon
                   font.pixelSize: Math.max(10, Math.round(iconBox.width * 0.43))
                   color: Color.menu.text
@@ -462,7 +453,7 @@ Item {
                   }
                   width: Math.max(Style.space(16), badgeText.implicitWidth + Style.space(8))
                   height: Style.space(16)
-                  radius: height / 2
+                  radius: Tokens.corner(Style)
                   color: root.dangerColor
                   border.width: 1
                   border.color: Util.alpha(Color.menu.background, 0.85)
@@ -472,7 +463,7 @@ Item {
                     anchors.centerIn: parent
                     text: dockItemWrapper.modelData.windowCount
                     font.family: Style.font.family
-                    font.pixelSize: 9
+                    font.pixelSize: Style.font.caption
                     font.bold: true
                     color: root.theme.textStrong
                   }
@@ -487,7 +478,7 @@ Item {
               anchors.horizontalCenter: parent.horizontalCenter
               width: Style.space(4)
               height: Style.space(4)
-              radius: Style.space(2)
+              radius: Tokens.corner(Style)
               color: Color.menu.text
             }
 
@@ -499,12 +490,13 @@ Item {
               anchors.horizontalCenter: parent.horizontalCenter
               width: tipText.implicitWidth + Style.space(12)
               height: tipText.implicitHeight + Style.space(6)
-              radius: Tokens.radius.chip
+              radius: Tokens.corner(Style)
               color: Util.alpha(Color.menu.background, 0.95)
               border.width: 1
               border.color: Util.alpha(Color.menu.border, 0.4)
 
               Text {
+                font.family: Style.font.family
                 id: tipText
                 text: dockItemWrapper.modelData.name
                 font.pixelSize: Style.font.caption
@@ -575,24 +567,15 @@ Item {
       // 悬于 Dock 胶囊条正上方（bar 高 64 + 底边距 12 + 间隙 10），并防止贴边溢出
       x: Math.max(Style.space(10), Math.min(anchorX - width / 2, cardPanel.width - width - Style.space(10)))
       y: cardPanel.height - Style.space(86) - height
-      radius: Style.space(14)
-      color: Util.alpha(Color.menu.background, 0.97)
-      border.width: 1
-      border.color: Util.alpha(Color.menu.border, 0.6)
+      radius: Tokens.corner(Style)
+      color: root.theme.popupBg
+      border.width: Tokens.popup.border
+      border.color: root.theme.popupBorder
       opacity: root.contextItem !== null ? 1 : 0
-      scale: root.contextItem !== null ? 1 : 0.92
+      scale: 1.0
       visible: root.contextItem !== null || opacity > 0
       Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutQuad } }
-      Behavior on scale { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutCubic } }
 
-      // 卡片投影
-      Rectangle {
-        anchors { fill: parent; margins: Style.space(3); topMargin: Style.space(8) }
-        radius: parent.radius
-        color: root.theme.shadow
-        opacity: 0.30
-        z: -1
-      }
 
       Column {
         id: contextCardCol
@@ -611,15 +594,16 @@ Item {
             anchors { left: parent.left; verticalCenter: parent.verticalCenter }
             width: Style.space(32)
             height: Style.space(32)
-            radius: Style.space(8)
+            radius: Tokens.corner(Style)
             color: Util.alpha(Color.menu.text, 0.09)
             border.width: 1
             border.color: Util.alpha(Color.menu.text, 0.10)
 
             Text {
+              font.family: Style.font.family
               anchors.centerIn: parent
               text: contextCard.shown ? contextCard.shown.icon : ""
-              font.pixelSize: 15
+              font.pixelSize: Style.font.title
               color: Color.menu.text
             }
           }
@@ -652,7 +636,7 @@ Item {
                 return "运行中 · " + n + " 个窗口" + (t ? " · " + t : "")
               }
               font.family: Style.font.family
-              font.pixelSize: 10
+              font.pixelSize: Style.font.caption
               color: Util.alpha(Color.menu.text, 0.55)
               elide: Text.ElideRight
             }
@@ -673,7 +657,7 @@ Item {
             required property var modelData
             width: parent.width
             height: Style.space(30)
-            radius: Tokens.radius.chip
+            radius: Tokens.corner(Style)
             color: cardRowHover.containsMouse
               ? Util.alpha(modelData.danger ? root.dangerColor : Color.menu.text, modelData.danger ? 0.14 : 0.09)
               : "transparent"
@@ -684,6 +668,7 @@ Item {
               spacing: Style.space(8)
 
               Text {
+                font.family: Style.font.family
                 anchors.verticalCenter: parent.verticalCenter
                 text: modelData.icon
                 font.pixelSize: Style.font.caption

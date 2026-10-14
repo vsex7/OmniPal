@@ -334,7 +334,7 @@ BarWidget {
             height: Style.space(34)
             implicitWidth: width
             implicitHeight: height
-            radius: Math.max(4, Style.cornerRadius)
+            radius: Tokens.corner(Style)
             color: root.engineRunning
               ? Tokens.alpha(root.currentColor, 0.15)
               : Tokens.alpha(Color.foreground, 0.08)
@@ -344,6 +344,7 @@ BarWidget {
               : Tokens.alpha(Color.foreground, 0.15)
 
             Text {
+              font.family: Style.font.family
               anchors.centerIn: parent
               text: root.engineRunning ? root.currentIcon : "⊘"
               font.pixelSize: Style.font.title
@@ -379,7 +380,7 @@ BarWidget {
               visible: root.engineRunning
               height: Style.space(16)
               width: heroBriefText.implicitWidth + Style.space(8)
-              radius: Style.space(8)
+              radius: Tokens.corner(Style)
               color: Tokens.alpha(root.currentColor, 0.18)
               anchors.verticalCenter: parent.verticalCenter
 
@@ -406,7 +407,7 @@ BarWidget {
               Rectangle {
                 width: Style.space(6)
                 height: Style.space(6)
-                radius: Style.space(3)
+                radius: Tokens.corner(Style)
                 color: root.engineRunning
                   ? (root.engineStatus === "active" ? root.theme.ok : root.theme.accent)
                   : Color.muted
@@ -425,6 +426,7 @@ BarWidget {
 
             // 分隔圆点
             Text {
+              font.family: Style.font.family
               text: "•"
               color: Qt.darker(Color.foreground, 1.8)
               font.pixelSize: Style.font.caption
@@ -439,7 +441,7 @@ BarWidget {
               Rectangle {
                 width: Style.space(6)
                 height: Style.space(6)
-                radius: Style.space(3)
+                radius: Tokens.corner(Style)
                 color: root.compositorConnected ? root.theme.ok : root.theme.danger
                 anchors.verticalCenter: parent.verticalCenter
               }
@@ -461,10 +463,11 @@ BarWidget {
           anchors.verticalCenter: parent.verticalCenter
           width: Style.space(22)
           height: Style.space(22)
-          radius: Math.max(2, Style.cornerRadius)
+          radius: Tokens.corner(Style)
           color: closeMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.foreground) : "transparent"
 
           Text {
+            font.family: Style.font.family
             text: "✕"
             color: closeMouse.containsMouse ? Color.accent : Qt.darker(Color.foreground, 1.3)
             font.pixelSize: Style.font.caption
@@ -511,7 +514,7 @@ BarWidget {
 
             Rectangle {
               anchors.fill: parent
-              radius: Math.max(2, Style.cornerRadius)
+              radius: Tokens.corner(Style)
               color: rowMouse.containsMouse
                 ? Style.hoverFillFor(Color.foreground, Color.accent)
                 : (profileRow.isActive ? Tokens.alpha(profileRow.itemColor, 0.12) : "transparent")
@@ -521,7 +524,7 @@ BarWidget {
               visible: profileRow.isActive
               width: Style.space(3)
               height: parent.height - Style.space(6)
-              radius: Style.space(1)
+              radius: Tokens.corner(Style)
               color: profileRow.itemColor
               anchors.left: parent.left
               anchors.leftMargin: Style.space(2)
@@ -529,6 +532,7 @@ BarWidget {
             }
 
             Text {
+              font.family: Style.font.family
               id: pIcon
               text: Model.resolveIcon(profileRow.modelData)
               color: profileRow.itemColor
@@ -607,7 +611,7 @@ BarWidget {
           width: effPolicyText.implicitWidth + Style.space(8)
           implicitWidth: width
           implicitHeight: height
-          radius: Style.space(8)
+          radius: Tokens.corner(Style)
           color: Tokens.alpha(root.currentColor, 0.18)
 
           Text {
@@ -631,7 +635,7 @@ BarWidget {
           width: parent.width
           height: Style.space(32)
           implicitHeight: height
-          radius: Math.max(3, Style.cornerRadius)
+          radius: Tokens.corner(Style)
           color: Tokens.alpha(Color.foreground, 0.06)
           border.width: 1
           border.color: Tokens.alpha(Color.foreground, 0.1)
@@ -662,13 +666,13 @@ BarWidget {
 
                 Rectangle {
                   anchors.fill: parent
-                  radius: Math.max(2, Style.cornerRadius - 1)
+                  radius: Tokens.corner(Style)
                   color: policySeg.isSelected
-                    ? Tokens.alpha(root.currentColor, 0.22)
+                    ? root.theme.selectedFill
                     : (policyMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent) : "transparent")
-                  border.width: policySeg.isSelected ? 1 : 0
+                  border.width: policySeg.isSelected ? Tokens.border.focus : 0
                   border.color: policySeg.isSelected
-                    ? Tokens.alpha(root.currentColor, 0.5)
+                    ? root.theme.selectedBorder
                     : "transparent"
 
                   Row {
@@ -676,14 +680,15 @@ BarWidget {
                     spacing: Style.space(4)
 
                     Text {
+                      font.family: Style.font.family
                       text: policySeg.modelData.icon
-                      color: policySeg.isSelected ? root.currentColor : (policyMouse.containsMouse ? Color.accent : Qt.darker(Color.foreground, 1.2))
+                      color: policySeg.isSelected ? root.theme.selectedText : (policyMouse.containsMouse ? Color.accent : Qt.darker(Color.foreground, 1.2))
                       font.pixelSize: Style.font.bodySmall
                     }
 
                     Text {
                       text: policySeg.modelData.name
-                      color: policySeg.isSelected ? root.currentColor : (policyMouse.containsMouse ? Color.accent : Color.foreground)
+                      color: policySeg.isSelected ? root.theme.selectedText : (policyMouse.containsMouse ? Color.accent : Color.foreground)
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                       font.bold: policySeg.isSelected
@@ -709,7 +714,7 @@ BarWidget {
         Rectangle {
           width: parent.width
           implicitHeight: Style.space(22)
-          radius: Math.max(2, Style.cornerRadius - 1)
+          radius: Tokens.corner(Style)
           color: Tokens.alpha(Color.foreground, 0.03)
 
           Item {
@@ -718,6 +723,7 @@ BarWidget {
             anchors.rightMargin: Style.space(6)
 
             Text {
+              font.family: Style.font.family
               id: infoIcon
               text: "ℹ"
               color: root.currentColor
@@ -848,11 +854,12 @@ BarWidget {
 
     Rectangle {
       anchors.fill: parent
-      radius: Math.max(2, Style.cornerRadius)
+      radius: Tokens.corner(Style)
       color: actionMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent) : "transparent"
     }
 
     Text {
+      font.family: Style.font.family
       id: rowIcon
       text: rowItem.iconText
       font.pixelSize: Style.font.bodySmall
