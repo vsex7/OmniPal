@@ -109,6 +109,12 @@ omni-profile stats --reset
 
 # 瞬间还原至 Omarchy 原生快捷键
 omni-profile restore
+
+# 导出一个模式分享给别人（不加 -o 则打印到终端）
+omni-profile export windows -o my-windows.json
+
+# 导入别人分享的模式（可用 --id 改名；含自定义命令时会先列出来让你确认）
+omni-profile import my-windows.json --id my-win
 ```
 
 ### 3. Quickshell 交互呼出

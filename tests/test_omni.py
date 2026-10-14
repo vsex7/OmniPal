@@ -994,5 +994,47 @@ class TestSwitchRollback(unittest.TestCase):
         self.assertFalse(self.engine.switch_mode("mac"))
         self.assertLess(len(calls), 6)
 
+
+class TestProfileExportImport(unittest.TestCase):
+    """omni-profile export/import round-trip, validation and safety guards."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.env = dict(os.environ, OMNIPAL_USER_PROFILES_DIR=str(Path(self._tmp.name) / "profiles"))
+        self.cli = [sys.executable, str(PROJECT_ROOT / "bin" / "omni-profile")]
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args, stdin=None):
+        return subprocess.run(self.cli + list(args), input=stdin, capture_output=True, text=True, env=self.env)
+
+    def test_round_trip_with_new_id(self):
+        out = Path(self._tmp.name) / "win.json"
+        self.assertEqual(self.run_cli("export", "windows", "-o", str(out)).returncode, 0)
+        data = json.loads(out.read_text(encoding="utf-8"))
+        self.assertFalse(any(k.startswith("_") for k in data))
+        r = self.run_cli("import", str(out), "--id", "my-win")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        saved = json.loads((Path(self.env["OMNIPAL_USER_PROFILES_DIR"]) / "my-win.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["id"], "my-win")
+        self.assertEqual(saved["bindings"], data["bindings"])
+
+    def test_refuses_builtin_name_bad_id_and_invalid_action(self):
+        out = Path(self._tmp.name) / "win.json"
+        self.run_cli("export", "windows", "-o", str(out))
+        self.assertNotEqual(self.run_cli("import", str(out)).returncode, 0)
+        self.assertNotEqual(self.run_cli("import", "-", stdin='{"id":"Bad ID","bindings":[]}').returncode, 0)
+        bad = '{"id":"b","bindings":[{"action":"no_such_action","key":"A"}]}'
+        self.assertNotEqual(self.run_cli("import", "-", stdin=bad).returncode, 0)
+        self.assertFalse(Path(self.env["OMNIPAL_USER_PROFILES_DIR"]).joinpath("b.json").exists())
+
+    def test_custom_command_requires_confirmation(self):
+        prof = '{"id":"cmdp","bindings":[{"action":"snap_left","mod":"SUPER","key":"F9","arg":"echo hi"}]}'
+        r = self.run_cli("import", "-", stdin=prof)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("echo hi", r.stdout)
+        self.assertEqual(self.run_cli("import", "-", "--yes", stdin=prof).returncode, 0)
+
 if __name__ == "__main__":
     unittest.main()
