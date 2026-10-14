@@ -26,23 +26,14 @@ omni-profile switch kde       # KDE Plasma 习惯
 omni-profile restore          # 回到 Omarchy 原生键位
 omni-profile cheatsheet       # 当前模式的快捷键
 omni-profile doctor           # 出问题时先跑这个
-omni-profile window-policy set follow-profile   # 窗口策略：follow-profile 跟随模式 / tiled 平铺 / floating 浮动
+omni-profile window-policy    # 查看各模式的平铺/浮动（窗口策略：跟随模式）
 ```
 
-日常操作都可以在 OmniPal 设置（`Super+Alt+I`）里完成：模式切换、窗口策略、配置持久化等。状态栏右键菜单同样提供常用功能（模式切换、窗口策略、速查表、贴靠布局、概览、切换下一模式、还原 Omarchy 原生模式、健康诊断、首次使用引导、打开设置），两处都可用。在设置里选择「Omarchy 原生模式」就是还原（等同 `omni-profile restore`）。
+日常操作都可以在 OmniPal 设置（`Super+Alt+I`）里完成：模式切换、配置持久化等。状态栏左键单击轮转到下一模式；右键菜单提供常用功能（模式切换、当前窗口策略、速查表、贴靠布局、概览、还原 Omarchy 原生模式、健康诊断、首次使用引导、打开设置），两处都可用。在设置里选择「Omarchy 原生模式」就是还原（等同 `omni-profile restore`）。
 
-### CLI 别名弃用
+### 窗口策略
 
-以下冗余写法仍可使用，但会在 stderr 打印弃用提示，后续版本将移除。请改用规范命令：
-
-| 已弃用 | 规范命令 |
-|---|---|
-| `omni-profile window-mode …` | `omni-profile window-policy …` |
-| `omni-profile window-policy tiled` / `tile` | `omni-profile window-policy set tiled` |
-| `omni-profile window-policy floating` / `float` | `omni-profile window-policy set floating` |
-| `omni-profile window-policy follow-profile` / `follow` / `follow_profile` | `omni-profile window-policy set follow-profile` |
-
-弃用提示只写到 stderr，stdout 与 `--json` 输出不变，脚本解析不受影响。
+窗口策略固定为「跟随模式」：每个模式文件里的 `window_mode`（`tiled` 平铺 / `floating` 浮动）决定该模式下新窗口的布局，没有全局覆盖。`omni-profile window-policy`（可加 `--json`）只读地列出每个模式的平铺/浮动以及当前生效值。旧版本保存的全局平铺/浮动覆盖会在守护进程启动时自动清除，改为跟随模式。
 
 ## 固定入口（所有模式通用）
 

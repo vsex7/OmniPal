@@ -47,30 +47,20 @@ Panel {
   property string engineStatus: "native"
   // Mirrors Panel.opened (PanelController); kept as a name for IPC/tests.
   readonly property bool panelOpen: root.opened
-  // Keyboard cursor over the panel rows: profiles, policies, actions, system, then 打开设置.
+  // Keyboard cursor over the panel rows: profiles, actions, system, then 打开设置.
   property bool cursorActive: false
   property int cursorIndex: 0
-  property string windowPolicy: "tiled"
   property string effectiveWindowMode: "tiled"
   property bool compositorConnected: false
   property var actionHints: ({})
   // 应用规则自动切换：state.json 的 auto = {app, mode, return_to}；手动切换会清除它
   property var autoInfo: null
   readonly property bool autoActive: root.autoInfo !== null
-  readonly property bool policyOverridden: Model.normalizePolicy(root.windowPolicy) !== "follow-profile"
   readonly property string autoText: root.autoActive
     ? ("自动 · 因为聚焦了 " + (root.autoInfo.app || "") + " · 离开后回到 " + root.modeNameOf(root.autoInfo.return_to || "omarchy"))
     : ""
 
   property var profiles: Model.fallbackProfiles()
-  // 菜单顺序与术语表一致：跟随模式（默认）/ 平铺 / 浮动；图标取自 Model.windowPolicies()
-  readonly property var policyOptions: ["follow-profile", "tiled", "floating"].map(function(id) {
-    var all = Model.windowPolicies()
-    var icon = ""
-    for (var i = 0; i < all.length; i++) if (all[i].id === id) icon = all[i].icon || ""
-    return { id: id, name: id === "follow-profile" ? "跟随模式" : (id === "tiled" ? "平铺" : "浮动"), icon: icon }
-  })
-
   function loadActionHints(rawText) {
     try {
       var rows = JSON.parse(rawText)
@@ -99,8 +89,7 @@ Panel {
       root.activeBindingsCount = data.active_bindings_count || 0
       root.engineStatus = data.status || (root.currentMode !== "omarchy" ? "active" : "native")
       root.currentBrief = (data.display && data.display.brief) || Model.defaultBrief(root.currentMode)
-      root.windowPolicy = Model.normalizePolicy(data.window_policy) || "tiled"
-      root.effectiveWindowMode = data.effective_window_mode || Model.computeEffectiveMode(root.windowPolicy, root.currentMode)
+      root.effectiveWindowMode = data.effective_window_mode || Model.effectiveWindowMode(root.currentMode, root.profiles)
       root.compositorConnected = (data.compositor_connected !== undefined)
         ? Boolean(data.compositor_connected)
         : (Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") !== "" && Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") !== undefined)
@@ -207,13 +196,11 @@ Panel {
     { icon: Icons.glyph.overview, label: "概览", hintKey: "task_view", run: "overview", closes: true }
   ]
   readonly property var systemRows: [
-    { icon: Icons.glyph.cycle, label: "切换下一模式", hintKey: "", run: "cycle", closes: false },
     { icon: Icons.glyph.restore, label: "还原 Omarchy 原生模式", hintKey: "", run: "restore", closes: false },
     { icon: Icons.glyph.doctor, label: "健康诊断", hintKey: "", run: "doctor", closes: true }
   ]
   readonly property var settingsRow: ({ icon: Icons.glyph.settings, label: "打开设置", hintKey: "omni_settings", run: "settings", closes: true })
-  readonly property int policyBase: root.profiles.length
-  readonly property int actionBase: root.policyBase + root.policyOptions.length
+  readonly property int actionBase: root.profiles.length
   readonly property int systemBase: root.actionBase + root.actionRows.length
   readonly property int settingsRowIndex: root.systemBase + root.systemRows.length
   readonly property int cursorCount: root.settingsRowIndex + 1
@@ -224,7 +211,6 @@ Panel {
     else if (row.run === "guide") root.openGuide()
     else if (row.run === "snap") root.triggerSnap()
     else if (row.run === "overview") root.openOverview()
-    else if (row.run === "cycle") root.cycleMode(false)
     else if (row.run === "restore") root.requestRestore()
     else if (row.run === "doctor") root.runDoctor()
     else if (row.run === "settings") root.openSettings()
@@ -239,8 +225,7 @@ Panel {
   function activateCursor() {
     if (!root.cursorActive) return
     var i = root.cursorIndex
-    if (i < root.policyBase) root.switchModeWithUndo(root.profiles[i].id)
-    else if (i < root.actionBase) root.setPolicy(root.policyOptions[i - root.policyBase].id)
+    if (i < root.actionBase) root.switchModeWithUndo(root.profiles[i].id)
     else if (i < root.systemBase) root.runAction(root.actionRows[i - root.actionBase])
     else if (i < root.settingsRowIndex) root.runAction(root.systemRows[i - root.systemBase])
     else root.runAction(root.settingsRow)
@@ -312,7 +297,7 @@ Panel {
     root.currentName = "Omarchy 原生模式"
     root.currentBrief = "OMA"
     root.activeBindingsCount = 0
-    root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, "omarchy")
+    root.effectiveWindowMode = Model.effectiveWindowMode("omarchy", root.profiles)
     runCmd("omni-profile restore")
   }
 
@@ -328,7 +313,7 @@ Panel {
     var cleanMode = String(modeId).trim()
     if (!safePattern.test(cleanMode)) return
     root.currentMode = cleanMode
-    root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, cleanMode)
+    root.effectiveWindowMode = Model.effectiveWindowMode(cleanMode, root.profiles)
     for (var i = 0; i < root.profiles.length; i++) {
       if (root.profiles[i].id === cleanMode) {
         var p = root.profiles[i]
@@ -339,14 +324,6 @@ Panel {
       }
     }
     runCmd("omni-profile switch " + cleanMode)
-  }
-
-  function setPolicy(policyId) {
-    if (!policyId) return
-    var norm = Model.normalizePolicy(policyId)
-    root.windowPolicy = norm
-    root.effectiveWindowMode = Model.computeEffectiveMode(norm, root.currentMode)
-    runCmd("omni-profile window-policy set " + norm)
   }
 
   function openSettings() {
@@ -393,9 +370,7 @@ Panel {
     function togglePanel(): void { root.togglePanel() }
     function getMode(): string { return root.currentMode }
     function switchMode(mode: string): void { root.switchMode(mode) }
-    function getWindowPolicy(): string { return root.windowPolicy }
     function getEffectiveWindowMode(): string { return root.effectiveWindowMode }
-    function setWindowPolicy(policy: string): void { root.setPolicy(policy) }
   }
 
   implicitWidth: button.implicitWidth
@@ -412,8 +387,7 @@ Panel {
     tooltipText: root.engineRunning
       ? ("OmniPal: " + root.currentName + (root.autoActive ? "\n" + root.autoText : "")
          + "\n生效快捷键: " + root.activeBindingsCount
-         + "\n窗口策略: " + Model.resolvePolicyName(root.windowPolicy) + (root.policyOverridden ? "（已覆盖）" : "")
-         + " · 生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
+         + "\n窗口策略: 跟随模式 · 生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
          + "\n左键: 轮转模式 | 右键: 快捷控制面板 | 中键: 设置")
       : "OmniPal Engine 未运行\n左键: 启动/切换 | 右键: 快捷控制面板"
 
@@ -546,7 +520,7 @@ Panel {
 
         PanelSeparator { foreground: Commons.Color.popups.text }
 
-        // 3. 窗口策略 (WINDOW POLICY)：当前项选中；非「跟随模式」时标注「已覆盖」
+        // 3. 窗口策略 (WINDOW POLICY)：只读，由当前模式自带的 window_mode 决定
         Item {
           width: parent.width
           implicitHeight: Math.max(wpHeader.implicitHeight, effPolicyBadge.implicitHeight)
@@ -567,41 +541,10 @@ Panel {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
-            text: (root.policyOverridden ? "已覆盖 · " : "") + "生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
-            color: root.policyOverridden ? Commons.Color.accent : Qt.darker(Commons.Color.popups.text, 1.4)
+            text: "跟随模式 · 生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
+            color: Qt.darker(Commons.Color.popups.text, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.body
-          }
-        }
-
-        Column {
-          width: parent.width
-          spacing: Style.spacing.xxs
-
-          Repeater {
-            model: root.policyOptions
-            delegate: Button {
-              id: policyRow
-              required property var modelData
-              required property int index
-              readonly property bool isCurrent: Model.normalizePolicy(root.windowPolicy) === modelData.id
-
-              width: parent.width
-              leftAlign: true
-              iconText: modelData.icon || ""
-              text: modelData.name
-              selected: isCurrent
-              hasCursor: root.cursorActive && root.cursorIndex === root.policyBase + index
-              foreground: Commons.Color.popups.text
-              onHovered: function(on) { root.hoverRow(root.policyBase + policyRow.index, on) }
-              onClicked: root.setPolicy(policyRow.modelData.id)
-
-              RowHint {
-                visible: policyRow.isCurrent
-                text: "当前"
-                color: Commons.Color.accent
-              }
-            }
           }
         }
 

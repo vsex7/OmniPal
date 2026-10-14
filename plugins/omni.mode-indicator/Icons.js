@@ -32,7 +32,6 @@ var glyph = {
   focus: "󰓾",
   plus: "󰐕",
   check: "󰄬",
-  stats: "󰄨",
   rules: "󰘔",
   magnet: "󰌢",
   layout: "󰕰",

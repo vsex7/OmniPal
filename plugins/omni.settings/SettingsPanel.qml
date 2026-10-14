@@ -13,14 +13,14 @@ import "Takeovers.js" as Takeovers
 
 // OmniPal 设置与控制中心面板（omni.settings）
 //
-// 三分类 Tab 导航的现代控制中心：
+// 分类 Tab 导航的现代控制中心：
 // 唯一完整入口（设计评审第 4 项）：状态栏菜单只保留快速切换 + 「打开设置」，其余控制都在这里。
 // 1. 🎯 模式：动态枚举 profiles 一键热切换；选择「Omarchy 原生模式」即还原（经确认）；
-//    窗口策略（跟随模式 / 平铺 / 浮动，非跟随时标注「已覆盖」）
+//    窗口策略固定为跟随模式：由各模式自带的平铺/浮动决定（只读显示）
 // 2. ⚙️ 高级选项：可选配置持久化（显式开关）、贴靠布局菜单呼出、速查表
-// 3. 📊 使用洞察：本地使用统计（概览摘要 / 模式切换排行 / 贴靠区域 Top 榜 + 一键重置）
+// 3. 规则：按应用自动切换模式
 //
-// 架构铁律：本插件只做展示与触发，全部绑定/持久化/统计操作均通过 omni-profile CLI
+// 架构铁律：本插件只做展示与触发，全部绑定/持久化操作均通过 omni-profile CLI
 // 交由 Engine 唯一执行，插件自身从不写任何 Hyprland 配置（AGENTS.md §2 / H-1）。
 Item {
   id: root
@@ -81,45 +81,21 @@ Item {
   // ---------- 可选配置持久化状态（omni-profile persist status --json） ----------
   property bool persistEnabled: false
   property string persistProfile: ""
-  property string persistPolicy: ""
   property string persistUpdatedAt: ""
   property string persistPath: ""
   property bool persistBusy: false
-
-  // ---------- 本地使用统计（omni-profile stats --json，纯本地零上传） ----------
-  property var statsSwitchList: []
-  property var statsSnapList: []
-  property int statsSwitchMax: 0
-  property int statsSnapMax: 0
-  property int statsTotal: 0
-  property int statsSwitchTotal: 0
-  property int statsSnapTotal: 0
-  property string statsLastUpdated: ""
-  property string statsLastReset: ""
-  property bool statsLoaded: false
-  property bool statsBusy: false
 
   // 模式元数据：唯一来源为 profiles/*.json（开窗时经 omni-profile list --json 加载），此处不再硬编码。
   property var modeItems: []
   // 各模式会接管哪些 Omarchy 原生快捷键（omni-profile doctor --json -> takeovers）
   property var doctorData: null
   function takeoverOf(id) { return Takeovers.forMode(root.doctorData, id) }
-  // 窗口策略：follow-profile（跟随模式）以外的取值即全局覆盖各模式自带的 window_mode
-  property string windowPolicy: "follow-profile"
-  readonly property bool policyOverridden: root.windowPolicy !== "follow-profile" && root.windowPolicy !== ""
   // 应用规则自动切换标记（state.json auto）
   property var autoInfo: null
   // 固定入口（schema/fixed_bindings.json），所有模式通用
   readonly property string fixedKeysText: "固定入口（所有模式通用）：Super+Ctrl+/ 速查表 · Super+Alt+I 控制中心 · Super+Alt+O 概览"
 
   function windowModeLabel(m) { return m === "floating" ? "浮动" : "平铺" }
-  // 窗口策略取值（docs/GLOSSARY.md：跟随模式 / 平铺 / 浮动）
-  readonly property var policyOptions: [
-    { value: "follow-profile", label: "跟随模式" },
-    { value: "tiled", label: "平铺" },
-    { value: "floating", label: "浮动" }
-  ]
-
   // 主题样式令牌：直接取 Omarchy Shell 的 qs.Commons（[menu] 表面，与 omarchy.menu /
   // omarchy.emojis 一致）。卡片/芯片用 Style 的 normal 控件 fill/border 令牌（见 Card 组件）。
   property color background: Commons.Color.menu.background
@@ -147,8 +123,7 @@ Item {
     listProc.running = true
     persistProc.running = true
     doctorProc.running = true
-    if (root.activeTab === 2) root.refreshStats()
-    if (root.activeTab === 3) rulesListProc.running = true
+    if (root.activeTab === 2) rulesListProc.running = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -167,20 +142,18 @@ Item {
   }
 
   // ---------- 确认 / 撤销状态 ----------
-  // confirmAction: "" | "restore" | "reset" — 破坏性操作先经 Ui.ConfirmDialog 确认
+  // confirmAction: "" | "restore" — 破坏性操作先经 Ui.ConfirmDialog 确认
   property string confirmAction: ""
   // 模式切换后 ~5s 内可按 U 撤销（回到 undoMode；omarchy 由 engine 走 restore 路径）
   property string undoMode: ""
   property string toastText: ""
 
   function askRestore() { root.confirmAction = "restore" }
-  function askResetStats() { if (!root.statsBusy) root.confirmAction = "reset" }
   function cancelConfirm() { root.confirmAction = ""; Qt.callLater(function() { keyCatcher.forceActiveFocus() }) }
   function acceptConfirm() {
     var a = root.confirmAction
     root.confirmAction = ""
     if (a === "restore") root.restoreNative()
-    else if (a === "reset") root.resetStats()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -220,13 +193,6 @@ Item {
     else root.switchModeWithUndo(targetMode)
   }
 
-  function setWindowPolicy(policy) {
-    if (!policy || policy === root.windowPolicy) return
-    root.windowPolicy = policy
-    policyProc.command = ["omni-profile", "window-policy", "set", policy]
-    policyProc.running = true
-  }
-
   function restoreNative() {
     switchProc.command = ["omni-profile", "restore"]
     switchProc.running = true
@@ -262,16 +228,6 @@ Item {
     persistToggleProc.running = true
   }
 
-  function refreshStats() {
-    statsProc.running = true
-  }
-
-  function resetStats() {
-    if (root.statsBusy) return
-    root.statsBusy = true
-    statsResetProc.running = true
-  }
-
   function modeNameOf(id) {
     for (var i = 0; i < root.modeItems.length; i++) {
       if (root.modeItems[i].id === id) return root.modeItems[i].name
@@ -298,28 +254,6 @@ Item {
     return t.slice(0, i) + " " + t.slice(i + 1, Math.min(z, i + 9))
   }
 
-  // 计数对象 → 按次数降序的排行数组（并列时按名称字典序，取前 8）
-  function rankArray(obj) {
-    var arr = []
-    for (var k in obj) {
-      var v = obj[k]
-      if (typeof v === "number" && v > 0) arr.push({ name: String(k), count: v })
-    }
-    arr.sort(function(a, b) {
-      if (b.count !== a.count) return b.count - a.count
-      return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0)
-    })
-    return arr.slice(0, 8)
-  }
-
-  function sumCounts(obj) {
-    var t = 0
-    for (var k in obj) {
-      if (typeof obj[k] === "number") t += obj[k]
-    }
-    return t
-  }
-
   function loadState(rawText) {
     if (!rawText || rawText.trim() === "") {
       root.engineRunning = false
@@ -333,8 +267,6 @@ Item {
       root.enginePid = d.pid || 0
       root.engineUpdatedAt = d.updated_at || ""
       root.engineStatus = d.status || "native"
-      var wp = String(d.window_policy || "follow-profile").toLowerCase()
-      root.windowPolicy = (wp === "follow" || wp === "follow_profile") ? "follow-profile" : (wp === "float" ? "floating" : (wp === "tile" ? "tiled" : wp))
       root.autoInfo = (d.auto && typeof d.auto === "object") ? d.auto : null
       root.engineRunning = true
     } catch (e) {
@@ -348,31 +280,8 @@ Item {
       var d = JSON.parse(rawText)
       root.persistEnabled = d.enabled === true
       root.persistProfile = d.profile || ""
-      root.persistPolicy = d.window_policy || ""
       root.persistUpdatedAt = d.updated_at || ""
       root.persistPath = d.path || ""
-    } catch (e) {}
-  }
-
-  function loadStats(rawText) {
-    root.statsLoaded = true
-    if (!rawText || rawText.trim() === "") return
-    try {
-      var d = JSON.parse(rawText)
-      var sw = (d && d.switches) || {}
-      var sn = (d && d.snaps) || {}
-      var ac = (d && d.actions) || {}
-      var swList = root.rankArray(sw)
-      var snList = root.rankArray(sn)
-      root.statsSwitchList = swList
-      root.statsSnapList = snList
-      root.statsSwitchMax = swList.length > 0 ? swList[0].count : 0
-      root.statsSnapMax = snList.length > 0 ? snList[0].count : 0
-      root.statsSwitchTotal = root.sumCounts(sw)
-      root.statsSnapTotal = root.sumCounts(sn)
-      root.statsTotal = root.statsSwitchTotal + root.statsSnapTotal + root.sumCounts(ac)
-      root.statsLastUpdated = d.last_updated || ""
-      root.statsLastReset = d.last_reset || ""
     } catch (e) {}
   }
 
@@ -385,8 +294,7 @@ Item {
   }
 
   onActiveTabChanged: {
-    if (root.activeTab === 2 && !root.statsLoaded) root.refreshStats()
-    if (root.activeTab === 3) rulesListProc.running = true
+    if (root.activeTab === 2) rulesListProc.running = true
   }
 
   Timer {
@@ -464,17 +372,6 @@ Item {
       stateFile.reload()
       listProc.running = true
       persistProc.running = true
-      if (root.activeTab === 2) root.refreshStats()
-    }
-  }
-
-  Process {
-    id: policyProc
-    command: ["omni-profile", "window-policy", "status"]
-    running: false
-    onExited: {
-      stateFile.reload()
-      persistProc.running = true
     }
   }
 
@@ -544,88 +441,6 @@ Item {
       root.persistBusy = false
       persistProc.running = true
       stateFile.reload()
-    }
-  }
-
-  Process {
-    id: statsProc
-    command: ["omni-profile", "stats", "--json"]
-    running: false
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: function() {
-        root.loadStats(text)
-      }
-    }
-  }
-
-  Process {
-    id: statsResetProc
-    command: ["omni-profile", "stats", "--reset"]
-    running: false
-    onExited: {
-      root.statsBusy = false
-      root.refreshStats()
-    }
-  }
-
-  // ---------- 内联组件：统计排行行（进度条 + 名称 + 次数） ----------
-  component RankRow: Rectangle {
-    id: rankRow
-    required property var entry
-    required property int rank
-    required property int maxCount
-    required property color barColor
-    property string displayName: ""
-
-    width: parent ? parent.width : 0
-    implicitHeight: Style.space(32)
-    radius: Style.cornerRadius
-    color: "transparent"
-
-    Rectangle {
-      anchors.fill: parent
-      radius: parent.radius
-      color: Util.alpha(root.foreground, 0.03)
-    }
-
-    Rectangle {
-      id: rankBar
-      anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
-      width: rankRow.maxCount > 0
-        ? rankRow.width * Math.max(0.05, rankRow.entry.count / rankRow.maxCount)
-        : 0
-      radius: parent.radius
-      color: Util.alpha(rankRow.barColor, 0.22)
-      Behavior on width { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutCubic } }
-    }
-
-    Rectangle {
-      anchors { left: parent.left; leftMargin: Style.space(4); verticalCenter: parent.verticalCenter }
-      width: Style.space(4); height: parent.height - Style.space(8); radius: Style.cornerRadius
-      color: rankRow.barColor
-    }
-
-    Text {
-      id: rankCount
-      anchors { right: parent.right; rightMargin: Style.space(10); verticalCenter: parent.verticalCenter }
-      text: rankRow.entry.count + " 次"
-      font.family: Style.font.family
-      font.pixelSize: Style.font.body
-      color: rankRow.barColor
-    }
-
-    Text {
-      anchors {
-        left: parent.left; leftMargin: Style.space(14)
-        right: rankCount.left; rightMargin: Style.space(8)
-        verticalCenter: parent.verticalCenter
-      }
-      text: (rankRow.rank > 0 ? rankRow.rank + ". " : "") + (rankRow.displayName || rankRow.entry.name)
-      font.family: Style.font.family
-      font.pixelSize: Style.font.body
-      color: Util.alpha(root.foreground, 0.9)
-      elide: Text.ElideRight
     }
   }
 
@@ -708,10 +523,10 @@ Item {
             root.openCheatSheet()
             event.accepted = true
           } else if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier))) {
-            root.activeTab = (root.activeTab + 3) % 4
+            root.activeTab = (root.activeTab + 2) % 3
             event.accepted = true
           } else if (event.key === Qt.Key_Tab) {
-            root.activeTab = (root.activeTab + 1) % 4
+            root.activeTab = (root.activeTab + 1) % 3
             event.accepted = true
           }
         }
@@ -737,11 +552,9 @@ Item {
           anchors.fill: parent
           z: 10
           opened: root.confirmAction !== ""
-          message: root.confirmAction === "restore"
-            ? "切换到 Omarchy 原生模式？将撤销全部快捷键覆盖。"
-            : "清空全部本地使用统计？此操作不可撤销。"
+          message: "切换到 Omarchy 原生模式？将撤销全部快捷键覆盖。"
           cancelText: "取消"
-          confirmText: root.confirmAction === "restore" ? "切换" : "重置"
+          confirmText: "切换"
           onCanceled: root.cancelConfirm()
           onConfirmed: root.acceptConfirm()
         }
@@ -781,7 +594,7 @@ Item {
           // Native ButtonGroup ("pick one of N"), same control the shell's own settings use.
           ButtonGroup {
             id: tabBar
-            readonly property var tabs: ["模式", "选项", "统计", "规则"]
+            readonly property var tabs: ["模式", "选项", "规则"]
             options: tabs.map(function(t, i) { return { value: String(i), label: t } })
             value: String(root.activeTab)
             focusable: false
@@ -924,7 +737,6 @@ Item {
                                 ? (modeCard.modelData.override ? "用户自定义（覆盖内置）" : "用户自定义")
                                 : "内置")
                             + " · " + root.windowModeLabel(modeCard.modelData.windowMode)
-                            + (root.policyOverridden ? "（已覆盖：全局" + root.windowModeLabel(root.windowPolicy) + "）" : "")
                             + (modeCard.modelData.id === "omarchy" ? " · 选择即还原：撤销全部快捷键覆盖（Shift+R）" : "")
                             + (modeCard.modelData.desc ? " · " + modeCard.modelData.desc : "")
                           font.family: Style.font.family
@@ -977,7 +789,7 @@ Item {
                   }
                 }
 
-                // 窗口策略：跟随模式 / 平铺 / 浮动；非跟随模式时标注「已覆盖」
+                // 窗口策略：固定为跟随模式，由当前模式自带的平铺/浮动决定（只读）
                 Item {
                   width: parent.width
                   implicitHeight: Math.max(policyTitle.implicitHeight, policyBadge.implicitHeight)
@@ -996,33 +808,17 @@ Item {
                     id: policyBadge
                     anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                     textFormat: Text.PlainText
-                    text: (root.policyOverridden ? "已覆盖 · " : "") + "生效："
-                      + root.windowModeLabel(root.policyOverridden ? root.windowPolicy : root.modeWindowModeOf(root.currentMode))
+                    text: "跟随模式 · 生效：" + root.windowModeLabel(root.modeWindowModeOf(root.currentMode))
                     font.family: Style.font.family
                     font.pixelSize: Style.font.body
-                    color: root.policyOverridden ? root.accent : Qt.darker(root.foreground, 1.4)
+                    color: Qt.darker(root.foreground, 1.4)
                   }
-                }
-
-                ButtonGroup {
-                  id: policyGroup
-                  width: parent.width
-                  focusable: false
-                  options: root.policyOptions
-                  value: root.windowPolicy
-                  foreground: root.foreground
-                  accent: root.accent
-                  background: "transparent"
-                  fontSize: Style.font.body
-                  onChanged: function(v) { root.setWindowPolicy(v) }
                 }
 
                 Text {
                   width: parent.width
                   textFormat: Text.PlainText
-                  text: root.policyOverridden
-                    ? "全局" + root.windowModeLabel(root.windowPolicy) + "，已覆盖各模式自带的平铺/浮动设置；选择「跟随模式」可恢复。"
-                    : "跟随模式：由当前模式决定平铺或浮动。"
+                  text: "跟随模式：由当前模式决定平铺或浮动。"
                   font.family: Style.font.family
                   font.pixelSize: Style.font.body
                   color: Qt.darker(root.foreground, 1.4)
@@ -1124,7 +920,7 @@ Item {
                         text: root.persistBusy
                           ? "正在同步持久化状态…"
                           : (root.persistEnabled
-                              ? ("已启用 · 自动记忆关机前配置：" + root.modeNameOf(root.persistProfile) + "（" + root.persistProfile + "）" + (root.persistPolicy ? " · " + (root.persistPolicy === "floating" ? "浮动" : "平铺") : "") + (root.persistUpdatedAt ? " · 更新于 " + root.fmtTs(root.persistUpdatedAt) : ""))
+                              ? ("已启用 · 自动记忆关机前配置：" + root.modeNameOf(root.persistProfile) + "（" + root.persistProfile + "）" + (root.persistUpdatedAt ? " · 更新于 " + root.fmtTs(root.persistUpdatedAt) : ""))
                               : "已禁用 · 关机/重启恢复默认，磁盘零残留")
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
@@ -1216,300 +1012,12 @@ Item {
             }
           }
 
-          // ===== Tab 2：使用洞察 =====
-          Item {
-            id: analyticsTab
-            anchors.fill: parent
-            opacity: root.activeTab === 2 ? 1.0 : 0.0
-            visible: root.activeTab === 2 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutQuad } }
-
-            Flickable {
-              anchors.fill: parent
-              contentWidth: width
-              contentHeight: analyticsCol.implicitHeight
-              clip: true
-              boundsBehavior: Flickable.StopAtBounds
-
-              Column {
-                id: analyticsCol
-                width: parent.width
-                spacing: Style.space(10)
-
-                // --- 概览摘要卡片 ---
-                Card {
-                  width: parent.width
-                  height: statsSummaryBody.implicitHeight + Style.space(28)
-
-                  Column {
-                    id: statsSummaryBody
-                    anchors {
-                      top: parent.top; topMargin: Style.space(14)
-                      left: parent.left; leftMargin: Style.space(14)
-                      right: parent.right; rightMargin: Style.space(14)
-                    }
-                    spacing: Style.space(10)
-
-                    Row {
-                      spacing: Style.space(8)
-                      Text {
-                        font.family: Style.font.family
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: Icons.glyph.stats
-                        font.pixelSize: Style.font.body
-                      }
-                      Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "概览摘要"
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.body
-                        color: root.foreground
-                      }
-                    }
-
-                    Row {
-                      width: parent.width
-                      spacing: Style.space(8)
-
-                      Repeater {
-                        model: [
-                          {
-                            label: "累计总操作数",
-                            value: root.statsLoaded ? String(root.statsTotal) : "…",
-                            tint: root.accent
-                          },
-                          {
-                            label: "上次更新",
-                            value: root.statsLoaded
-                              ? (root.statsLastUpdated ? root.fmtTs(root.statsLastUpdated) : "无记录")
-                              : "…",
-                            tint: root.okColor
-                          },
-                          {
-                            label: "上次重置",
-                            value: root.statsLoaded
-                              ? (root.statsLastReset ? root.fmtTs(root.statsLastReset) : "从未")
-                              : "…",
-                            tint: root.persistEnabled ? root.accent : Util.alpha(root.foreground, 0.6)
-                          }
-                        ]
-                        delegate: Card {
-                          id: statCard
-                          required property var modelData
-                          width: (analyticsCol.width - Style.space(28) - Style.space(16)) / 3
-                          height: Style.space(72)
-
-                          Column {
-                            anchors.centerIn: parent
-                            spacing: Style.space(4)
-
-                            Text {
-                              anchors.horizontalCenter: parent.horizontalCenter
-                              text: statCard.modelData.value
-                              font.family: Style.font.family
-                              font.pixelSize: statCard.modelData.label === "累计总操作数" ? Style.font.heading : Style.font.body
-                              color: statCard.modelData.tint
-                            }
-                            Text {
-                              anchors.horizontalCenter: parent.horizontalCenter
-                              text: statCard.modelData.label
-                              font.family: Style.font.family
-                              font.pixelSize: Style.font.body
-                              color: Util.alpha(root.foreground, 0.6)
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-
-                // --- 模式切换排行卡片 ---
-                Card {
-                  width: parent.width
-                  height: switchRankBody.implicitHeight + Style.space(28)
-
-                  Column {
-                    id: switchRankBody
-                    anchors {
-                      top: parent.top; topMargin: Style.space(14)
-                      left: parent.left; leftMargin: Style.space(14)
-                      right: parent.right; rightMargin: Style.space(14)
-                    }
-                    spacing: Style.space(8)
-
-                    Item {
-                      width: parent.width
-                      height: Style.space(22)
-
-                      Row {
-                        spacing: Style.space(8)
-                        anchors.left: parent.left
-                        Text {
-                          font.family: Style.font.family
-                          anchors.verticalCenter: parent.verticalCenter
-                          text: Icons.glyph.cycle
-                          font.pixelSize: Style.font.body
-                        }
-                        Text {
-                          anchors.verticalCenter: parent.verticalCenter
-                          text: "模式切换排行"
-                          font.family: Style.font.family
-                          font.pixelSize: Style.font.body
-                          color: root.foreground
-                        }
-                      }
-
-                      Text {
-                        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                        text: root.statsLoaded ? ("共 " + root.statsSwitchTotal + " 次") : ""
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.body
-                        color: Util.alpha(root.foreground, 0.55)
-                      }
-                    }
-
-                    Repeater {
-                      model: root.statsSwitchList
-                      delegate: RankRow {
-                        required property var modelData
-                        required property int index
-                        entry: modelData
-                        rank: index + 1
-                        maxCount: root.statsSwitchMax
-                        barColor: root.modeColorOf(modelData.name)
-                        displayName: root.modeNameOf(modelData.name)
-                      }
-                    }
-
-                    Text {
-                      visible: root.statsLoaded && root.statsSwitchList.length === 0
-                      width: parent.width
-                      text: "暂无切换记录 · 切换习惯模式后自动累积"
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.body
-                      color: Util.alpha(root.foreground, 0.5)
-                    }
-
-                    Text {
-                      visible: !root.statsLoaded
-                      width: parent.width
-                      text: "正在读取本地统计…"
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.body
-                      color: Util.alpha(root.foreground, 0.5)
-                    }
-                  }
-                }
-
-                // --- 常用贴靠区域 Top 榜卡片 ---
-                Card {
-                  width: parent.width
-                  height: snapRankBody.implicitHeight + Style.space(28)
-
-                  Column {
-                    id: snapRankBody
-                    anchors {
-                      top: parent.top; topMargin: Style.space(14)
-                      left: parent.left; leftMargin: Style.space(14)
-                      right: parent.right; rightMargin: Style.space(14)
-                    }
-                    spacing: Style.space(8)
-
-                    Item {
-                      width: parent.width
-                      height: Style.space(22)
-
-                      Row {
-                        spacing: Style.space(8)
-                        anchors.left: parent.left
-                        Text {
-                          font.family: Style.font.family
-                          anchors.verticalCenter: parent.verticalCenter
-                          text: Icons.glyph.compass
-                          font.pixelSize: Style.font.body
-                        }
-                        Text {
-                          anchors.verticalCenter: parent.verticalCenter
-                          text: "常用贴靠区域 Top 榜"
-                          font.family: Style.font.family
-                          font.pixelSize: Style.font.body
-                          color: root.foreground
-                        }
-                      }
-
-                      Text {
-                        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                        text: root.statsLoaded ? ("共 " + root.statsSnapTotal + " 次") : ""
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.body
-                        color: Util.alpha(root.foreground, 0.55)
-                      }
-                    }
-
-                    Repeater {
-                      model: root.statsSnapList
-                      delegate: RankRow {
-                        required property var modelData
-                        required property int index
-                        entry: modelData
-                        rank: index + 1
-                        maxCount: root.statsSnapMax
-                        barColor: root.accent
-                      }
-                    }
-
-                    Text {
-                      visible: root.statsLoaded && root.statsSnapList.length === 0
-                      width: parent.width
-                      text: "暂无贴靠记录 · 通过贴靠布局菜单或贴靠快捷键自动累积"
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.body
-                      color: Util.alpha(root.foreground, 0.5)
-                    }
-
-                    Text {
-                      visible: !root.statsLoaded
-                      width: parent.width
-                      text: "正在读取本地统计…"
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.body
-                      color: Util.alpha(root.foreground, 0.5)
-                    }
-                  }
-                }
-
-                // --- 重置统计数据操作 ---
-                Button {
-                  width: parent.width
-                  text: root.statsBusy ? "正在重置统计…" : "重置统计数据"
-                  bordered: true
-                  enabled: !root.statsBusy
-                  foreground: root.dangerColor
-                  accent: root.dangerColor
-                  verticalPadding: Style.space(10)
-                  onClicked: root.askResetStats()
-                }
-
-                Text {
-                  width: parent.width
-                  text: "统计仅为本机聚合计数（~/.config/omnipal/stats.json）· 零按键内容记录 · 零网络上传"
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.body
-                  color: Util.alpha(root.foreground, 0.45)
-                  wrapMode: Text.Wrap
-                  horizontalAlignment: Text.AlignHCenter
-                }
-              }
-            }
-          }
-
-          // ===== Tab 3：应用规则（按应用自动切换模式） =====
+          // ===== Tab 2：应用规则（按应用自动切换模式） =====
           Item {
             id: rulesTab
             anchors.fill: parent
-            opacity: root.activeTab === 3 ? 1.0 : 0.0
-            visible: root.activeTab === 3 || opacity > 0.0
+            opacity: root.activeTab === 2 ? 1.0 : 0.0
+            visible: root.activeTab === 2 || opacity > 0.0
             Behavior on opacity { NumberAnimation { duration: root.theme.duration(140); easing.type: Easing.OutQuad } }
 
             Flickable {

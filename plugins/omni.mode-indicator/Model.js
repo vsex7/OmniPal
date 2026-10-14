@@ -102,76 +102,16 @@ function fallbackProfiles() {
   ];
 }
 
-var DEFAULT_POLICIES = [
-  {
-    "id": "tiled",
-    "name": "平铺",
-    "english": "Tiled",
-    "icon": "◫",
-    "desc": "新常规窗口自动平铺分屏"
-  },
-  {
-    "id": "floating",
-    "name": "浮动",
-    "english": "Floating",
-    "icon": "❐",
-    "desc": "新常规窗口居中自由浮动"
-  },
-  {
-    "id": "follow-profile",
-    "name": "跟随",
-    "english": "Follow",
-    "icon": "⇄",
-    "desc": "随快捷键模式决定平铺/浮动"
+// 窗口策略固定为「跟随模式」：由模式自带的 window_mode 决定平铺/浮动（无全局覆盖）。
+// profiles 为 omni-profile list --json 的结果；缺省时 mac 为浮动，其余平铺。
+function effectiveWindowMode(currentMode, profiles) {
+  var key = String(currentMode || "").toLowerCase().trim();
+  var list = profiles || [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].id === key) {
+      var wm = list[i].window_mode;
+      if (wm === "floating" || wm === "tiled") return wm;
+    }
   }
-];
-
-function windowPolicies() {
-  return DEFAULT_POLICIES;
-}
-
-function normalizePolicy(id) {
-  var key = String(id || "").toLowerCase().trim();
-  if (key === "follow" || key === "follow_profile" || key === "follow-profile") return "follow-profile";
-  if (key === "float" || key === "floating") return "floating";
-  if (key === "tile" || key === "tiled") return "tiled";
-  return "tiled";
-}
-
-function resolvePolicyName(id) {
-  var key = normalizePolicy(id);
-  for (var i = 0; i < DEFAULT_POLICIES.length; i++) {
-    if (DEFAULT_POLICIES[i].id === key) return DEFAULT_POLICIES[i].name;
-  }
-  return "平铺";
-}
-
-function resolvePolicyIcon(id) {
-  var key = normalizePolicy(id);
-  for (var i = 0; i < DEFAULT_POLICIES.length; i++) {
-    if (DEFAULT_POLICIES[i].id === key) return DEFAULT_POLICIES[i].icon;
-  }
-  return "◫";
-}
-
-function resolvePolicyDesc(id, currentMode) {
-  var key = normalizePolicy(id);
-  if (key === "follow-profile") {
-    var modeKey = String(currentMode || "").toLowerCase().trim();
-    var eff = (modeKey === "mac") ? "浮动 (macOS 习惯)" : (modeKey === "windows" ? "平铺 (Windows 习惯)" : (modeKey === "omarchy" ? "平铺 (Omarchy 原生)" : "平铺 (默认习惯)"));
-    return "当前跟随 " + eff;
-  }
-  for (var i = 0; i < DEFAULT_POLICIES.length; i++) {
-    if (DEFAULT_POLICIES[i].id === key) return DEFAULT_POLICIES[i].desc;
-  }
-  return "新常规窗口自动平铺分屏";
-}
-
-function computeEffectiveMode(policy, currentMode) {
-  var p = normalizePolicy(policy);
-  if (p === "follow-profile") {
-    return String(currentMode || "").toLowerCase().trim() === "mac" ? "floating" : "tiled";
-  }
-  if (p === "floating") return "floating";
-  return "tiled";
+  return key === "mac" ? "floating" : "tiled";
 }
