@@ -19,6 +19,21 @@ import "Tokens.js" as Tokens
 Item {
   id: root
 
+  // ---- Omarchy theme: Tokens.js is the single source of truth -------------
+  // Follows the current Omarchy theme at runtime (colors.toml), tokyo-night fallback.
+  property var themePalette: Tokens.fallback
+  readonly property var modeColors: Tokens.modeColors(themePalette)
+  readonly property var theme: Tokens.build(Color, themePalette)
+  FileView {
+    id: omniThemeFile
+    property bool legacy: false
+    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
+    onLoadFailed: if (!legacy) legacy = true
+  }
+
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
   property var manifest: null
@@ -95,7 +110,7 @@ Item {
       name: "Windows 11 习惯模式",
       desc: "Alt+F4 关闭窗口 · Win+方向键智能吸附 · Win+E 文件管理器 · Win+Tab 任务视图",
       count: 19,
-      color: Tokens.mode.windows,
+      color: root.modeColors.windows,
       source: "project",
       override: false
     },
@@ -105,7 +120,7 @@ Item {
       name: "macOS 习惯模式",
       desc: "Super+Q 退出程序 · Super+Space 聚焦搜索 · Super+Shift+3/4 截图 · Super+H 最小化",
       count: 42,
-      color: Tokens.mode.mac,
+      color: root.modeColors.mac,
       source: "project",
       override: false
     },
@@ -115,7 +130,7 @@ Item {
       name: "KDE Plasma 习惯模式",
       desc: "Meta+方向键贴边 · Alt+Space 搜索 · Ctrl+Alt+L 锁屏 · Meta+W 概览",
       count: 19,
-      color: Tokens.mode.kde,
+      color: root.modeColors.kde,
       source: "project",
       override: false
     },
@@ -125,7 +140,7 @@ Item {
       name: "Omarchy 原生模式",
       desc: "",
       count: 0,
-      color: Tokens.mode.omarchy,
+      color: root.modeColors.omarchy,
       source: "project",
       override: false
     }
@@ -142,9 +157,9 @@ Item {
   readonly property color glassColor: Util.alpha(Color.menu.background, 0.90)
   readonly property int cornerRadius: Style.cornerRadius
 
-  readonly property color accent: Color.accent || Tokens.semantic.accent
-  readonly property color okColor: Tokens.semantic.ok
-  readonly property color dangerColor: Tokens.semantic.danger
+  readonly property color accent: Color.accent || root.theme.accent
+  readonly property color okColor: root.theme.ok
+  readonly property color dangerColor: root.theme.danger
   readonly property color hairline: Util.alpha(Color.menu.text, 0.10)
   readonly property color chipColor: Util.alpha(Color.menu.text, 0.05)
 
@@ -429,8 +444,8 @@ Item {
           var parsed = JSON.parse(data)
           if (Array.isArray(parsed) && parsed.length > 0) {
             var iconMap = { "windows": "⊞", "mac": "◆", "kde": "❖", "omarchy": "⊡" }
-            var colorMap = { "windows": Tokens.mode.windows, "mac": Tokens.mode.mac, "kde": Tokens.mode.kde, "omarchy": Tokens.mode.omarchy }
-            var customColors = Tokens.mode.custom
+            var colorMap = { "windows": root.modeColors.windows, "mac": root.modeColors.mac, "kde": root.modeColors.kde, "omarchy": root.modeColors.omarchy }
+            var customColors = root.modeColors.custom
             var items = []
             for (var i = 0; i < parsed.length; i++) {
               var p = parsed[i]
@@ -513,7 +528,7 @@ Item {
 
     width: parent ? parent.width : 0
     implicitHeight: Style.space(32)
-    radius: 6
+    radius: Tokens.radius.chip
     color: "transparent"
 
     Rectangle {
@@ -530,12 +545,12 @@ Item {
         : 0
       radius: parent.radius
       color: Util.alpha(rankRow.barColor, 0.22)
-      Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+      Behavior on width { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutCubic } }
     }
 
     Rectangle {
       anchors { left: parent.left; leftMargin: Style.space(4); verticalCenter: parent.verticalCenter }
-      width: Style.space(4); height: parent.height - Style.space(8); radius: 2
+      width: Style.space(4); height: parent.height - Style.space(8); radius: Tokens.radius.chip
       color: rankRow.barColor
     }
 
@@ -582,8 +597,8 @@ Item {
       border.color: tgl.checked
         ? Util.alpha(root.okColor, 0.95)
         : Util.alpha(root.foreground, 0.10)
-      Behavior on color { ColorAnimation { duration: 200 } }
-      Behavior on border.color { ColorAnimation { duration: 200 } }
+      Behavior on color { ColorAnimation { duration: Tokens.motion.slow } }
+      Behavior on border.color { ColorAnimation { duration: Tokens.motion.slow } }
     }
 
     Rectangle {
@@ -591,10 +606,10 @@ Item {
       width: parent.height - Style.space(8)
       height: width
       radius: width / 2
-      color: "#ffffff"
+      color: root.theme.textStrong
       x: tgl.checked ? parent.width - width - Style.space(4) : Style.space(4)
       y: Style.space(4)
-      Behavior on x { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+      Behavior on x { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutCubic } }
     }
 
     MouseArea {
@@ -635,8 +650,8 @@ Item {
       padding: Style.space(20)
       scale: root.opened ? 1.0 : 0.96
       opacity: root.opened ? 1.0 : 0.0
-      Behavior on scale { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
-      Behavior on opacity { NumberAnimation { duration: 150 } }
+      Behavior on scale { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutCubic } }
+      Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal } }
 
       MouseArea {
         anchors.fill: parent
@@ -698,7 +713,7 @@ Item {
               id: closeBtn
               width: Style.space(28)
               height: Style.space(28)
-              radius: 4
+              radius: Tokens.radius.chip
               color: closeHover.containsMouse ? Util.alpha(root.foreground, 0.12) : "transparent"
               anchors.verticalCenter: parent.verticalCenter
               anchors.right: parent.right
@@ -742,7 +757,7 @@ Item {
               border.color: Util.alpha(root.foreground, 0.08)
               x: Style.space(4) + root.activeTab * tabBar.unit
               y: Style.space(4)
-              Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+              Behavior on x { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutCubic } }
             }
 
             Row {
@@ -767,8 +782,8 @@ Item {
                     color: root.activeTab === tabCell.index
                       ? root.foreground
                       : Util.alpha(root.foreground, 0.60)
-                    Behavior on color { ColorAnimation { duration: 160 } }
-                    Behavior on font.pixelSize { NumberAnimation { duration: 160 } }
+                    Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
+                    Behavior on font.pixelSize { NumberAnimation { duration: Tokens.motion.normal } }
                   }
 
                   MouseArea {
@@ -797,7 +812,7 @@ Item {
 
               Rectangle {
                 id: engineDot
-                width: 8; height: 8; radius: 4
+                width: 8; height: 8; radius: Tokens.radius.chip
                 color: root.engineRunning ? root.okColor : root.dangerColor
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
@@ -861,8 +876,8 @@ Item {
             opacity: root.activeTab === 0 ? 1.0 : 0.0
             scale: root.activeTab === 0 ? 1.0 : 0.985
             visible: root.activeTab === 0 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
-            Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
+            Behavior on opacity { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
+            Behavior on scale { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -914,18 +929,18 @@ Item {
                           : Util.alpha(root.foreground, 0.12)
                       scale: modeCardHover.containsMouse ? 1.015 : 1.0
                       z: modeCardHover.containsMouse ? 2 : 1
-                      Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                      Behavior on color { ColorAnimation { duration: 140 } }
-                      Behavior on border.color { ColorAnimation { duration: 140 } }
+                      Behavior on scale { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutCubic } }
+                      Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
+                      Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
                       // 悬停阴影升起（伪影层，零 GPU 图层开销）
                       Rectangle {
                         anchors { fill: parent; topMargin: Style.space(6); margins: Style.space(3) }
-                        radius: parent.radius + 4
-                        color: "#000000"
+                        radius: parent.radius
+                        color: root.theme.shadow
                         opacity: modeCardHover.containsMouse && !modeCard.isActive ? 0.25 : 0.0
                         z: -1
-                        Behavior on opacity { NumberAnimation { duration: 170 } }
+                        Behavior on opacity { NumberAnimation { duration: Tokens.motion.slow } }
                       }
 
                       MouseArea {
@@ -959,7 +974,7 @@ Item {
                         id: modeKeycap
                         anchors { right: parent.right; rightMargin: Style.space(11); top: parent.top; topMargin: Style.space(11) }
                         width: Style.space(20); height: Style.space(20)
-                        radius: 4
+                        radius: Tokens.radius.chip
                         visible: !modeCard.isActive
                         color: Util.alpha(root.foreground, 0.08)
                         border.width: 1
@@ -982,7 +997,7 @@ Item {
                         anchors { right: parent.right; rightMargin: Style.space(11); top: parent.top; topMargin: Style.space(11) }
                         width: activePillText.implicitWidth + Style.space(12)
                         height: activePillText.implicitHeight + Style.space(6)
-                        radius: 4
+                        radius: Tokens.radius.chip
                         color: modelData.color
 
                         Text {
@@ -992,7 +1007,7 @@ Item {
                           font.family: Style.font.family
                           font.pixelSize: 10
                           font.bold: true
-                          color: "#ffffff"
+                          color: root.theme.onAccent
                         }
                       }
 
@@ -1057,8 +1072,8 @@ Item {
             opacity: root.activeTab === 1 ? 1.0 : 0.0
             scale: root.activeTab === 1 ? 1.0 : 0.985
             visible: root.activeTab === 1 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
-            Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
+            Behavior on opacity { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
+            Behavior on scale { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -1081,7 +1096,7 @@ Item {
                   color: Util.alpha(root.foreground, 0.04)
                   border.width: 1
                   border.color: root.persistEnabled ? Util.alpha(root.okColor, 0.45) : root.hairline
-                  Behavior on border.color { ColorAnimation { duration: 200 } }
+                  Behavior on border.color { ColorAnimation { duration: Tokens.motion.slow } }
 
                   Column {
                     id: persistCardBody
@@ -1122,7 +1137,7 @@ Item {
                         checked: root.persistEnabled
                         enabled: !root.persistBusy
                         opacity: root.persistBusy ? 0.55 : 1.0
-                        Behavior on opacity { NumberAnimation { duration: 150 } }
+                        Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal } }
                         onToggled: root.togglePersist()
                       }
                     }
@@ -1139,7 +1154,7 @@ Item {
                     Rectangle {
                       width: parent.width
                       height: persistStatusText.implicitHeight + Style.space(12)
-                      radius: 6
+                      radius: Tokens.radius.chip
                       color: Util.alpha(root.foreground, 0.05)
 
                       Text {
@@ -1212,8 +1227,8 @@ Item {
                       color: snapBtnHover.containsMouse ? Util.alpha(root.accent, 0.22) : Util.alpha(root.accent, 0.10)
                       border.width: 1
                       border.color: snapBtnHover.containsMouse ? root.accent : Util.alpha(root.accent, 0.4)
-                      Behavior on color { ColorAnimation { duration: 140 } }
-                      Behavior on border.color { ColorAnimation { duration: 140 } }
+                      Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
+                      Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
                       Text {
                         anchors.centerIn: parent
@@ -1243,7 +1258,7 @@ Item {
                   color: Util.alpha(root.foreground, 0.04)
                   border.width: 1
                   border.color: restoreCardHover.containsMouse ? Util.alpha(root.dangerColor, 0.5) : root.hairline
-                  Behavior on border.color { ColorAnimation { duration: 160 } }
+                  Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
                   MouseArea {
                     id: restoreCardHover
@@ -1287,7 +1302,7 @@ Item {
                         padding: 3
                         Rectangle {
                           anchors.fill: parent
-                          radius: 3
+                          radius: Tokens.radius.chip
                           color: Util.alpha(root.foreground, 0.08)
                           border.width: 1
                           border.color: Util.alpha(root.foreground, 0.18)
@@ -1311,8 +1326,8 @@ Item {
                       color: restoreBtnHover.containsMouse ? Util.alpha(root.dangerColor, 0.20) : Util.alpha(root.dangerColor, 0.08)
                       border.width: 1
                       border.color: restoreBtnHover.containsMouse ? root.dangerColor : Util.alpha(root.dangerColor, 0.4)
-                      Behavior on color { ColorAnimation { duration: 140 } }
-                      Behavior on border.color { ColorAnimation { duration: 140 } }
+                      Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
+                      Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
                       Text {
                         anchors.centerIn: parent
@@ -1342,7 +1357,7 @@ Item {
                   color: sheetBtnHover.containsMouse ? Util.alpha(root.foreground, 0.12) : Util.alpha(root.foreground, 0.06)
                   border.width: 1
                   border.color: Util.alpha(root.foreground, 0.15)
-                  Behavior on color { ColorAnimation { duration: 140 } }
+                  Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
 
                   Text {
                     anchors.centerIn: parent
@@ -1371,8 +1386,8 @@ Item {
             opacity: root.activeTab === 2 ? 1.0 : 0.0
             scale: root.activeTab === 2 ? 1.0 : 0.985
             visible: root.activeTab === 2 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
-            Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutQuad } }
+            Behavior on opacity { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
+            Behavior on scale { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -1444,14 +1459,14 @@ Item {
                             value: root.statsLoaded
                               ? (root.statsLastReset ? root.fmtTs(root.statsLastReset) : "从未")
                               : "…",
-                            tint: root.persistEnabled ? Tokens.semantic.warn : Util.alpha(root.foreground, 0.6)
+                            tint: root.persistEnabled ? root.theme.warn : Util.alpha(root.foreground, 0.6)
                           }
                         ]
                         delegate: Rectangle {
                           required property var modelData
                           width: (analyticsCol.width - Style.space(28) - Style.space(16)) / 3
                           height: Style.space(72)
-                          radius: 8
+                          radius: Tokens.radius.chip
                           color: root.chipColor
                           border.width: 1
                           border.color: root.hairline
@@ -1654,8 +1669,8 @@ Item {
                   border.width: 1
                   border.color: Util.alpha(root.dangerColor, 0.4)
                   enabled: !root.statsBusy
-                  Behavior on color { ColorAnimation { duration: 140 } }
-                  Behavior on border.color { ColorAnimation { duration: 140 } }
+                  Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
+                  Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
                   Text {
                     anchors.centerIn: parent

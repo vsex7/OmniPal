@@ -19,6 +19,20 @@ import "Tokens.js" as Tokens
 Item {
   id: root
 
+  // ---- Omarchy theme: Tokens.js is the single source of truth -------------
+  // Follows the current Omarchy theme at runtime (colors.toml), tokyo-night fallback.
+  property var themePalette: Tokens.fallback
+  readonly property var theme: Tokens.build(Color, themePalette)
+  FileView {
+    id: omniThemeFile
+    property bool legacy: false
+    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
+    onLoadFailed: if (!legacy) legacy = true
+  }
+
   // ------------------------------------------------------- host contract
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
@@ -485,8 +499,8 @@ Item {
                 : pillHover.containsMouse ? Util.alpha(root.foreground, 0.08) : "transparent"
               border.width: 1
               border.color: selected ? Util.alpha(root.accent, 0.6) : root.hairline
-              Behavior on color { ColorAnimation { duration: 140 } }
-              Behavior on border.color { ColorAnimation { duration: 140 } }
+              Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
+              Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
               Row {
                 id: pillInner
@@ -508,8 +522,8 @@ Item {
                   visible: previewPill.engineActive
                   width: Style.space(5)
                   height: Style.space(5)
-                  radius: 3
-                  color: Tokens.semantic.ok
+                  radius: Tokens.radius.chip
+                  color: root.theme.ok
                   anchors.verticalCenter: parent.verticalCenter
                 }
               }
@@ -645,8 +659,8 @@ Item {
                 : catPillHover.containsMouse ? Util.alpha(root.foreground, 0.07) : "transparent"
               border.width: 1
               border.color: selected ? Util.alpha(root.accent, 0.55) : root.hairline
-              Behavior on color { ColorAnimation { duration: 130 } }
-              Behavior on border.color { ColorAnimation { duration: 130 } }
+              Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
+              Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
               Row {
                 id: catPillRow
@@ -667,7 +681,7 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                   width: Math.max(Style.space(15), catCountLabel.implicitWidth + Style.space(6))
                   height: Style.space(14)
-                  radius: 7
+                  radius: Tokens.radius.chip
                   color: catPill.selected ? Util.alpha(root.accent, 0.25) : root.chipColor
 
                   Text {
@@ -788,7 +802,7 @@ Item {
                         : (binding.rowLive ? Util.alpha(root.accent, 0.10) : "transparent")
                       border.width: binding.rowLive ? 1 : 0
                       border.color: Util.alpha(root.accent, 0.35)
-                      Behavior on color { ColorAnimation { duration: 120 } }
+                      Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
                     }
 
                     Flow {
@@ -809,50 +823,18 @@ Item {
 
                           width: keyLabel.implicitWidth + Style.space(13)
                           height: Math.max(Style.space(21), Style.font.body + Style.space(7))
-                          radius: Style.space(5)
-                          border.width: 1
-                          border.color: Util.alpha(root.foreground, 0.2)
-
-                          // 物理质感键帽：立体渐变 + 顶部高光 + 底部阴影凹槽
-                          gradient: Gradient {
-                            GradientStop {
-                              position: 0
-                              color: keyCap.capLive ? Util.alpha(root.accent, 0.38) : Util.alpha(root.foreground, 0.15)
-                            }
-                            GradientStop {
-                              position: 1
-                              color: keyCap.capLive ? Util.alpha(root.accent, 0.18) : Util.alpha(root.foreground, 0.05)
-                            }
-                          }
-
-                          Rectangle {
-                            anchors {
-                              top: parent.top; topMargin: 1
-                              left: parent.left; leftMargin: 3
-                              right: parent.right; rightMargin: 3
-                            }
-                            height: 1
-                            radius: 1
-                            color: Util.alpha("#ffffff", 0.16)
-                          }
-
-                          Rectangle {
-                            anchors {
-                              bottom: parent.bottom; bottomMargin: 1
-                              left: parent.left; leftMargin: 3
-                              right: parent.right; rightMargin: 3
-                            }
-                            height: 1.5
-                            radius: 1
-                            color: Util.alpha("#000000", 0.28)
-                          }
+                          // Omarchy key-cap chip (Tokens): flat fill, 1px border, accent when held
+                          radius: Tokens.radius.chip
+                          border.width: keyCap.capLive ? Tokens.border.focus : Tokens.border.hair
+                          border.color: keyCap.capLive ? root.theme.accent : root.theme.chipBorder
+                          color: keyCap.capLive ? root.theme.selectionFill : root.theme.chipFill
 
                           // 实时按键高亮反馈：按住修饰键时关联键帽闪烁
                           SequentialAnimation on border.color {
                             loops: Animation.Infinite
                             running: keyCap.capLive
-                            ColorAnimation { to: Util.alpha(root.accent, 0.95); duration: 280 }
-                            ColorAnimation { to: Util.alpha(root.accent, 0.30); duration: 280 }
+                            ColorAnimation { to: Util.alpha(root.accent, 0.95); duration: Tokens.motion.slow }
+                            ColorAnimation { to: Util.alpha(root.accent, 0.30); duration: Tokens.motion.slow }
                           }
 
                           Text {

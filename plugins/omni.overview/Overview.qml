@@ -12,6 +12,20 @@ import "Tokens.js" as Tokens
 Item {
   id: root
 
+  // ---- Omarchy theme: Tokens.js is the single source of truth -------------
+  // Follows the current Omarchy theme at runtime (colors.toml), tokyo-night fallback.
+  property var themePalette: Tokens.fallback
+  readonly property var theme: Tokens.build(Color, themePalette)
+  FileView {
+    id: omniThemeFile
+    property bool legacy: false
+    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
+    onLoadFailed: if (!legacy) legacy = true
+  }
+
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
   property var manifest: null
@@ -222,11 +236,11 @@ Item {
     Rectangle {
       id: backdrop
       anchors.fill: parent
-      color: Qt.rgba(0.02, 0.03, 0.05, 0.92)
+      color: Tokens.alpha(root.theme.sunken, 0.92)
       opacity: root.opened ? 1.0 : 0.0
 
       Behavior on opacity {
-        NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutCubic }
       }
 
       // ----------------------------------------------------
@@ -507,8 +521,8 @@ Item {
 
               // 亮橙色加粗高光描边 (带强烈外发光)
               ctx.lineWidth = 4.0
-              ctx.strokeStyle = "#ff7700"
-              ctx.shadowColor = "#ff7700"
+              ctx.strokeStyle = root.theme.accent
+              ctx.shadowColor = root.theme.accent
               ctx.shadowBlur = 28
               ctx.stroke()
               ctx.shadowBlur = 0
@@ -516,7 +530,7 @@ Item {
               // 扇区两端高光刻度线 (GTA 武器槽位精密咬合锁扣)
               var midA = item.midAngle
               ctx.lineWidth = 3
-              ctx.strokeStyle = "#ffffff"
+              ctx.strokeStyle = root.theme.textStrong
               var notchR1 = rIn + 10
               var notchR2 = rIn + 26
               ctx.beginPath()
@@ -573,11 +587,11 @@ Item {
         Rectangle {
           anchors.fill: parent
           radius: width / 2
-          color: "#07090e"
+          color: root.theme.sunken
           border.width: 2.5
-          border.color: root.currentSelectedWin ? "#ff7700" : Qt.rgba(1, 1, 1, 0.18)
+          border.color: root.currentSelectedWin ? root.theme.accent : Tokens.alpha(root.theme.text, 0.18)
 
-          Behavior on border.color { ColorAnimation { duration: 120 } }
+          Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
 
           // 内圈微妙科技暗线
           Rectangle {
@@ -586,7 +600,7 @@ Item {
             radius: width / 2
             color: "transparent"
             border.width: 1
-            border.color: Qt.rgba(255, 255, 255, 0.06)
+            border.color: Tokens.alpha(root.theme.text, 0.06)
           }
 
           // 核心内容排版
@@ -599,18 +613,18 @@ Item {
             Rectangle {
               height: 24
               width: parent.width
-              color: "#131720"
-              radius: 4
+              color: root.theme.surface
+              radius: Tokens.radius.chip
               border.width: 1
-              border.color: root.currentSelectedWin ? Qt.rgba(255, 119, 0, 0.3) : Qt.rgba(1, 1, 1, 0.08)
+              border.color: root.currentSelectedWin ? Tokens.alpha(root.theme.accent, 0.3) : Tokens.alpha(root.theme.text, 0.08)
 
               Text {
                 anchors.centerIn: parent
                 text: "ACTIVE: [" + (root.currentSelectedWin ? root.currentSelectedWin.activeName : "NONE") + "]"
-                color: "#ff7700"
+                color: root.theme.accent
                 font.pixelSize: 11
                 font.bold: true
-                font.family: "monospace"
+                font.family: Tokens.font.mono
                 elide: Text.ElideRight
                 width: parent.width - 16
                 horizontalAlignment: Text.AlignHCenter
@@ -629,7 +643,7 @@ Item {
                 width: 48
                 height: 48
                 radius: 24
-                color: root.currentSelectedWin ? Qt.rgba(255, 119, 0, 0.12) : "transparent"
+                color: root.currentSelectedWin ? Tokens.alpha(root.theme.accent, 0.12) : "transparent"
               }
 
               Image {
@@ -644,7 +658,7 @@ Item {
             // 真实窗口标题
             Text {
               text: (root.currentSelectedWin && (root.currentSelectedWin.title || root.currentSelectedWin.appName)) ? String(root.currentSelectedWin.title || root.currentSelectedWin.appName) : "No Window Selected"
-              color: "#ffffff"
+              color: root.theme.textStrong
               font.pixelSize: 13
               font.bold: true
               font.family: Style.font.family
@@ -665,18 +679,18 @@ Item {
               Row {
                 width: parent.width
                 spacing: 8
-                Text { text: "WORKSPACE:"; color: "#8892b0"; font.pixelSize: 9; font.bold: true; font.family: "monospace"; width: 85 }
+                Text { text: "WORKSPACE:"; color: root.theme.textMuted; font.pixelSize: 9; font.bold: true; font.family: Tokens.font.mono; width: 85 }
                 Rectangle {
                   height: 6
                   width: parent.width - 93
-                  radius: 2
-                  color: "#181b24"
+                  radius: Tokens.radius.chip
+                  color: root.theme.surfaceAlt
                   anchors.verticalCenter: parent.verticalCenter
                   Rectangle {
                     height: parent.height
                     width: parent.width * 0.85
-                    radius: 2
-                    color: "#ff7700"
+                    radius: Tokens.radius.chip
+                    color: root.theme.accent
                   }
                 }
               }
@@ -685,18 +699,18 @@ Item {
               Row {
                 width: parent.width
                 spacing: 8
-                Text { text: "LAYOUT MODE:"; color: "#8892b0"; font.pixelSize: 9; font.bold: true; font.family: "monospace"; width: 85 }
+                Text { text: "LAYOUT MODE:"; color: root.theme.textMuted; font.pixelSize: 9; font.bold: true; font.family: Tokens.font.mono; width: 85 }
                 Rectangle {
                   height: 6
                   width: parent.width - 93
-                  radius: 2
-                  color: "#181b24"
+                  radius: Tokens.radius.chip
+                  color: root.theme.surfaceAlt
                   anchors.verticalCenter: parent.verticalCenter
                   Rectangle {
                     height: parent.height
                     width: root.currentSelectedWin && root.currentSelectedWin.layoutMode === "FLOAT" ? parent.width * 0.45 : parent.width * 0.95
-                    radius: 2
-                    color: "#00f0ff"
+                    radius: Tokens.radius.chip
+                    color: root.theme.info
                   }
                 }
               }
@@ -705,13 +719,13 @@ Item {
               Row {
                 width: parent.width
                 spacing: 8
-                Text { text: "PROCESS PID:"; color: "#8892b0"; font.pixelSize: 9; font.bold: true; font.family: "monospace"; width: 85 }
+                Text { text: "PROCESS PID:"; color: root.theme.textMuted; font.pixelSize: 9; font.bold: true; font.family: Tokens.font.mono; width: 85 }
                 Text {
                   text: root.currentSelectedWin ? (String(root.currentSelectedWin.pid) + " · " + (root.currentSelectedWin.resolutionStr || "1280×800")) : "-"
-                  color: "#cbd5e1"
+                  color: root.theme.text
                   font.pixelSize: 9
                   font.bold: true
-                  font.family: "monospace"
+                  font.family: Tokens.font.mono
                   anchors.verticalCenter: parent.verticalCenter
                 }
               }
@@ -727,6 +741,7 @@ Item {
         model: root.layoutWindows
 
         delegate: OverviewCard {
+          theme: root.theme
           required property var modelData
           required property int index
 
@@ -746,6 +761,7 @@ Item {
       // ==========================================
       BlackHole {
         id: portalHole
+        theme: root.theme
         visible: root.opened && backdrop.opacity > 0.05
         anchors.right: parent.right
         anchors.rightMargin: Math.max(70, (parent.width - 1020) / 4)
@@ -764,17 +780,17 @@ Item {
         width: 155
         height: 82
         radius: 12
-        color: portalHole.isDragOver ? Qt.rgba(1, 0, 0.5, 0.55) : Qt.rgba(0.06, 0.08, 0.12, 0.90)
+        color: portalHole.isDragOver ? Tokens.alpha(root.theme.danger, 0.55) : Tokens.alpha(root.theme.surface, 0.90)
         border.width: 2
-        border.color: portalHole.isDragOver ? "#ff007f" : "#00f0ff"
+        border.color: portalHole.isDragOver ? root.theme.danger : root.theme.info
         z: 999
 
         x: root.dragGlobalX - width / 2
         y: root.dragGlobalY - height / 2
 
         scale: portalHole.isDragOver ? 0.65 : 1.08
-        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-        Behavior on border.color { ColorAnimation { duration: 120 } }
+        Behavior on scale { NumberAnimation { duration: Tokens.motion.fast; easing.type: Easing.OutCubic } }
+        Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
 
         Row {
           anchors.centerIn: parent
@@ -793,7 +809,7 @@ Item {
             spacing: 2
             Text {
               text: root.draggedSlotData ? String(root.draggedSlotData.appName || "").toUpperCase() : ""
-              color: "#ffffff"
+              color: root.theme.textStrong
               font.pixelSize: 11
               font.bold: true
               font.family: Style.font.family
@@ -802,10 +818,10 @@ Item {
             }
             Text {
               text: portalHole.isDragOver ? "ENTERING HOLE..." : "DRAGGING"
-              color: portalHole.isDragOver ? "#ff007f" : "#00f0ff"
+              color: portalHole.isDragOver ? root.theme.danger : root.theme.info
               font.pixelSize: 9
               font.bold: true
-              font.family: "monospace"
+              font.family: Tokens.font.mono
             }
           }
         }
@@ -821,9 +837,9 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         height: 32
         radius: 16
-        color: "#12151e"
+        color: root.theme.surface
         border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.12)
+        border.color: Tokens.alpha(root.theme.text, 0.12)
 
         Row {
           anchors.centerIn: parent
@@ -833,40 +849,40 @@ Item {
 
           Row {
             spacing: 6
-            Text { text: "MOUSE"; color: "#ff7700"; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
-            Text { text: "FLICK TO SELECT"; color: "#94a3b8"; font.pixelSize: 10; font.family: Style.font.family }
+            Text { text: "MOUSE"; color: root.theme.accent; font.pixelSize: 10; font.bold: true; font.family: Tokens.font.mono }
+            Text { text: "FLICK TO SELECT"; color: root.theme.textMuted; font.pixelSize: 10; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Qt.rgba(1, 1, 1, 0.2); font.pixelSize: 11 }
+          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: 11 }
 
           Row {
             spacing: 6
-            Text { text: "DRAG → HOLE"; color: "#ff007f"; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
-            Text { text: "MOVE TO WORKSPACE [" + root.targetTransferWorkspaceId + "]"; color: "#94a3b8"; font.pixelSize: 10; font.family: Style.font.family }
+            Text { text: "DRAG → HOLE"; color: root.theme.danger; font.pixelSize: 10; font.bold: true; font.family: Tokens.font.mono }
+            Text { text: "MOVE TO WORKSPACE [" + root.targetTransferWorkspaceId + "]"; color: root.theme.textMuted; font.pixelSize: 10; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Qt.rgba(1, 1, 1, 0.2); font.pixelSize: 11 }
+          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: 11 }
 
           Row {
             spacing: 6
-            Text { text: "[M]"; color: "#00f0ff"; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
-            Text { text: "QUICK TRANSFER"; color: "#94a3b8"; font.pixelSize: 10; font.family: Style.font.family }
+            Text { text: "[M]"; color: root.theme.info; font.pixelSize: 10; font.bold: true; font.family: Tokens.font.mono }
+            Text { text: "QUICK TRANSFER"; color: root.theme.textMuted; font.pixelSize: 10; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Qt.rgba(1, 1, 1, 0.2); font.pixelSize: 11 }
+          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: 11 }
 
           Row {
             spacing: 6
-            Text { text: "ENTER / CLICK"; color: "#ffffff"; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
-            Text { text: "EQUIP / FOCUS"; color: "#94a3b8"; font.pixelSize: 10; font.family: Style.font.family }
+            Text { text: "ENTER / CLICK"; color: root.theme.textStrong; font.pixelSize: 10; font.bold: true; font.family: Tokens.font.mono }
+            Text { text: "EQUIP / FOCUS"; color: root.theme.textMuted; font.pixelSize: 10; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Qt.rgba(1, 1, 1, 0.2); font.pixelSize: 11 }
+          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: 11 }
 
           Row {
             spacing: 6
-            Text { text: "ESC"; color: "#ffffff"; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
-            Text { text: "CANCEL"; color: "#94a3b8"; font.pixelSize: 10; font.family: Style.font.family }
+            Text { text: "ESC"; color: root.theme.textStrong; font.pixelSize: 10; font.bold: true; font.family: Tokens.font.mono }
+            Text { text: "CANCEL"; color: root.theme.textMuted; font.pixelSize: 10; font.family: Style.font.family }
           }
         }
       }

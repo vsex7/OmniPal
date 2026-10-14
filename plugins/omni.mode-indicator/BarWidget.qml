@@ -20,6 +20,21 @@ import "Tokens.js" as Tokens
 // 6. 模式与策略数据 100% 来源单一事实源 (omni-profile / state.json)
 BarWidget {
   id: root
+
+  // ---- Omarchy theme: Tokens.js is the single source of truth -------------
+  // Follows the current Omarchy theme at runtime (colors.toml), tokyo-night fallback.
+  property var themePalette: Tokens.fallback
+  readonly property var modeColors: Tokens.modeColors(themePalette)
+  readonly property var theme: Tokens.build(Color, themePalette)
+  FileView {
+    id: omniThemeFile
+    property bool legacy: false
+    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
+    onLoadFailed: if (!legacy) legacy = true
+  }
   moduleName: "omni.mode-indicator"
 
   property string statePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/omnipal/state.json"
@@ -27,7 +42,7 @@ BarWidget {
   property string currentName: "Omarchy 原生模式"
   property string currentIcon: "⊡"
   property string currentBrief: "OMA"
-  property color currentColor: Tokens.mode.omarchy
+  property color currentColor: root.modeColors.omarchy
   property int activeBindingsCount: 0
   property bool engineRunning: false
   property string engineStatus: "native"
@@ -216,7 +231,7 @@ BarWidget {
     root.currentName = "Omarchy 原生模式"
     root.currentIcon = "⊡"
     root.currentBrief = "OMA"
-    root.currentColor = Tokens.mode.omarchy
+    root.currentColor = root.modeColors.omarchy
     root.activeBindingsCount = 0
     root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, "omarchy")
     runCmd("omni-profile restore")
@@ -294,7 +309,7 @@ BarWidget {
     open: root.panelOpen
     triggerMode: "click"
     padding: Style.space(8)
-    borderColor: Qt.rgba(root.currentColor.r, root.currentColor.g, root.currentColor.b, 0.45)
+    borderColor: Tokens.alpha(root.currentColor, 0.45)
     contentWidth: contextPopup.fittedContentWidth(Style.space(320))
     contentHeight: contextPopup.fittedContentHeight(panelLayout.implicitHeight)
 
@@ -321,12 +336,12 @@ BarWidget {
             implicitHeight: height
             radius: Math.max(4, Style.cornerRadius)
             color: root.engineRunning
-              ? Qt.rgba(root.currentColor.r, root.currentColor.g, root.currentColor.b, 0.15)
-              : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.08)
+              ? Tokens.alpha(root.currentColor, 0.15)
+              : Tokens.alpha(Color.foreground, 0.08)
             border.width: 1
             border.color: root.engineRunning
-              ? Qt.rgba(root.currentColor.r, root.currentColor.g, root.currentColor.b, 0.4)
-              : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.15)
+              ? Tokens.alpha(root.currentColor, 0.4)
+              : Tokens.alpha(Color.foreground, 0.15)
 
             Text {
               anchors.centerIn: parent
@@ -365,7 +380,7 @@ BarWidget {
               height: Style.space(16)
               width: heroBriefText.implicitWidth + Style.space(8)
               radius: Style.space(8)
-              color: Qt.rgba(root.currentColor.r, root.currentColor.g, root.currentColor.b, 0.18)
+              color: Tokens.alpha(root.currentColor, 0.18)
               anchors.verticalCenter: parent.verticalCenter
 
               Text {
@@ -393,7 +408,7 @@ BarWidget {
                 height: Style.space(6)
                 radius: Style.space(3)
                 color: root.engineRunning
-                  ? (root.engineStatus === "active" ? Tokens.semantic.ok : Tokens.semantic.accent)
+                  ? (root.engineStatus === "active" ? root.theme.ok : root.theme.accent)
                   : Color.muted
                 anchors.verticalCenter: parent.verticalCenter
               }
@@ -425,13 +440,13 @@ BarWidget {
                 width: Style.space(6)
                 height: Style.space(6)
                 radius: Style.space(3)
-                color: root.compositorConnected ? Tokens.semantic.ok : Tokens.semantic.danger
+                color: root.compositorConnected ? root.theme.ok : root.theme.danger
                 anchors.verticalCenter: parent.verticalCenter
               }
 
               Text {
                 text: root.compositorConnected ? "Hyprland 连通" : "未连接 Compositor"
-                color: root.compositorConnected ? Qt.darker(Color.foreground, 1.4) : Tokens.semantic.danger
+                color: root.compositorConnected ? Qt.darker(Color.foreground, 1.4) : root.theme.danger
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
               }
@@ -499,7 +514,7 @@ BarWidget {
               radius: Math.max(2, Style.cornerRadius)
               color: rowMouse.containsMouse
                 ? Style.hoverFillFor(Color.foreground, Color.accent)
-                : (profileRow.isActive ? Qt.rgba(profileRow.itemColor.r, profileRow.itemColor.g, profileRow.itemColor.b, 0.12) : "transparent")
+                : (profileRow.isActive ? Tokens.alpha(profileRow.itemColor, 0.12) : "transparent")
             }
 
             Rectangle {
@@ -593,7 +608,7 @@ BarWidget {
           implicitWidth: width
           implicitHeight: height
           radius: Style.space(8)
-          color: Qt.rgba(root.currentColor.r, root.currentColor.g, root.currentColor.b, 0.18)
+          color: Tokens.alpha(root.currentColor, 0.18)
 
           Text {
             id: effPolicyText
@@ -617,9 +632,9 @@ BarWidget {
           height: Style.space(32)
           implicitHeight: height
           radius: Math.max(3, Style.cornerRadius)
-          color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.06)
+          color: Tokens.alpha(Color.foreground, 0.06)
           border.width: 1
-          border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.1)
+          border.color: Tokens.alpha(Color.foreground, 0.1)
 
           Row {
             anchors.fill: parent
@@ -649,11 +664,11 @@ BarWidget {
                   anchors.fill: parent
                   radius: Math.max(2, Style.cornerRadius - 1)
                   color: policySeg.isSelected
-                    ? Qt.rgba(root.currentColor.r, root.currentColor.g, root.currentColor.b, 0.22)
+                    ? Tokens.alpha(root.currentColor, 0.22)
                     : (policyMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent) : "transparent")
                   border.width: policySeg.isSelected ? 1 : 0
                   border.color: policySeg.isSelected
-                    ? Qt.rgba(root.currentColor.r, root.currentColor.g, root.currentColor.b, 0.5)
+                    ? Tokens.alpha(root.currentColor, 0.5)
                     : "transparent"
 
                   Row {
@@ -695,7 +710,7 @@ BarWidget {
           width: parent.width
           implicitHeight: Style.space(22)
           radius: Math.max(2, Style.cornerRadius - 1)
-          color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.03)
+          color: Tokens.alpha(Color.foreground, 0.03)
 
           Item {
             anchors.fill: parent

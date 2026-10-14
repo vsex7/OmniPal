@@ -1,4 +1,5 @@
 import QtQuick
+import "Tokens.js" as Tokens
 import QtQuick.Layouts
 import Quickshell
 import qs.Commons
@@ -8,6 +9,7 @@ import qs.Ui
 // 支持将窗口拖拽至黑洞，将程序静默吸入并移动至指定工作区
 Item {
   id: blackHoleRoot
+  property var theme: Tokens.build(null, Tokens.fallback)
 
   property int targetWorkspaceId: 2
   property bool isDragOver: false
@@ -79,16 +81,16 @@ Item {
     radius: width / 2
     color: "transparent"
     border.width: blackHoleRoot.isDragOver ? 3 : 1
-    border.color: blackHoleRoot.isDragOver ? "#ff007f" : Qt.rgba(0.5, 0.2, 0.9, 0.25)
+    border.color: blackHoleRoot.isDragOver ? theme.danger : Tokens.alpha(theme.special, 0.25)
 
-    Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
-    Behavior on border.color { ColorAnimation { duration: 200 } }
+    Behavior on width { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutCubic } }
+    Behavior on border.color { ColorAnimation { duration: Tokens.motion.slow } }
 
     Rectangle {
       anchors.fill: parent
       radius: width / 2
-      color: blackHoleRoot.isDragOver ? Qt.rgba(1.0, 0.0, 0.5, 0.15) : Qt.rgba(0.4, 0.1, 0.8, 0.06)
-      Behavior on color { ColorAnimation { duration: 200 } }
+      color: blackHoleRoot.isDragOver ? Tokens.alpha(theme.danger, 0.15) : Tokens.alpha(theme.special, 0.06)
+      Behavior on color { ColorAnimation { duration: Tokens.motion.slow } }
     }
   }
 
@@ -154,7 +156,7 @@ Item {
     radius: 80
     color: "transparent"
     border.width: 3
-    border.color: "#00f0ff"
+    border.color: theme.info
     opacity: 0
   }
 
@@ -165,12 +167,12 @@ Item {
     width: blackHoleRoot.isDragOver ? 92 : 80
     height: width
     radius: width / 2
-    color: "#020306"
+    color: theme.sunken
     border.width: blackHoleRoot.isDragOver ? 3.5 : 2
-    border.color: blackHoleRoot.isDragOver ? "#00f0ff" : "#ffffff"
+    border.color: blackHoleRoot.isDragOver ? theme.info : theme.textStrong
 
-    Behavior on width { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-    Behavior on border.color { ColorAnimation { duration: 150 } }
+    Behavior on width { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutCubic } }
+    Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
 
     // 中心微型光子环 (Photon Ring)
     Rectangle {
@@ -178,9 +180,9 @@ Item {
       width: parent.width * 0.55
       height: width
       radius: width / 2
-      color: "#000000"
+      color: theme.shadow
       border.width: 1.5
-      border.color: blackHoleRoot.isDragOver ? "#ff7700" : Qt.rgba(1, 1, 1, 0.4)
+      border.color: blackHoleRoot.isDragOver ? theme.accent : Tokens.alpha(theme.text, 0.4)
     }
   }
 
@@ -199,7 +201,7 @@ Item {
         width: 7
         height: 7
         radius: 3.5
-        color: blackHoleRoot.isDragOver ? "#ff007f" : "#a855f7"
+        color: blackHoleRoot.isDragOver ? theme.danger : theme.special
         anchors.verticalCenter: parent.verticalCenter
         SequentialAnimation on opacity {
           loops: Animation.Infinite
@@ -211,17 +213,17 @@ Item {
 
       Text {
         text: blackHoleRoot.isDragOver ? "EVENT HORIZON CAPTURE" : "BLACK HOLE PORTAL"
-        color: blackHoleRoot.isDragOver ? "#ff007f" : "#cbd5e1"
+        color: blackHoleRoot.isDragOver ? theme.danger : theme.text
         font.pixelSize: 11
         font.bold: true
-        font.family: "monospace"
+        font.family: Tokens.font.mono
       }
     }
 
     Text {
       anchors.horizontalCenter: parent.horizontalCenter
       text: blackHoleRoot.isDragOver ? ("RELEASE → MOVE TO WORKSPACE [" + blackHoleRoot.targetWorkspaceId + "]") : ("DRAG HERE → WORKSPACE [" + blackHoleRoot.targetWorkspaceId + "]")
-      color: blackHoleRoot.isDragOver ? "#00f0ff" : "#94a3b8"
+      color: blackHoleRoot.isDragOver ? theme.info : theme.textMuted
       font.pixelSize: 10
       font.bold: true
       font.family: Style.font.family

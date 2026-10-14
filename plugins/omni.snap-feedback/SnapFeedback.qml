@@ -21,6 +21,20 @@ import "Tokens.js" as Tokens
 Item {
   id: root
 
+  // ---- Omarchy theme: Tokens.js is the single source of truth -------------
+  // Follows the current Omarchy theme at runtime (colors.toml), tokyo-night fallback.
+  property var themePalette: Tokens.fallback
+  readonly property var theme: Tokens.build(Color, themePalette)
+  FileView {
+    id: omniThemeFile
+    property bool legacy: false
+    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
+    onLoadFailed: if (!legacy) legacy = true
+  }
+
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
   property var manifest: null
@@ -30,7 +44,7 @@ Item {
   property string zone: "left"
   property string hoveredZone: ""
 
-  readonly property color snapColor: (Color && Color.accent) ? Color.accent : Tokens.semantic.accent
+  readonly property color snapColor: (Color && Color.accent) ? Color.accent : root.theme.accent
 
   // 键盘与焦点导航状态
   property int focusedTemplateIndex: -1  // -1 表示未选模板，0~5 表示当前选中的模板
@@ -228,9 +242,9 @@ Item {
     Rectangle {
       anchors.fill: parent
       visible: root.interactive
-      color: Util.alpha(Color.menu.scrim || "#000000", 0.55)
+      color: Util.alpha(Color.menu.scrim || root.theme.black, 0.55)
       opacity: root.interactive ? 1.0 : 0.0
-      Behavior on opacity { NumberAnimation { duration: 120 } }
+      Behavior on opacity { NumberAnimation { duration: Tokens.motion.fast } }
 
       MouseArea {
         anchors.fill: parent
@@ -470,14 +484,14 @@ Item {
           height: slotGeom.height
           radius: Style.cornerRadius ? Style.cornerRadius * 1.5 : 12
 
-          color: Qt.rgba(1, 1, 1, 0.03)
+          color: Tokens.alpha(root.theme.text, 0.03)
           border.width: 1
           border.color: Util.alpha(root.snapColor, 0.22)
 
-          Behavior on x { NumberAnimation { duration: 80 } }
-          Behavior on y { NumberAnimation { duration: 80 } }
-          Behavior on width { NumberAnimation { duration: 80 } }
-          Behavior on height { NumberAnimation { duration: 80 } }
+          Behavior on x { NumberAnimation { duration: Tokens.motion.fast } }
+          Behavior on y { NumberAnimation { duration: Tokens.motion.fast } }
+          Behavior on width { NumberAnimation { duration: Tokens.motion.fast } }
+          Behavior on height { NumberAnimation { duration: Tokens.motion.fast } }
         }
       }
 
@@ -495,16 +509,16 @@ Item {
         border.width: 2
         border.color: Util.alpha(root.snapColor, root.interactive ? 0.75 : 0.85)
 
-        Behavior on x { NumberAnimation { duration: 80 } }
-        Behavior on y { NumberAnimation { duration: 80 } }
-        Behavior on width { NumberAnimation { duration: 80 } }
-        Behavior on height { NumberAnimation { duration: 80 } }
+        Behavior on x { NumberAnimation { duration: Tokens.motion.fast } }
+        Behavior on y { NumberAnimation { duration: Tokens.motion.fast } }
+        Behavior on width { NumberAnimation { duration: Tokens.motion.fast } }
+        Behavior on height { NumberAnimation { duration: Tokens.motion.fast } }
 
         // 柔和外发光边框
         Rectangle {
           anchors.fill: parent
           anchors.margins: -2
-          radius: parent.radius + 2
+          radius: parent.radius
           color: "transparent"
           border.width: 1
           border.color: Util.alpha(root.snapColor, 0.35)
@@ -517,7 +531,7 @@ Item {
           implicitWidth: pillRow.implicitWidth + Style.space(24)
           implicitHeight: pillRow.implicitHeight + Style.space(16)
           radius: height / 2
-          color: Qt.rgba(0.06, 0.08, 0.12, 0.90)
+          color: Tokens.alpha(root.theme.surface, 0.90)
           border.color: Util.alpha(root.snapColor, 0.65)
           border.width: 1
 
@@ -525,7 +539,7 @@ Item {
           Rectangle {
             anchors.fill: parent
             anchors.margins: -1
-            radius: parent.radius + 1
+            radius: parent.radius
             color: "transparent"
             border.width: 1
             border.color: Util.alpha(root.snapColor, 0.30)
@@ -556,7 +570,7 @@ Item {
                   font.family: Style.font.family
                   font.pixelSize: Style.font.bodySmall
                   font.bold: true
-                  color: "#ffffff"
+                  color: root.theme.textStrong
                 }
 
                 // 物理像素分辨率胶囊
@@ -564,8 +578,8 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                   implicitWidth: dimLabel.implicitWidth + 8
                   height: 16
-                  radius: 3
-                  color: Qt.rgba(1, 1, 1, 0.14)
+                  radius: Tokens.radius.chip
+                  color: Tokens.alpha(root.theme.text, 0.14)
 
                   Text {
                     id: dimLabel
@@ -601,16 +615,16 @@ Item {
         property: "opacity"
         from: 0.0
         to: 1.0
-        duration: 100
+        duration: Tokens.motion.fast
         easing.type: Easing.OutCubic
       }
-      PauseAnimation { duration: 180 }
+      PauseAnimation { duration: Tokens.motion.slow }
       NumberAnimation {
         target: previewContainer
         property: "opacity"
         from: 1.0
         to: 0.0
-        duration: 140
+        duration: Tokens.motion.normal
         easing.type: Easing.InQuad
       }
     }
@@ -625,8 +639,8 @@ Item {
 
       scale: root.interactive ? 1.0 : 0.95
       opacity: root.interactive ? 1.0 : 0.0
-      Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutBack; easing.overshoot: 1.08 } }
-      Behavior on opacity { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+      Behavior on scale { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutBack; easing.overshoot: 1.08 } }
+      Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutCubic } }
 
       readonly property real cardRadius: Math.max(14, Style.cornerRadius ? Style.cornerRadius * 1.5 : 14)
 
@@ -636,7 +650,7 @@ Item {
         anchors.margins: -10
         radius: flyoutWrapper.cardRadius + 10
         color: "transparent"
-        border.color: Qt.rgba(0, 0, 0, 0.45)
+        border.color: Tokens.alpha(root.theme.black, 0.45)
         border.width: 10
       }
 
@@ -646,9 +660,9 @@ Item {
         anchors.margins: -1
         radius: flyoutWrapper.cardRadius + 1
         color: "transparent"
-        border.color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.42) : Qt.rgba(1, 1, 1, 0.08)
+        border.color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.42) : Tokens.alpha(root.theme.text, 0.08)
         border.width: 1
-        Behavior on border.color { ColorAnimation { duration: 120 } }
+        Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
       }
 
       // 3. 卡片主体 (Obsidian Acrylic Glass)
@@ -656,11 +670,11 @@ Item {
         id: flyoutCard
         anchors.fill: parent
         radius: flyoutWrapper.cardRadius
-        color: Qt.rgba(0.07, 0.09, 0.13, 0.96)
-        border.color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.48) : Qt.rgba(1, 1, 1, 0.14)
+        color: Tokens.alpha(root.theme.surface, 0.96)
+        border.color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.48) : Tokens.alpha(root.theme.text, 0.14)
         border.width: 1
         clip: true
-        Behavior on border.color { ColorAnimation { duration: 120 } }
+        Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
 
         // 吸收卡片空白区点击，防止点击空白处透传穿透导致面板被全屏遮罩误关闭
         MouseArea {
@@ -673,7 +687,7 @@ Item {
           anchors.left: parent.left
           anchors.right: parent.right
           height: 1
-          color: Qt.rgba(1, 1, 1, 0.14)
+          color: Tokens.alpha(root.theme.text, 0.14)
         }
 
         // ============================================================
@@ -697,7 +711,7 @@ Item {
             Rectangle {
               width: Style.space(24)
               height: Style.space(24)
-              radius: 6
+              radius: Tokens.radius.chip
               color: Util.alpha(root.snapColor, 0.16)
               border.color: Util.alpha(root.snapColor, 0.40)
               border.width: 1
@@ -717,7 +731,7 @@ Item {
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
               font.bold: true
-              color: "#ffffff"
+              color: root.theme.textStrong
               anchors.verticalCenter: parent.verticalCenter
             }
 
@@ -725,9 +739,9 @@ Item {
             Rectangle {
               visible: (root.targetWindowTitle !== "" || root.targetWindowClass !== "" || root.targetWindowAddress !== "")
               height: Style.space(18)
-              radius: 4
-              color: Qt.rgba(1, 1, 1, 0.08)
-              border.color: Qt.rgba(1, 1, 1, 0.14)
+              radius: Tokens.radius.chip
+              color: Tokens.alpha(root.theme.text, 0.08)
+              border.color: Tokens.alpha(root.theme.text, 0.14)
               border.width: 1
               anchors.verticalCenter: parent.verticalCenter
               implicitWidth: targetWinRow.implicitWidth + Style.space(10)
@@ -740,8 +754,8 @@ Item {
                 Rectangle {
                   width: 5
                   height: 5
-                  radius: 3
-                  color: Tokens.semantic.ok
+                  radius: Tokens.radius.chip
+                  color: root.theme.ok
                   anchors.verticalCenter: parent.verticalCenter
                 }
 
@@ -769,9 +783,9 @@ Item {
             // 阶段提示药丸
             Rectangle {
               height: Style.space(20)
-              radius: 4
-              color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.18) : Qt.rgba(0, 0, 0, 0.45)
-              border.color: root.focusedTemplateIndex !== -1 ? root.snapColor : Qt.rgba(1, 1, 1, 0.12)
+              radius: Tokens.radius.chip
+              color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.18) : Tokens.alpha(root.theme.black, 0.45)
+              border.color: root.focusedTemplateIndex !== -1 ? root.snapColor : Tokens.alpha(root.theme.text, 0.12)
               border.width: 1
               anchors.verticalCenter: parent.verticalCenter
               implicitWidth: stepBadgeRow.implicitWidth + Style.space(8)
@@ -796,19 +810,19 @@ Item {
             Rectangle {
               width: Style.space(22)
               height: Style.space(22)
-              radius: 5
-              color: closeMouse.containsMouse ? Tokens.semantic.danger : Qt.rgba(1, 1, 1, 0.06)
-              border.color: closeMouse.containsMouse ? "transparent" : Qt.rgba(1, 1, 1, 0.10)
+              radius: Tokens.radius.chip
+              color: closeMouse.containsMouse ? root.theme.danger : Tokens.alpha(root.theme.text, 0.06)
+              border.color: closeMouse.containsMouse ? "transparent" : Tokens.alpha(root.theme.text, 0.10)
               border.width: 1
               anchors.verticalCenter: parent.verticalCenter
-              Behavior on color { ColorAnimation { duration: 90 } }
+              Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
 
               Text {
                 anchors.centerIn: parent
                 text: "✕"
                 font.pixelSize: 10
                 font.bold: true
-                color: closeMouse.containsMouse ? "#ffffff" : Util.alpha(Color.foreground, 0.60)
+                color: closeMouse.containsMouse ? root.theme.white : Util.alpha(Color.foreground, 0.60)
               }
 
               MouseArea {
@@ -849,24 +863,24 @@ Item {
 
               width: (templatesGrid.width - templatesGrid.spacing * 2) / 3
               height: (templatesGrid.height - templatesGrid.spacing) / 2
-              radius: 8
+              radius: Tokens.radius.chip
               color: isSelectedTpl
-                ? Qt.rgba(0.14, 0.19, 0.28, 0.92)
-                : (isCardHovered ? Qt.rgba(0.12, 0.15, 0.22, 0.82) : Qt.rgba(0.09, 0.11, 0.16, 0.65))
-              border.color: isSelectedTpl ? root.snapColor : (isCardHovered ? Qt.rgba(1, 1, 1, 0.30) : Qt.rgba(1, 1, 1, 0.10))
+                ? Tokens.alpha(root.theme.surfaceAlt, 0.92)
+                : (isCardHovered ? Tokens.alpha(root.theme.surfaceAlt, 0.82) : Tokens.alpha(root.theme.surface, 0.65))
+              border.color: isSelectedTpl ? root.snapColor : (isCardHovered ? Tokens.alpha(root.theme.text, 0.30) : Tokens.alpha(root.theme.text, 0.10))
               border.width: isSelectedTpl ? 2 : 1
               opacity: isDimmed ? 0.45 : 1.0
 
-              Behavior on color { ColorAnimation { duration: 80 } }
-              Behavior on border.color { ColorAnimation { duration: 80 } }
-              Behavior on border.width { NumberAnimation { duration: 80 } }
-              Behavior on opacity { NumberAnimation { duration: 80 } }
+              Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
+              Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
+              Behavior on border.width { NumberAnimation { duration: Tokens.motion.fast } }
+              Behavior on opacity { NumberAnimation { duration: Tokens.motion.fast } }
 
               // 选中外圈光晕
               Rectangle {
                 anchors.fill: parent
                 anchors.margins: -2
-                radius: parent.radius + 2
+                radius: parent.radius
                 color: "transparent"
                 border.width: 1
                 border.color: Util.alpha(root.snapColor, 0.45)
@@ -906,7 +920,7 @@ Item {
                       font.family: Style.font.family
                       font.pixelSize: 9
                       font.bold: true
-                      color: tplCard.isSelectedTpl ? "#ffffff" : (tplCard.isCardHovered ? "#ffffff" : Util.alpha(Color.foreground, 0.85))
+                      color: tplCard.isSelectedTpl ? root.theme.white : (tplCard.isCardHovered ? root.theme.white : Util.alpha(Color.foreground, 0.85))
                       anchors.verticalCenter: parent.verticalCenter
                     }
 
@@ -927,9 +941,9 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     width: 16
                     height: 14
-                    radius: 3
-                    color: tplCard.isSelectedTpl ? root.snapColor : Qt.rgba(0, 0, 0, 0.45)
-                    border.color: tplCard.isSelectedTpl ? "#ffffff" : Qt.rgba(1, 1, 1, 0.15)
+                    radius: Tokens.radius.chip
+                    color: tplCard.isSelectedTpl ? root.snapColor : Tokens.alpha(root.theme.black, 0.45)
+                    border.color: tplCard.isSelectedTpl ? root.theme.textStrong : Tokens.alpha(root.theme.text, 0.15)
                     border.width: 1
 
                     Text {
@@ -937,7 +951,7 @@ Item {
                       text: tplCard.modelData.key || String(tplCard.index + 1)
                       font.pixelSize: 8
                       font.bold: true
-                      color: tplCard.isSelectedTpl ? "#000000" : Util.alpha(Color.foreground, 0.75)
+                      color: tplCard.isSelectedTpl ? root.theme.black : Util.alpha(Color.foreground, 0.75)
                     }
                   }
                 }
@@ -947,9 +961,9 @@ Item {
                   id: miniCanvas
                   width: parent.width
                   height: parent.height - 21
-                  radius: 5
-                  color: Qt.rgba(0, 0, 0, 0.30)
-                  border.color: Qt.rgba(1, 1, 1, 0.06)
+                  radius: Tokens.radius.chip
+                  color: Tokens.alpha(root.theme.black, 0.30)
+                  border.color: Tokens.alpha(root.theme.text, 0.06)
                   border.width: 1
                   clip: true
 
@@ -975,14 +989,14 @@ Item {
                       y: slotY + 1
                       width: Math.max(10, slotW - 2)
                       height: Math.max(10, slotH - 2)
-                      radius: 3
+                      radius: Tokens.radius.chip
 
-                      color: isHovered ? Util.alpha(root.snapColor, 0.40) : Qt.rgba(1, 1, 1, 0.08)
-                      border.color: isHovered ? root.snapColor : Qt.rgba(1, 1, 1, 0.16)
+                      color: isHovered ? Util.alpha(root.snapColor, 0.40) : Tokens.alpha(root.theme.text, 0.08)
+                      border.color: isHovered ? root.snapColor : Tokens.alpha(root.theme.text, 0.16)
                       border.width: isHovered ? 1.5 : 1
 
-                      Behavior on color { ColorAnimation { duration: 80 } }
-                      Behavior on border.color { ColorAnimation { duration: 80 } }
+                      Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
+                      Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
 
                       // 选中模板时的数字按键角标 [1]、[2]...
                       Rectangle {
@@ -990,9 +1004,9 @@ Item {
                         anchors.centerIn: parent
                         width: 16
                         height: 16
-                        radius: 3
-                        color: slotRect.isSlotFocused ? root.snapColor : Qt.rgba(0, 0, 0, 0.7)
-                        border.color: slotRect.isSlotFocused ? "#ffffff" : Util.alpha(root.snapColor, 0.5)
+                        radius: Tokens.radius.chip
+                        color: slotRect.isSlotFocused ? root.snapColor : Tokens.alpha(root.theme.black, 0.7)
+                        border.color: slotRect.isSlotFocused ? root.theme.white : Util.alpha(root.snapColor, 0.5)
                         border.width: 1
 
                         Text {
@@ -1000,7 +1014,7 @@ Item {
                           text: String(slotRect.index + 1)
                           font.pixelSize: 9
                           font.bold: true
-                          color: slotRect.isSlotFocused ? "#000000" : "#ffffff"
+                          color: slotRect.isSlotFocused ? root.theme.onAccent : root.theme.textStrong
                         }
                       }
 
@@ -1012,7 +1026,7 @@ Item {
                         font.family: Style.font.family
                         font.pixelSize: 8
                         font.bold: true
-                        color: "#ffffff"
+                        color: root.theme.textStrong
                       }
 
                       MouseArea {
@@ -1051,7 +1065,7 @@ Item {
           anchors.leftMargin: Style.space(14)
           anchors.rightMargin: Style.space(14)
           height: 1
-          color: Qt.rgba(1, 1, 1, 0.08)
+          color: Tokens.alpha(root.theme.text, 0.08)
         }
 
         // ============================================================
@@ -1075,7 +1089,7 @@ Item {
             Rectangle {
               width: 5
               height: 5
-              radius: 3
+              radius: Tokens.radius.chip
               color: root.hoveredZone !== "" ? root.snapColor : Util.alpha(Color.foreground, 0.4)
               anchors.verticalCenter: parent.verticalCenter
             }
@@ -1117,9 +1131,9 @@ Item {
               delegate: Rectangle {
                 required property var modelData
                 height: 16
-                radius: 3
-                color: Qt.rgba(0, 0, 0, 0.45)
-                border.color: Qt.rgba(1, 1, 1, 0.12)
+                radius: Tokens.radius.chip
+                color: Tokens.alpha(root.theme.black, 0.45)
+                border.color: Tokens.alpha(root.theme.text, 0.12)
                 border.width: 1
                 implicitWidth: kbdRow.implicitWidth + 6
 
@@ -1133,7 +1147,7 @@ Item {
                     font.family: Style.font.family
                     font.pixelSize: 8
                     font.bold: true
-                    color: "#ffffff"
+                    color: root.theme.textStrong
                     anchors.verticalCenter: parent.verticalCenter
                   }
 

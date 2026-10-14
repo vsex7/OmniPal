@@ -17,6 +17,20 @@ import "Tokens.js" as Tokens
 Item {
   id: root
 
+  // ---- Omarchy theme: Tokens.js is the single source of truth -------------
+  // Follows the current Omarchy theme at runtime (colors.toml), tokyo-night fallback.
+  property var themePalette: Tokens.fallback
+  readonly property var theme: Tokens.build(Color, themePalette)
+  FileView {
+    id: omniThemeFile
+    property bool legacy: false
+    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
+    onLoadFailed: if (!legacy) legacy = true
+  }
+
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
   property var manifest: null
@@ -53,7 +67,7 @@ Item {
   property real contextCenterX: 0
 
   // ---------- 设计令牌 ----------
-  readonly property color dangerColor: Tokens.semantic.danger
+  readonly property color dangerColor: root.theme.danger
   readonly property color hairline: Util.alpha(Color.menu.text, 0.10)
 
   function open(payloadJson) {
@@ -346,7 +360,7 @@ Item {
       Rectangle {
         anchors.fill: parent
         anchors.margins: -1
-        radius: parent.radius + 1
+        radius: parent.radius
         color: "transparent"
         border.width: 1
         border.color: Util.alpha(Color.menu.text, 0.08)
@@ -401,7 +415,7 @@ Item {
                   target: bounceSlot
                   property: "y"
                   to: -Style.space(13)
-                  duration: 130
+                  duration: Tokens.motion.normal
                   easing.type: Easing.OutCubic
                 }
                 NumberAnimation {
@@ -427,7 +441,7 @@ Item {
                   ? Util.alpha(Color.menu.text, 0.16)
                   : Util.alpha(Color.menu.text, 0.08)
                 Behavior on width { SpringAnimation { spring: 3.2; damping: 0.62; epsilon: 0.001 } }
-                Behavior on color { ColorAnimation { duration: 140 } }
+                Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
 
                 Text {
                   text: dockItemWrapper.modelData.icon
@@ -460,7 +474,7 @@ Item {
                     font.family: Style.font.family
                     font.pixelSize: 9
                     font.bold: true
-                    color: "#ffffff"
+                    color: root.theme.textStrong
                   }
                 }
               }
@@ -485,7 +499,7 @@ Item {
               anchors.horizontalCenter: parent.horizontalCenter
               width: tipText.implicitWidth + Style.space(12)
               height: tipText.implicitHeight + Style.space(6)
-              radius: 4
+              radius: Tokens.radius.chip
               color: Util.alpha(Color.menu.background, 0.95)
               border.width: 1
               border.color: Util.alpha(Color.menu.border, 0.4)
@@ -568,14 +582,14 @@ Item {
       opacity: root.contextItem !== null ? 1 : 0
       scale: root.contextItem !== null ? 1 : 0.92
       visible: root.contextItem !== null || opacity > 0
-      Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
-      Behavior on scale { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
+      Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutQuad } }
+      Behavior on scale { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutCubic } }
 
       // 卡片投影
       Rectangle {
         anchors { fill: parent; margins: Style.space(3); topMargin: Style.space(8) }
-        radius: parent.radius + 6
-        color: "#000000"
+        radius: parent.radius
+        color: root.theme.shadow
         opacity: 0.30
         z: -1
       }
@@ -659,11 +673,11 @@ Item {
             required property var modelData
             width: parent.width
             height: Style.space(30)
-            radius: 8
+            radius: Tokens.radius.chip
             color: cardRowHover.containsMouse
               ? Util.alpha(modelData.danger ? root.dangerColor : Color.menu.text, modelData.danger ? 0.14 : 0.09)
               : "transparent"
-            Behavior on color { ColorAnimation { duration: 120 } }
+            Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
 
             Row {
               anchors { left: parent.left; leftMargin: Style.space(9); verticalCenter: parent.verticalCenter }
