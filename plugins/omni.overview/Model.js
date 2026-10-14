@@ -456,7 +456,7 @@ function calculateRadialNexusLayout(windows, availW, availH) {
     copy.anchorY = Math.round(cy + midR * Math.sin(midA))
     copy.angleDeg = Math.round(midA * 180 / Math.PI)
     copy.cyberColor = getAppCyberColor(item.class, item.appType)
-    copy.shortcutKey = (i < 8) ? String(i + 1) : ""
+    copy.shortcutKey = (i < 9) ? String(i + 1) : ""
 
     results.push(copy)
   }
@@ -597,7 +597,7 @@ function calculateGtaWheelLayout(windows, availW, availH) {
     copy.anchorX = Math.round(cx + midR * Math.cos(midA))
     copy.anchorY = Math.round(cy + midR * Math.sin(midA))
     copy.angleDeg = Math.round(midA * 180 / Math.PI)
-    copy.shortcutKey = (i < 8) ? String(i + 1) : ""
+    copy.shortcutKey = (i < 9) ? String(i + 1) : ""
     copy.activeName = (item.appName || "WINDOW").toUpperCase()
     copy.cardScale = cardScale
 

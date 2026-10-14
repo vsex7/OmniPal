@@ -8,6 +8,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
+import "Safety.js" as Safety
 
 // OmniPal Overview - GTA V 战术武器轮盘多任务视界 (终极精细打磨版)
 Item {
@@ -136,6 +137,7 @@ Item {
   function dismiss() {
     root.opened = false
     root.searchQuery = ""
+    root.disarmClose()
     root.isDraggingCard = false
     if (root.shell && typeof root.shell.hide === "function") {
       root.shell.hide(root.pluginId)
@@ -164,6 +166,31 @@ Item {
       Quickshell.execDetached(["hyprctl", "dispatch", "focuswindow", addrStr])
     }
     root.dismiss()
+  }
+
+  // ---- close confirmation: no undo, so arm first, close on second press within Safety.CONFIRM_MS
+  property string closeArmedAddress: ""
+
+  function requestClose(address) {
+    if (!address) return
+    if (Safety.isArmed(root.closeArmedAddress, address)) {
+      root.disarmClose()
+      root.closeWindow(address)
+    } else {
+      root.closeArmedAddress = address
+      closeArmTimer.restart()
+    }
+  }
+
+  function disarmClose() {
+    root.closeArmedAddress = ""
+    closeArmTimer.stop()
+  }
+
+  Timer {
+    id: closeArmTimer
+    interval: Safety.CONFIRM_MS
+    onTriggered: root.closeArmedAddress = ""
   }
 
   function closeWindow(address) {
@@ -366,7 +393,9 @@ Item {
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
             event.accepted = true
-            if (root.searchQuery.length > 0) {
+            if (root.closeArmedAddress !== "") {
+              root.disarmClose()
+            } else if (root.searchQuery.length > 0) {
               root.searchQuery = ""
               root.selectedIndex = 0
             } else {
@@ -377,35 +406,39 @@ Item {
 
           var total = root.layoutWindows.length
 
-          // GTA 5 数字键槽位快速直达 [1-8]
-          if (root.searchQuery === "" && event.key >= Qt.Key_1 && event.key <= Qt.Key_8 && !(event.modifiers & Qt.ControlModifier) && !(event.modifiers & Qt.AltModifier)) {
+          var alt = (event.modifiers & Qt.AltModifier) && !(event.modifiers & Qt.ControlModifier)
+
+          // 槽位直达 Alt+1-9（与控制中心 1-9 统一；纯数字键进入搜索）
+          if (alt && event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
             var targetIdx = event.key - Qt.Key_1
-            if (targetIdx >= 0 && targetIdx < total && root.layoutWindows[targetIdx]) {
-              event.accepted = true
+            event.accepted = true
+            if (targetIdx < total && root.layoutWindows[targetIdx]) {
               root.focusWindow(root.layoutWindows[targetIdx].address)
-              return
             }
+            return
           }
 
-          // 顺时针 / 逆时针武器轮盘切片步进
-          if (event.key === Qt.Key_Tab || event.key === Qt.Key_Right || event.key === Qt.Key_Down || (root.searchQuery === "" && (event.key === Qt.Key_L || event.key === Qt.Key_J))) {
+          // 轮盘步进：方向键 / Tab，或 Alt+h/j/k/l（纯字母永远进入搜索）
+          if (event.key === Qt.Key_Tab || event.key === Qt.Key_Right || event.key === Qt.Key_Down || (alt && (event.key === Qt.Key_L || event.key === Qt.Key_J))) {
             event.accepted = true
+            root.disarmClose()
             if (total > 0) {
               root.selectedIndex = (root.selectedIndex + 1) % total
             }
             return
           }
 
-          if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Left || event.key === Qt.Key_Up || (root.searchQuery === "" && (event.key === Qt.Key_H || event.key === Qt.Key_K))) {
+          if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Left || event.key === Qt.Key_Up || (alt && (event.key === Qt.Key_H || event.key === Qt.Key_K))) {
             event.accepted = true
+            root.disarmClose()
             if (total > 0) {
               root.selectedIndex = (root.selectedIndex - 1 + total) % total
             }
             return
           }
 
-          // 回车 / 空格：确认聚焦窗口
-          if (event.key === Qt.Key_Return || (root.searchQuery === "" && event.key === Qt.Key_Space)) {
+          // 回车：确认聚焦窗口
+          if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             event.accepted = true
             if (root.currentSelectedWin && root.currentSelectedWin.address) {
               root.focusWindow(root.currentSelectedWin.address)
@@ -413,17 +446,17 @@ Item {
             return
           }
 
-          // 关闭当前窗口 (x / Delete)
-          if ((root.searchQuery === "" && event.key === Qt.Key_X) || event.key === Qt.Key_Delete) {
+          // 关闭当前窗口 (Delete / Alt+x)：首次按下提示“再按一次关闭”，~2s 内再按才关闭（无撤销）
+          if (event.key === Qt.Key_Delete || (alt && event.key === Qt.Key_X)) {
             event.accepted = true
             if (root.currentSelectedWin && root.currentSelectedWin.address) {
-              root.closeWindow(root.currentSelectedWin.address)
+              root.requestClose(root.currentSelectedWin.address)
             }
             return
           }
 
-          // 发送到另一个工作区 (m 快捷键触发黑洞传送)
-          if (root.searchQuery === "" && event.key === Qt.Key_M) {
+          // 发送到另一个工作区 (Alt+m 触发黑洞传送)
+          if (alt && event.key === Qt.Key_M) {
             event.accepted = true
             if (root.currentSelectedWin && root.currentSelectedWin.address) {
               root.moveWindowToWorkspace(root.currentSelectedWin.address, root.targetTransferWorkspaceId)
@@ -431,17 +464,18 @@ Item {
             return
           }
 
-          // 退格
+          // 退格：仅删除搜索字符（不再关闭窗口）
           if (event.key === Qt.Key_Backspace) {
             event.accepted = true
             if (root.searchQuery.length > 0) {
               root.searchQuery = root.searchQuery.substring(0, root.searchQuery.length - 1)
               root.selectedIndex = 0
-            } else if (root.currentSelectedWin && root.currentSelectedWin.address) {
-              root.closeWindow(root.currentSelectedWin.address)
             }
             return
           }
+
+          // 其他 Alt 组合不进入搜索
+          if (alt) return
 
           // 实时打字搜索
           if (event.text && event.text.length === 1 && !event.isAutoRepeat) {
@@ -768,8 +802,10 @@ Item {
           id: footerRow
           anchors.centerIn: parent
           textFormat: Text.PlainText
-          text: "enter focus · drag move to workspace " + root.targetTransferWorkspaceId + " · m move · esc close"
-          color: root.theme.textMuted
+          text: root.closeArmedAddress !== ""
+            ? (Safety.CLOSE_AGAIN_TEXT + " · esc 取消")
+            : ("type to search · arrows select · enter focus · alt+1-9 jump · alt+m move to workspace " + root.targetTransferWorkspaceId + " · del close · esc exit")
+          color: root.closeArmedAddress !== "" ? root.theme.danger : root.theme.textMuted
           font.pixelSize: Style.font.caption
           font.family: Style.font.family
         }

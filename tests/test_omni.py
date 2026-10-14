@@ -2012,3 +2012,54 @@ class TestOmarchyVersionGate(unittest.TestCase):
         self.assertNotIn("exit 1", unknown)
         too_old = sh.split("too_old)", 1)[1].split(";;", 1)[0]
         self.assertIn("exit 1", too_old)
+
+
+class TestUxSafetyRound2(unittest.TestCase):
+    """Overview typing goes to search, closes need a second press, mode switches are undoable."""
+    P = PROJECT_ROOT / "plugins"
+
+    def read(self, rel):
+        return (self.P / rel).read_text(encoding="utf-8")
+
+    def test_overview_plain_letters_are_not_shortcuts(self):
+        qml = self.read("omni.overview/Overview.qml")
+        self.assertNotIn('root.searchQuery === "" && (event.key', qml)
+        self.assertNotIn('root.searchQuery === "" && event.key', qml)
+        self.assertIn("(alt && event.key === Qt.Key_X)", qml)
+        self.assertIn("alt && event.key === Qt.Key_M", qml)
+        self.assertIn("alt && (event.key === Qt.Key_L || event.key === Qt.Key_J)", qml)
+        self.assertNotIn("Qt.Key_Space", qml)
+
+    def test_overview_close_requires_second_press(self):
+        qml = self.read("omni.overview/Overview.qml")
+        self.assertIn("root.requestClose(root.currentSelectedWin.address)", qml)
+        self.assertEqual(qml.count("root.closeWindow("), 1)  # only from requestClose
+        self.assertIn("interval: Safety.CONFIRM_MS", qml)
+        self.assertIn("Safety.CLOSE_AGAIN_TEXT", qml)
+
+    def test_overview_number_range_matches_settings(self):
+        qml = self.read("omni.overview/Overview.qml")
+        self.assertIn("event.key <= Qt.Key_9", qml)
+        self.assertNotIn("Qt.Key_8", qml)
+        self.assertNotIn("(i < 8)", self.read("omni.overview/Model.js"))
+        self.assertIn("num < 9", self.read("omni.settings/SettingsPanel.qml"))
+
+    def test_dock_multi_window_close_arms_first(self):
+        qml = self.read("omni.mac-dock/MacDock.qml")
+        self.assertIn("it.windowCount > 1 && !Safety.isArmed(root.closeArmedKey", qml)
+        self.assertIn("interval: Safety.CONFIRM_MS", qml)
+
+    def test_mode_indicator_switch_is_undoable(self):
+        qml = self.read("omni.mode-indicator/BarWidget.qml")
+        self.assertIn("onClicked: root.switchModeWithUndo(profileRow.modelData.id)", qml)
+        self.assertIn("root.switchModeWithUndo(root.profiles[i].id)", qml)
+        self.assertIn("interval: Safety.UNDO_MS", qml)
+        self.assertIn("root.undoSwitch()", qml)
+
+    def test_safety_js_is_shared(self):
+        js = self.read("shared/Safety.js")
+        self.assertIn("var UNDO_MS = 5000", js)
+        self.assertIn("var CONFIRM_MS = 2000", js)
+        self.assertIn("再按一次关闭", js)
+        for d in ("omni.overview", "omni.mac-dock", "omni.mode-indicator", "omni.settings"):
+            self.assertEqual((self.P / d / "Safety.js").read_text(encoding="utf-8"), js, d)
