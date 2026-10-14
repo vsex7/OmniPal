@@ -35,6 +35,8 @@ omni-profile doctor           # 出问题时先跑这个
 
 ## 更多
 
+- [按应用自动切换模式](docs/APP_RULES.md)
+- [自定义 profile 编写指南](docs/PROFILE_GUIDE.md)
 - [完整功能与命令参考](docs/REFERENCE.md)
 - [常见问题](docs/FAQ.md)
 - [更新日志](CHANGELOG.md)
