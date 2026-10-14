@@ -15,21 +15,31 @@ echo "项目路径: ${PROJECT_ROOT}"
 
 # 1. 依赖检查
 command -v python3 >/dev/null 2>&1 || { echo "❌ 缺少依赖: python3"; exit 1; }
-command -v hyprctl >/dev/null 2>&1 || { echo "❌ 缺少依赖: hyprctl (Hyprland)"; exit 1; }
+command -v hyprctl >/dev/null 2>&1 || { echo "❌ 缺少依赖: hyprctl。OmniPal 只支持运行在 Hyprland 上的 Omarchy，请在 Omarchy 桌面里安装。"; exit 1; }
 
 # 2. 预先校验一致性
 echo "🔍 运行 Profile 与 Schema 一致性校验..."
 python3 "${PROJECT_ROOT}/scripts/check_consistency.py"
 
 # 3. 创建 CLI 符号链接
-mkdir -p "${HOME}/.local/bin"
+# 记录本次安装新建的目录，卸载时只删除这些目录（且仅在为空时）
+CREATED_DIRS_FILE="${HOME}/.local/share/omnipal/created-dirs"
+track_mkdir() {
+    if [ ! -d "$1" ]; then
+        mkdir -p "$1"
+        mkdir -p "$(dirname "${CREATED_DIRS_FILE}")"
+        echo "$1" >> "${CREATED_DIRS_FILE}"
+    fi
+}
+
+track_mkdir "${HOME}/.local/bin"
 ln -sf "${PROJECT_ROOT}/bin/omni-profile" "${BIN_TARGET}"
 chmod +x "${PROJECT_ROOT}/bin/omni-profile"
 echo "✅ CLI 链接已创建: ${BIN_TARGET}"
 
 # 4. 安装 Quickshell 插件（符号链接至 ~/.config/omarchy/plugins/）
 OMARCHY_PLUGINS_DIR="${HOME}/.config/omarchy/plugins"
-mkdir -p "${OMARCHY_PLUGINS_DIR}"
+track_mkdir "${OMARCHY_PLUGINS_DIR}"
 echo "🧩 部署 OmniPal Quickshell 插件..."
 for p_path in "${PROJECT_ROOT}/plugins"/omni.*; do
     if [ -d "${p_path}" ]; then
@@ -40,7 +50,7 @@ for p_path in "${PROJECT_ROOT}/plugins"/omni.*; do
 done
 
 # 5. 创建可选的 systemd 用户守护进程（用于在会话退出时自动触发 restore）
-mkdir -p "${SYSTEMD_USER_DIR}"
+track_mkdir "${SYSTEMD_USER_DIR}"
 cat > "${SERVICE_FILE}" <<EOF
 [Unit]
 Description=OmniPal Runtime Hot-Switching Daemon
