@@ -4,6 +4,31 @@
 
 ---
 
+## [v1.7.1] - 2026-10-14
+
+### 🔒 安全
+- 拼进 `hyprctl eval` 的字符串（绑定名、命令参数、窗口地址）统一经过 `lua_str()` 转义，命令里带引号、反斜杠或换行不会再弄坏整批绑定，也无法注入 Lua。
+
+### 🐛 修复
+- 运行目录改为优先读取 `XDG_RUNTIME_DIR`，引擎、卸载脚本和模式指示器插件保持一致（指示器原来写死了 `/run/user/1000`）。
+- 切换失败时回滚到切换前的模式，而不是掉回原生键位，并防止回滚递归。
+- systemd 服务加上 `ConditionPathExists` 和重启次数上限；仓库放在临时目录时安装会给出警告。
+- 原先静默吞掉的异常改为在 `OMNIPAL_DEBUG=1` 时输出到 stderr。
+- 卸载会删除安装时新建、且已为空的目录。
+- 缺少 `hyprctl` 时，安装脚本说明 OmniPal 只支持 Omarchy / Hyprland。
+- `omni-profile doctor` 显示的版本号改为与发布版本一致。
+
+### 🎨 界面
+- 新的炭黑、米白、琥珀视觉：新 Logo 和横幅（`docs/assets/`）。
+- 插件颜色统一走设计 token：`plugins/shared/Tokens.js` 为唯一源头，用 `scripts/sync_tokens.py` 同步到各插件，一致性校验检查副本是否同步。
+
+### 🧪 工程
+- 新增 GitHub Actions，在 Python 3.11 / 3.12 / 3.13 上跑测试；没有 Hyprland 时测试自动使用 `hyprctl` 替身。
+- 新增转义和回滚测试，共 53 个测试。
+- 新增 `docs/FAQ.md`。
+
+---
+
 ## [v1.7.0] - 2026-09-15
 
 ### ⌨️ omni.cheat-sheet 交互与视觉大升级 — Milestone 5

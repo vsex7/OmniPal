@@ -27,6 +27,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+__version__ = "1.7.1"
+
 RUN_DIR = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "omnipal"
 STATE_FILE = RUN_DIR / "state.json"
 OVERLAY_FILE = RUN_DIR / "active_overlay.json"
@@ -963,7 +965,7 @@ end"""
         """Runs comprehensive diagnostics on daemon, sockets, live binds, and state consistency."""
         report: Dict[str, Any] = {
             "healthy": True,
-            "version": "1.2.0",
+            "version": __version__,
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "daemon": {"running": False, "pid": None},
             "socket2": {"connected": False, "path": None},
