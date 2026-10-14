@@ -18,7 +18,6 @@
 - mac 模式不再用 Super+数字切换工作区，改用 Super+Ctrl+←/→。
 
 ### 🚧 发版前待办
-- 真机确认 `hl.dispatch(hl.dsp.send_shortcut{...})` 的调用写法。
 - 在真机 Hyprland 上验证 v1.8.0 / v1.9.0 的界面和转发。
 
 ---
