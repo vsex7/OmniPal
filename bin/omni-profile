@@ -497,7 +497,7 @@ def cmd_persist(engine: OmniPalEngine, args):
             sys.exit(1)
         status = engine.get_persistence_status()
         print(f"✅ 已启用配置持久化: 模式 '{status['profile']}', 窗口策略 '{status.get('window_policy')}' 记录于 {status['path']}")
-        print("   后续 switch / cycle / 窗口策略调整后将自动同步持久化（可随时执行 persist disable 关闭）。")
+        print("   后续 switch / cycle / restore / 窗口策略调整后将自动同步持久化（可随时执行 persist disable 关闭）。")
         return
 
     if action == "disable":

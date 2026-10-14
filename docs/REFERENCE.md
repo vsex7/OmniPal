@@ -29,7 +29,7 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
   - Quickshell 插件通过 `Quickshell.Io.FileView` 响应更新，无需后台密集轮询。
 - **可选配置持久化（Opt-in Persistence，默认关闭）**：
   - 仅在用户显式执行 `omni-profile persist enable` 后，才将目标模式写入唯一文件 `~/.config/omnipal/persistence.json`（支持 `OMNIPAL_CONFIG_DIR` 重定向）；默认仍是纯内存零文件写入模式。
-  - `switch` / `cycle` 成功后自动同步持久化模式；`persist disable` 或卸载脚本即可彻底清理，零残留。
+  - `switch` / `cycle` / `restore` 成功后自动同步持久化模式；`persist disable` 或卸载脚本即可彻底清理，零残留。
 - **全套 Quickshell 专属插件**：
   1. `omni.mode-indicator`：Omarchy Top Bar 托盘模式指示器与右键快捷控制面板。左键循环轮转模式、右键弹出精致快捷面板（模式一键切换、快捷入口、系统诊断与控制）、中键设置，深度集成 `PopupCard` 与焦点自动收起。
   2. `omni.cheat-sheet`：快捷键 HUD 速查层，根据单一事实源动态渲染当前有效键位，支持按分类检索与按键说明。

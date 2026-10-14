@@ -805,12 +805,12 @@ class OmniPalEngine:
 
         cur_persisted = self.get_persistence_status()
 
-        # Resolve target profile:
-        # passed profile -> existing persisted profile -> active mode in state -> "windows"
+        # Resolve target profile (persist enable snapshots current mode by default):
+        # passed profile -> active mode in state -> existing persisted profile -> "windows"
         target_profile = (
             profile
-            or cur_persisted.get("profile")
             or self.get_state().get("mode")
+            or cur_persisted.get("profile")
             or "windows"
         ).lower().strip()
 
@@ -819,12 +819,12 @@ class OmniPalEngine:
             print(f"Error: Unknown profile '{target_profile}' for persistence. Available profiles: {valid}", file=sys.stderr)
             return False
 
-        # Resolve target window policy:
-        # passed policy -> existing persisted policy -> current window policy -> "tiled"
+        # Resolve target window policy (same preference: explicit -> current -> persisted):
+        # passed policy -> current window policy -> existing persisted policy -> "tiled"
         raw_policy = (
             window_policy
-            or cur_persisted.get("window_policy")
             or self.get_window_policy()
+            or cur_persisted.get("window_policy")
             or "tiled"
         )
         target_policy = normalize_window_policy(raw_policy) or "tiled"
@@ -1917,8 +1917,13 @@ end
 
         return "; ".join(lua_ops)
 
-    def restore(self, auto: Any = _KEEP) -> bool:
-        """Restores Hyprland keybindings by unbinding all currently injected overlays and re-registering baseline."""
+    def restore(self, auto: Any = _KEEP, *, sync_persistence: bool = True) -> bool:
+        """Restores Hyprland keybindings by unbinding all currently injected overlays and re-registering baseline.
+
+        When persistence is enabled, a successful user-facing restore mirrors profile "omarchy"
+        into persistence.json (same as switch/cycle). Pass sync_persistence=False for daemon
+        shutdown cleanup so exiting does not overwrite the last chosen profile.
+        """
         with engine_lock():
             auto = self._resolve_auto("omarchy", auto)
             active_overlay = self._get_active_overlay()
@@ -1977,20 +1982,31 @@ end
             # State is already "omarchy", so the reload watcher won't re-apply an overlay.
             # Natives we unbound are rebound from the Lua stash; reload only if that isn't possible.
             unbound = [b for b in active_overlay if b.get("native_unbound")]
+            ok = True
             if not unbound:
-                return True
-            # A config reload above rebuilt the Lua state: natives are back and the stash is gone.
-            if config_reloaded:
-                return self.apply_fixed_bindings()
-            if all(b.get("native_restorable", False) for b in unbound):
+                ok = True
+            elif config_reloaded:
+                # A config reload above rebuilt the Lua state: natives are back and the stash is gone.
+                ok = self.apply_fixed_bindings()
+            elif all(b.get("native_restorable", False) for b in unbound):
                 restore_ops = [_native_unstash_lua(b["combo"]) for b in unbound
                                if b.get("native_count", 0) > 0]
                 if not restore_ops or self._eval_lua_strict("; ".join(restore_ops)):
-                    return True
-                print("Native rebind from stash failed; falling back to hyprctl reload", file=sys.stderr)
-            if not self._reload_hyprland():
-                return False
-            return self.apply_fixed_bindings()
+                    ok = True
+                else:
+                    print("Native rebind from stash failed; falling back to hyprctl reload", file=sys.stderr)
+                    ok = self._reload_hyprland() and self.apply_fixed_bindings()
+            else:
+                if not self._reload_hyprland():
+                    ok = False
+                else:
+                    ok = self.apply_fixed_bindings()
+
+            # CLI / bar / settings / IPC restore paths share this method; keep persistence.json
+            # aligned with the live mode the same way switch_mode and cycle_mode do.
+            if ok and sync_persistence and self.get_persistence_status()["enabled"]:
+                self.set_persistence(True, profile="omarchy")
+            return ok
 
     def _reload_hyprland(self) -> bool:
         if compositor_mutation_disabled():
@@ -3057,7 +3073,8 @@ def run_daemon():
             curr = engine.get_state().get("mode", "omarchy")
             cur_app = engine._get_applied_window_mode()
             if curr != "omarchy" or cur_app == "floating" or engine._get_active_overlay():
-                engine.restore()
+                # Do not sync persistence on shutdown: exit must not rewrite the last chosen profile.
+                engine.restore(sync_persistence=False)
 
     def sig_handler(signum, frame):
         print(f"\n🛑 Received signal {signum}. Restoring Hyprland keybindings...", flush=True)

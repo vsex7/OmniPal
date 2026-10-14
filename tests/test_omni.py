@@ -627,6 +627,52 @@ class TestPersistenceManager(BaseOmniTestCase):
         self.assertTrue(self.engine.set_persistence(True))
         self.assertEqual(self.engine.get_persistence_status()["profile"], "mac")
 
+    def test_restore_autosyncs_persistence(self):
+        """Direct restore (CLI/bar/settings path) must mirror omarchy into persistence.json."""
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertEqual(self.engine.get_persisted_profile(), "windows")
+
+        self.assertTrue(self.engine.restore())
+        self.assertEqual(self.engine.get_state().get("mode"), "omarchy")
+        self.assertEqual(self.engine.get_persistence_status()["profile"], "omarchy")
+        self.assertEqual(self.engine.get_persisted_profile(), "omarchy")
+        self.assertEqual(
+            json.loads(self.persist_path.read_text(encoding="utf-8"))["profile"],
+            "omarchy",
+        )
+
+        # Disabled persistence stays inert during restore
+        self.assertTrue(self.engine.set_persistence(False))
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertTrue(self.engine.restore())
+        self.assertIsNone(self.engine.get_persisted_profile())
+        self.assertFalse(self.engine.get_persistence_status()["enabled"])
+
+    def test_restore_can_skip_persistence_sync(self):
+        """Daemon shutdown restore must not overwrite the last chosen persisted profile."""
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertEqual(self.engine.get_persisted_profile(), "windows")
+
+        self.assertTrue(self.engine.restore(sync_persistence=False))
+        self.assertEqual(self.engine.get_state().get("mode"), "omarchy")
+        self.assertEqual(self.engine.get_persisted_profile(), "windows")
+        self.assertEqual(
+            json.loads(self.persist_path.read_text(encoding="utf-8"))["profile"],
+            "windows",
+        )
+
+    def test_enable_snapshots_current_over_stale_persisted(self):
+        """persist enable without --profile prefers live mode over a stale persisted profile."""
+        self.assertTrue(self.engine.set_persistence(True, "windows", "tiled"))
+        # Simulate a restore that failed to sync (or sync_persistence=False), leaving stale profile.
+        self.assertTrue(self.engine.restore(sync_persistence=False))
+        self.assertEqual(self.engine.get_state().get("mode"), "omarchy")
+        self.assertEqual(self.engine.get_persisted_profile(), "windows")
+
+        self.assertTrue(self.engine.set_persistence(True))
+        self.assertEqual(self.engine.get_persistence_status()["profile"], "omarchy")
+        self.assertEqual(self.engine.get_persisted_profile(), "omarchy")
+
     def test_env_config_dir_isolation(self):
         """OMNIPAL_CONFIG_DIR must fully isolate every persistence read/write."""
         self.assertTrue(self.engine.set_persistence(True, "windows"))

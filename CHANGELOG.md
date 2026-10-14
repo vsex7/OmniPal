@@ -16,6 +16,9 @@
 - 可在 `~/.config/omnipal/terminals.json` 自定义终端名单，末尾 `*` 表示前缀匹配。
 - 新命令 `omni-profile send <MOD> <KEY> [--class <类名>]`，手动把快捷键发给当前窗口。
 
+### 🐛 修复
+- **持久化与 restore**：`omni-profile restore`（以及状态栏/设置等同路径）在持久化启用时会把 `persistence.json` 的 profile 同步为 `omarchy`，与 `switch`/`cycle` 一致；守护进程退出时的 cleanup restore 不会改写持久化，以免重启后丢上次模式。`persist enable` 未指定模式时优先快照当前模式，不再沿用过期的已持久化 profile。
+
 ### 🔧 变更
 - 全局窗口策略保留：跟随模式（默认）/ 平铺 / 浮动，`omni-profile window-policy` 查看、`window-policy set <follow-profile|tiled|floating>` 设置；状态栏右键菜单「窗口策略」三行（标注「当前」）、设置模式页选择器、模式卡片「已覆盖：全局平铺/浮动」、doctor「⚠️ 已覆盖」提示；IPC `setWindowPolicy` / `getWindowPolicy`；随配置持久化记住（`persist enable --policy`）。不再在启动时清除已保存的 `window_policy`。
 - mac 模式开启时会暂时停用 Omarchy 原生的 Super+W、Super+数字绑定；还原或切到别的模式时会执行 `hyprctl reload` 把它们找回来。
