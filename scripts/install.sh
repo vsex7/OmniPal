@@ -31,13 +31,23 @@ echo "ℹ️  安装后请不要移动或删除 ${PROJECT_ROOT}；如需移动�
 # 3. 创建 CLI 符号链接
 # 记录本次安装新建的目录，卸载时只删除这些目录（且仅在为空时）
 CREATED_DIRS_FILE="${HOME}/.local/share/omnipal/created-dirs"
-track_mkdir() {
-    if [ ! -d "$1" ]; then
-        mkdir -p "$1"
-        mkdir -p "$(dirname "${CREATED_DIRS_FILE}")"
-        echo "$1" >> "${CREATED_DIRS_FILE}"
-    fi
+record_dir() {
+    mkdir -p "$(dirname "${CREATED_DIRS_FILE}")"
+    echo "$1" >> "${CREATED_DIRS_FILE}"
 }
+# 把 mkdir -p 会连带新建的每一级上级目录都记下来（由外到内），卸载时由内到外删除
+track_mkdir() {
+    local missing=() d="$1"
+    while [ ! -d "${d}" ] && [ "${d}" != "${HOME}" ] && [ "${d}" != "/" ]; do
+        missing=("${d}" "${missing[@]}")
+        d="$(dirname "${d}")"
+    done
+    [ ${#missing[@]} -eq 0 ] && return 0
+    mkdir -p "$1"
+    for d in "${missing[@]}"; do record_dir "${d}"; done
+}
+# 记录文件自身所在的目录也要算作新建
+track_mkdir "$(dirname "${CREATED_DIRS_FILE}")"
 
 track_mkdir "${HOME}/.local/bin"
 ln -sf "${PROJECT_ROOT}/bin/omni-profile" "${BIN_TARGET}"

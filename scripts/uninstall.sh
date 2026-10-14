@@ -65,13 +65,13 @@ fi
 # 7. 移除安装时新建、现在已为空的目录（原本就存在的目录不动）
 CREATED_DIRS_FILE="${HOME}/.local/share/omnipal/created-dirs"
 if [ -f "${CREATED_DIRS_FILE}" ]; then
-    tac "${CREATED_DIRS_FILE}" | while IFS= read -r d; do
-        if [ -n "${d}" ] && [ -d "${d}" ] && [ -z "$(ls -A "${d}" 2>/dev/null)" ]; then
+    DIRS_LIST="$(tac "${CREATED_DIRS_FILE}")"
+    rm -f "${CREATED_DIRS_FILE}"
+    while IFS= read -r d; do
+        if [ -n "${d}" ] && [ -d "${d}" ] && [ -z "$(ls -A "${d}")" ]; then
             rmdir "${d}" && echo "🧹 已移除空目录: ${d}"
         fi
-    done
-    rm -f "${CREATED_DIRS_FILE}"
-    rmdir "$(dirname "${CREATED_DIRS_FILE}")" 2>/dev/null || true
+    done <<< "${DIRS_LIST}"
 fi
 
 echo "✅ 卸载完毕！系统快捷键与配置已完整恢复至原始状态，零文件残留。"
