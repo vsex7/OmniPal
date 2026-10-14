@@ -5,7 +5,7 @@
 ## 三步上手
 
 ```bash
-# 1. 切到 VS Code，然后运行（自动取当前窗口的类名）
+# 1. 运行后 3 秒内切到 VS Code，自动取它的窗口类名
 omni-profile rules add --current mac
 # 或者手动写类名
 omni-profile rules add code mac
@@ -34,7 +34,8 @@ omni-profile rules test code
 | 命令 | 作用 |
 | --- | --- |
 | `rules add <类名> <模式>` | 添加规则 |
-| `rules add --current <模式>` | 用当前焦点窗口添加 |
+| `rules add --current <模式>` | 倒数 3 秒后用焦点窗口添加，`--delay 0` 跳过倒数 |
+| `rules test --current` | 查看当前应用会命中哪条规则 |
 | `rules remove <类名>` | 删除规则 |
 | `rules enable/disable <类名>` | 启用或停用某条规则 |
 | `rules default <模式>` | 固定基准模式 |

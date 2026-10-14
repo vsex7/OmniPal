@@ -11,7 +11,7 @@
 <text x="248" y="131" fill="#8a867d">默认模式</text>
 <rect x="736" y="114" width="96" height="24" fill="none" stroke="#e6e1d6"/><text x="784" y="131" fill="#e6e1d6" text-anchor="middle">omarchy v</text>
 <rect x="752" y="164" width="96" height="30" fill="#e2a03f"/><text x="800" y="184" fill="#16161a" text-anchor="middle" font-weight="700">+ 添加</text></g>
-<g font-size="12" fill="#8a867d"><text x="248" y="226">应用（窗口类名）</text><text x="560" y="226">模式</text><text x="720" y="226">启用</text></g>
+<g font-size="12" fill="#8a867d"><text x="248" y="226">应用（窗口类名）</text><text x="440" y="226">匹配</text><text x="560" y="226">模式</text><text x="720" y="226">启用</text></g>
 <path d="M232 236H848" stroke="#3a3a40"/>
 <g font-size="14">
 <text x="248" y="272" fill="#e6e1d6">code</text><text x="248" y="290" font-size="11" fill="#8a867d">Visual Studio Code</text>
@@ -29,4 +29,4 @@
 <rect x="232" y="460" width="616" height="64" fill="none" stroke="#3a3a40" stroke-dasharray="4 4"/>
 <text x="248" y="488" font-size="13" fill="#8a867d">当前焦点  <tspan fill="#e6e1d6">code</tspan>  →  <tspan fill="#e2a03f">mac</tspan></text>
 <text x="248" y="510" font-size="12" fill="#5a5850">点“添加”时自动填入当前焦点应用的类名</text>
-</svg>
+<text x="440" y="268" font-size="13" fill="#8a867d">精确</text><text x="440" y="336" font-size="13" fill="#8a867d">前缀</text><text x="440" y="404" font-size="13" fill="#8a867d">精确</text></svg>
