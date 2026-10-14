@@ -568,23 +568,25 @@ class TestPersistenceManager(BaseOmniTestCase):
         status = self.engine.get_persistence_status()
         self.assertTrue(status["enabled"])
         self.assertIsNone(status["profile"])
-        self.assertNotIn("window_policy", status)
+        self.assertIsNone(status["window_policy"])
         self.assertIsNone(status["updated_at"])
         self.assertEqual(status["path"], str(self.persist_path))
         self.assertFalse(self.persist_path.exists(), "惰性写入：首次配置变更前不强行创建文件")
         self.assertIsNone(self.engine.get_persisted_profile())
-        self.assertFalse(hasattr(self.engine, "get_persisted_window_policy"))
+        self.assertIsNone(self.engine.get_persisted_window_policy())
 
     def test_enable_disable_and_invalid_profile(self):
-        """Enable/disable round-trip and rejection of unknown profiles; no window_policy is stored."""
-        self.assertTrue(self.engine.set_persistence(True, "mac"))
+        """Enable/disable round-trip, window policy stored, rejection of unknown profiles."""
+        self.assertTrue(self.engine.set_persistence(True, "mac", "floating"))
         status = self.engine.get_persistence_status()
         self.assertTrue(status["enabled"])
         self.assertEqual(status["profile"], "mac")
         self.assertIsNotNone(status["updated_at"])
         self.assertTrue(self.persist_path.exists())
-        self.assertNotIn("window_policy", json.loads(self.persist_path.read_text(encoding="utf-8")))
+        self.assertEqual(status["window_policy"], "floating")
+        self.assertEqual(json.loads(self.persist_path.read_text(encoding="utf-8"))["window_policy"], "floating")
         self.assertEqual(self.engine.get_persisted_profile(), "mac")
+        self.assertEqual(self.engine.get_persisted_window_policy(), "floating")
 
         # Illegal profile must be refused without touching the stored state
         self.assertFalse(self.engine.set_persistence(True, "nonexistent_bogus"))
@@ -596,7 +598,9 @@ class TestPersistenceManager(BaseOmniTestCase):
         status = self.engine.get_persistence_status()
         self.assertFalse(status["enabled"])
         self.assertIsNone(status["profile"])
+        self.assertIsNone(status["window_policy"])
         self.assertIsNone(self.engine.get_persisted_profile())
+        self.assertIsNone(self.engine.get_persisted_window_policy())
 
     def test_switch_mode_autosync(self):
         """switch_mode must mirror into persistence.json when persistence is enabled."""
@@ -659,21 +663,19 @@ class TestPersistenceManager(BaseOmniTestCase):
                     os.environ.pop("OMNIPAL_RUN_DIR", None)
                 engine_module._resolve_run_dir()
 
-    def test_legacy_window_policy_migrated_to_follow_profile(self):
-        """A stored global tiled/floating override (state.json + persistence.json) is dropped and ignored."""
+    def test_stored_window_policy_is_kept_and_restored(self):
+        """No startup migration: a stored global policy survives and is honoured (follow-profile restored)."""
         from engine.engine import STATE_FILE
+        self.assertFalse(hasattr(self.engine, "migrate_legacy_window_policy"))
         self.persist_path.write_text(json.dumps({"enabled": True, "profile": "windows", "window_policy": "floating"}), encoding="utf-8")
         STATE_FILE.write_text(json.dumps({"mode": "windows", "window_policy": "floating"}), encoding="utf-8")
-        # Ignored even before migration: the mode's own window_mode decides
-        self.assertNotIn("window_policy", self.engine.get_state())
-        self.assertEqual(self.engine.get_state()["effective_window_mode"], "tiled")
-        migrated = self.engine.migrate_legacy_window_policy()
-        self.assertIn(str(self.persist_path), migrated)
-        self.assertIn(str(STATE_FILE), migrated)
-        self.assertNotIn("window_policy", json.loads(self.persist_path.read_text(encoding="utf-8")))
-        self.assertNotIn("window_policy", json.loads(STATE_FILE.read_text(encoding="utf-8")))
-        self.assertEqual(self.engine.get_persisted_profile(), "windows")
-        self.assertEqual(self.engine.migrate_legacy_window_policy(), [])
+        state = self.engine.get_state()
+        self.assertEqual(state["window_policy"], "floating")
+        self.assertEqual(state["effective_window_mode"], "floating")
+        self.assertEqual(self.engine.get_persisted_window_policy(), "floating")
+        self.assertEqual(json.loads(self.persist_path.read_text(encoding="utf-8"))["window_policy"], "floating")
+        STATE_FILE.write_text(json.dumps({"mode": "omarchy", "window_policy": "follow-profile"}), encoding="utf-8")
+        self.engine.window_policy = "follow-profile"
 
 class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
     """Validates window policy management, state synchronization, and Mode Indicator UI architecture."""
@@ -698,14 +700,48 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self._fake_sock.unlink(missing_ok=True)
         super().tearDown()
 
-    def test_window_policy_api_removed(self):
-        """The global override is gone: no set/get API, state carries only effective_window_mode."""
-        for gone in ("set_window_policy", "get_window_policy", "get_persisted_window_policy",
-                     "get_stats", "reset_stats", "record_switch", "record_snap", "record_action", "_record_stat"):
+    def test_window_policy_api_and_stats_removed(self):
+        """Global policy API is back; usage-stats API stays removed."""
+        for present in ("set_window_policy", "get_window_policy", "get_persisted_window_policy"):
+            self.assertTrue(hasattr(self.engine, present), present)
+        for gone in ("get_stats", "reset_stats", "record_switch", "record_snap", "record_action", "_record_stat",
+                     "migrate_legacy_window_policy"):
             self.assertFalse(hasattr(self.engine, gone), gone)
         state = self.engine.get_state()
-        self.assertNotIn("window_policy", state)
+        self.assertIn("window_policy", state)
         self.assertIn("effective_window_mode", state)
+
+    def test_set_window_policy_overrides_and_follows(self):
+        """tiled/floating override every mode's window_mode; follow-profile hands it back."""
+        try:
+            self.assertTrue(self.engine.switch_mode("windows"))
+            self.assertTrue(self.engine.set_window_policy("floating"))
+            st = self.engine.get_state()
+            self.assertEqual(st["window_policy"], "floating")
+            self.assertEqual(st["effective_window_mode"], "floating")
+            self.assertEqual(self.engine.get_persistence_status()["window_policy"], "floating")
+            # survives a mode switch
+            self.assertTrue(self.engine.switch_mode("mac"))
+            self.assertEqual(self.engine.get_state()["window_policy"], "floating")
+            self.assertTrue(self.engine.set_window_policy("tiled"))
+            self.assertEqual(self.engine.get_state()["effective_window_mode"], "tiled")
+            self.assertTrue(self.engine.set_window_policy("follow-profile"))
+            self.assertEqual(self.engine.get_state()["effective_window_mode"], "floating")  # mac's own
+            self.assertFalse(self.engine.set_window_policy("bogus"))
+            self.assertEqual(self.engine.get_window_policy(), "follow-profile")
+        finally:
+            self.engine.set_window_policy("follow-profile")
+            self.engine.restore()
+
+    def test_rejected_policy_rolls_back(self):
+        self.engine.set_window_policy("follow-profile")
+        orig = self.engine._apply_window_policy
+        self.engine._apply_window_policy = lambda *a, **k: False
+        try:
+            self.assertFalse(self.engine.set_window_policy("floating"))
+            self.assertEqual(self.engine.get_window_policy(), "follow-profile")
+        finally:
+            self.engine._apply_window_policy = orig
 
     def test_tiled_disables_float_rules_without_reload(self):
         from engine.engine import APPLIED_WINDOW_MODE_FILE
@@ -732,6 +768,8 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.engine.profiles["windows"]["window_mode"] = "floating"
         self.assertEqual(self.engine.get_effective_window_mode("windows"), "floating")
         self.assertEqual(self.engine.window_modes_by_profile()["windows"], "floating")
+        self.assertEqual(self.engine.get_effective_window_mode("windows", "tiled"), "tiled")
+        self.assertEqual(self.engine.get_effective_window_mode("mac", "follow-profile"), "floating")
 
     def test_follow_profile_effective_mode(self):
         """Each mode's own window_mode decides: floating on mac, tiled elsewhere."""
@@ -748,15 +786,18 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         state = self.engine.get_state()
         self.assertEqual(state.get("effective_window_mode"), "tiled")
 
-    def test_stored_override_never_applies(self):
-        """A leftover window_policy in state.json is ignored on switch and restore."""
+    def test_policy_preserved_on_switch_and_restore(self):
+        """A stored global policy is kept across switch and restore."""
         from engine.engine import STATE_FILE
         STATE_FILE.write_text(json.dumps({"mode": "omarchy", "window_policy": "floating"}), encoding="utf-8")
-        self.assertTrue(self.engine.switch_mode("windows"))
-        self.assertEqual(self.engine.get_state()["effective_window_mode"], "tiled")
-        self.assertNotIn("window_policy", json.loads(STATE_FILE.read_text(encoding="utf-8")))
-        self.assertTrue(self.engine.restore())
-        self.assertNotIn("window_policy", self.engine.get_state())
+        try:
+            self.assertTrue(self.engine.switch_mode("windows"))
+            self.assertEqual(self.engine.get_state()["effective_window_mode"], "floating")
+            self.assertEqual(json.loads(STATE_FILE.read_text(encoding="utf-8"))["window_policy"], "floating")
+            self.assertTrue(self.engine.restore())
+            self.assertEqual(self.engine.get_state()["window_policy"], "floating")
+        finally:
+            self.engine.set_window_policy("follow-profile")
 
     def test_display_metadata_persistence_in_state(self):
         """Verifies that state.json includes display metadata (icon, brief, color) for Mode Indicator."""
@@ -778,33 +819,45 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertEqual(state["display"].get("brief"), "OMA")
 
     def test_cli_window_policy_commands(self):
-        """window-policy is read-only; window-mode, set and shorthand forms are gone."""
+        """window-policy show + set <follow-profile|tiled|floating>; aliases, window-mode and stats stay removed."""
         bin_path = str(PROJECT_ROOT / "bin" / "omni-profile")
-        p1 = subprocess.run([bin_path, "window-policy"], capture_output=True, text=True)
+        env = dict(os.environ, OMNIPAL_DRY_RUN="1")
+        p1 = subprocess.run([bin_path, "window-policy"], capture_output=True, text=True, env=env)
         self.assertEqual(p1.returncode, 0, p1.stderr)
-        self.assertIn("OmniPal 窗口策略：跟随模式", p1.stdout)
+        self.assertIn("OmniPal 窗口策略", p1.stdout)
         self.assertIn("(mac): 浮动", p1.stdout)
 
-        p2 = subprocess.run([bin_path, "window-policy", "--json"], capture_output=True, text=True)
+        p2 = subprocess.run([bin_path, "window-policy", "--json"], capture_output=True, text=True, env=env)
         self.assertEqual(p2.returncode, 0, p2.stderr)
         data = json.loads(p2.stdout)
-        self.assertNotIn("window_policy", data)
+        self.assertIn(data["window_policy"], ("follow-profile", "tiled", "floating"))
+        self.assertIn("overridden", data)
         self.assertIn("effective_window_mode", data)
         self.assertEqual(data["window_modes"]["mac"], "floating")
         self.assertEqual(data["window_modes"]["windows"], "tiled")
 
-        for removed in (["window-mode"], ["window-policy", "set", "floating"], ["window-policy", "tiled"],
-                        ["window-policy", "float"], ["window-policy", "follow-profile"], ["window-policy", "follow"],
-                        ["stats"], ["stats", "--reset"], ["persist", "enable", "--policy", "floating"]):
-            p = subprocess.run([bin_path, *removed], capture_output=True, text=True)
+        src = (PROJECT_ROOT / "bin" / "omni-profile").read_text(encoding="utf-8")
+        self.assertIn('WINDOW_POLICY_CHOICES = ["follow-profile", "tiled", "floating"]', src)
+        self.assertIn('p_p_enable.add_argument("--policy", choices=WINDOW_POLICY_CHOICES', src)
+        self.assertIn("窗口策略: ⚠️ 已覆盖：全局", src)  # doctor warning
+        self.assertIn("window-policy set follow-profile", src)
+        self.assertNotIn("_warn_deprecated_alias", src)
+        self.assertNotIn("DEPRECATED_POLICY_SUBCOMMANDS", src)
+
+        for removed in (["window-mode"], ["window-policy", "tiled"], ["window-policy", "float"],
+                        ["window-policy", "follow-profile"], ["window-policy", "follow"],
+                        ["window-policy", "set", "float"], ["window-policy", "set", "follow"],
+                        ["window-policy", "set", "tile"], ["stats"], ["stats", "--reset"],
+                        ["persist", "enable", "--policy", "float"]):
+            p = subprocess.run([bin_path, *removed], capture_output=True, text=True, env=env)
             self.assertNotEqual(p.returncode, 0, removed)
 
     def test_mode_indicator_model_helpers(self):
-        """Model.js only resolves the effective window mode from each mode's window_mode."""
+        """Model.js resolves policy names/effective mode; follow-profile reads each mode's window_mode."""
         content = (PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "Model.js").read_text(encoding="utf-8")
-        self.assertIn("effectiveWindowMode", content)
-        for gone in ("DEFAULT_POLICIES", "windowPolicies", "resolvePolicyName", "normalizePolicy", "computeEffectiveMode"):
-            self.assertNotIn(gone, content)
+        for present in ("effectiveWindowMode", "DEFAULT_POLICIES", "normalizePolicy", "computeEffectiveMode", "resolvePolicyName"):
+            self.assertIn(present, content)
+        self.assertNotIn('"name": "跟随",', content)
 
     def test_mode_indicator_model_execution_in_node(self):
         """Executes Model.js in Node.js to strictly test pure logic functions and fallback counts."""
@@ -829,6 +882,12 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         if (ctx.effectiveWindowMode('windows', []) !== 'tiled') throw new Error('windows != tiled');
         if (ctx.effectiveWindowMode('windows', [{{id: 'windows', window_mode: 'floating'}}]) !== 'floating') throw new Error('window_mode ignored');
         if (ctx.effectiveWindowMode(null, null) !== 'tiled') throw new Error('null != tiled');
+        // Global policy overrides; follow-profile defers to the mode
+        if (ctx.computeEffectiveMode('floating', 'windows', []) !== 'floating') throw new Error('floating override');
+        if (ctx.computeEffectiveMode('tiled', 'mac', []) !== 'tiled') throw new Error('tiled override');
+        if (ctx.computeEffectiveMode('follow-profile', 'mac', []) !== 'floating') throw new Error('follow mac');
+        if (ctx.normalizePolicy('') !== 'follow-profile') throw new Error('empty -> follow-profile');
+        if (ctx.resolvePolicyName('follow-profile') !== '跟随模式') throw new Error('glossary name');
         """
         res = subprocess.run(["node", "-e", js_code], capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, f"Node execution error: {res.stderr}")
@@ -848,8 +907,11 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertIn("compositorConnected", content)
         self.assertIn("effPolicyBadge", content)
         self.assertIn("getEffectiveWindowMode", content)
-        for gone in ("windowPolicy", "policyOptions", "setPolicy", "getWindowPolicy", "setWindowPolicy",
-                     "policyOverridden", "已覆盖 · ", "（已覆盖", "切换下一模式", "window-policy set"):
+        for present in ("windowPolicy", "policyOptions", "setPolicy", "getWindowPolicy(): string",
+                        "setWindowPolicy(policy: string): void", "policyOverridden", "已覆盖 · ",
+                        "omni-profile window-policy set ", "policyBase", '"当前"'):
+            self.assertIn(present, content, present)
+        for gone in ("切换下一模式", 'run: "cycle"'):
             self.assertNotIn(gone, content, gone)
         self.assertIn("closePanel", content)
         self.assertIn("panelOpen", content)
@@ -1048,11 +1110,11 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         orig_state_text = STATE_FILE.read_text(encoding="utf-8") if STATE_FILE.exists() else None
         try:
             for raw in ("[1, 2, 3]", "NOT_VALID_JSON{{{",
-                        json.dumps({"mode": "omarchy", "window_policy": "floating"})):
+                        json.dumps({"mode": "omarchy", "window_policy": "bogus"})):
                 STATE_FILE.write_text(raw, encoding="utf-8")
+                self.engine.window_policy = "follow-profile"
                 self.assertEqual(self.engine.get_effective_window_mode(), "tiled")
                 st = self.engine.get_state()
-                self.assertNotIn("window_policy", st)
                 self.assertEqual(st.get("effective_window_mode"), "tiled")
         finally:
             if orig_state_text is not None:
@@ -2056,9 +2118,10 @@ class TestUiAutoOverrideText(unittest.TestCase):
         st = (PROJECT_ROOT / "plugins/omni.settings/SettingsPanel.qml").read_text(encoding="utf-8")
         self.assertIn("root.windowModeLabel(modeCard.modelData.windowMode)", st)
         self.assertIn("Super+Ctrl+/", st)
+        self.assertIn("已覆盖 · ", bar)
+        self.assertIn("（已覆盖：全局", st)
+        self.assertIn("已覆盖 · ", st)
         for qml in (bar, st):
-            for gone in ("已覆盖 · ", "（已覆盖", "已覆盖："):
-                self.assertNotIn(gone, qml)
             self.assertNotIn("Style.font.caption", qml)
             self.assertNotIn("Style.font.bodySmall", qml)
 
@@ -2068,10 +2131,11 @@ class TestSettingsSingleEntry(unittest.TestCase):
         self.bar = (PROJECT_ROOT / "plugins/omni.mode-indicator/BarWidget.qml").read_text(encoding="utf-8")
         self.st = (PROJECT_ROOT / "plugins/omni.settings/SettingsPanel.qml").read_text(encoding="utf-8")
 
-    def test_settings_window_policy_is_read_only(self):
-        self.assertIn("跟随模式 · 生效：", self.st)
-        for gone in ('"window-policy", "set"', "policyOptions", "policyGroup", "已覆盖", "policyOverridden",
-                     '"stats"', "statsProc", "resetStats", "askResetStats", "重置统计数据", "analyticsTab", "RankRow"):
+    def test_settings_window_policy_selector(self):
+        for present in ('["omni-profile", "window-policy", "set", policy]', "policyOptions", "policyGroup",
+                        "policyOverridden", "已覆盖", '"follow-profile"', '"tiled"', '"floating"'):
+            self.assertIn(present, self.st, present)
+        for gone in ('"stats"', "statsProc", "resetStats", "askResetStats", "重置统计数据", "analyticsTab", "RankRow"):
             self.assertNotIn(gone, self.st, gone)
         self.assertIn('["模式", "选项", "规则"]', self.st)
 
@@ -2090,7 +2154,8 @@ class TestSettingsSingleEntry(unittest.TestCase):
         order = [self.bar.index(f'text: "{h}"') for h in ("模式", "窗口策略", "快捷入口", "系统")]
         self.assertEqual(order, sorted(order))
         self.assertLess(order[-1], self.bar.index("row: root.settingsRow"))
-        for bad in ("快捷键速查表\"", "多任务概览", "布局吸附", "控制中心", "切换下一模式", "omni-profile window-policy set "):
+        self.assertIn("omni-profile window-policy set ", self.bar)
+        for bad in ("快捷键速查表\"", "多任务概览", "布局吸附", "控制中心", "切换下一模式"):
             self.assertNotIn(bad, self.bar, bad)
 
     def test_restore_merged_into_omarchy_card(self):

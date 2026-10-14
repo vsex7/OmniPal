@@ -52,7 +52,7 @@
 | 空间多工作区任务视图 | 16:9 画布卡片平铺全部工作区，窗口按矢量元数据映射真实相对位置，零截图、跨桌面键盘瞬移 | v1.3.0 已交付 |
 | 吸附布局一致性校验 | `check_consistency.py` 全面校验 `snap_layouts.json`：分区几何越界、图标/标签、模板唯一性与槽位合法性 | v1.3.0 已交付 |
 | 快捷键搜索 | 在 HUD (omni.cheat-sheet) 中支持全分类实时模糊检索 | v1.0.0 已交付 |
-| 配置持久化 | 默认记录最后使用的 Profile，仅写 `~/.config/omnipal/persistence.json`；`persist disable` 关闭重启恢复，卸载会清理该文件 | v1.4.0 引入，当前默认开启 |
+| 配置持久化 | 默认记录最后使用的 Profile 与 Window Policy，仅写 `~/.config/omnipal/persistence.json`；`persist disable` 关闭重启恢复，卸载会清理该文件 | v1.4.0 引入，当前默认开启 |
 | 本地使用统计 | 已移除（v1.9.0）：不再收集或存储任何使用统计，`stats` 子命令已删除 | v1.5.0 引入，v1.9.0 移除 |
 
 ---

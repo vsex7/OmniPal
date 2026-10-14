@@ -17,12 +17,12 @@
 - 新命令 `omni-profile send <MOD> <KEY> [--class <类名>]`，手动把快捷键发给当前窗口。
 
 ### 🔧 变更
+- 全局窗口策略保留：跟随模式（默认）/ 平铺 / 浮动，`omni-profile window-policy` 查看、`window-policy set <follow-profile|tiled|floating>` 设置；状态栏右键菜单「窗口策略」三行（标注「当前」）、设置模式页选择器、模式卡片「已覆盖：全局平铺/浮动」、doctor「⚠️ 已覆盖」提示；IPC `setWindowPolicy` / `getWindowPolicy`；随配置持久化记住（`persist enable --policy`）。不再在启动时清除已保存的 `window_policy`。
 - mac 模式开启时会暂时停用 Omarchy 原生的 Super+W、Super+数字绑定；还原或切到别的模式时会执行 `hyprctl reload` 把它们找回来。
 - mac 模式不再用 Super+数字切换工作区，改用 Super+Ctrl+←/→。
 
 ### 🗑️ 移除
-- CLI：删除已弃用的 `window-mode` 子命令与 `window-policy tiled|tile|floating|float|follow-profile|follow|follow_profile` 简写；`window-policy set` 一并删除，`window-policy [--json]` 只读显示每个模式的平铺/浮动。
-- 全局窗口策略覆盖：不再有全局平铺/浮动，每个模式自带的 `window_mode` 决定；状态栏菜单、设置、模式卡片与 doctor 不再显示「已覆盖」；IPC `setWindowPolicy` / `getWindowPolicy` 删除；守护进程启动时清除 `$XDG_RUNTIME_DIR/omnipal/state.json` 与 `persistence.json` 中遗留的 `window_policy`；`persist enable --policy` 删除。
+- CLI：删除已弃用的 `window-mode` 子命令与 `window-policy tiled|tile|floating|float|follow-profile|follow|follow_profile` 简写；规范写法 `window-policy set <follow-profile|tiled|floating>` 保留。
 - 本地使用统计：删除 `stats` 子命令、引擎中的统计收集与 `stats.json` 读写、设置中的「统计」页与「重置统计数据」确认。
 - 状态栏右键菜单删除「切换下一模式」（左键单击即轮转）。
 - **KDE 模式**：删除内置 `profiles/kde.json`，只保留 Windows、macOS、Omarchy 原生模式三种；设置模式卡片、状态栏菜单、Omarchy 菜单「快捷键模式」、速查表、上手指南、图标与配色同步移除。迁移：守护进程启动或执行任意 `omni-profile` 命令时，若 `state.json` / `persistence.json` 中的模式为 kde，回退到 windows；`app_rules.json` 中指向 kde 的规则被删除（`default_mode` 为 kde 时改为 windows），并输出一行日志；已注册的 Omarchy 菜单若仍有 kde 子项会自动重写。`omni-profile switch kde` 报错并列出可用模式。

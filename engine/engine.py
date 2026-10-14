@@ -297,7 +297,22 @@ def _debug(msg) -> None:
 
 RETIRED_MODES = ("kde",)  # removed built-in modes; saved references migrate to MIGRATION_FALLBACK_MODE
 MIGRATION_FALLBACK_MODE = "windows"
-LEGACY_WINDOW_POLICY_KEY = "window_policy"  # removed global tiled/floating override; stripped on startup
+
+VALID_WINDOW_POLICIES = {"tiled", "floating", "follow-profile"}
+WINDOW_POLICY_ALIASES = {
+    "tile": "tiled",
+    "tiled": "tiled",
+    "float": "floating",
+    "floating": "floating",
+    "follow": "follow-profile",
+    "follow-profile": "follow-profile",
+    "follow_profile": "follow-profile",
+}
+
+def normalize_window_policy(policy: Optional[str]) -> Optional[str]:
+    if not policy:
+        return None
+    return WINDOW_POLICY_ALIASES.get(str(policy).lower().strip())
 
 DIALOG_KEYWORDS = (
     "polkit",
@@ -587,7 +602,24 @@ class OmniPalEngine:
         self.snap_zones: Dict[str, Dict[str, Any]] = {}
         self.snap_layouts: List[Dict[str, Any]] = []
         self._last_summon_proc = None
+        self.window_policy: str = "follow-profile"
         self._ensure_run_dir()
+        if STATE_FILE.exists():
+            try:
+                with open(STATE_FILE, "r", encoding="utf-8") as f:
+                    _st = json.load(f)
+                    pol = normalize_window_policy(_st.get("window_policy"))
+                    if pol:
+                        self.window_policy = pol
+            except Exception:
+                pass
+        else:
+            try:
+                persisted_pol = self.get_persisted_window_policy()
+                if persisted_pol:
+                    self.window_policy = persisted_pol
+            except Exception:
+                pass
         self._load_catalog()
         self._load_snap_schema()
         self._write_snap_layouts_cache()
@@ -703,13 +735,14 @@ class OmniPalEngine:
     # --- Configuration persistence (~/.config/omnipal/persistence.json; default enabled to remember last state) ---
 
     def get_persistence_status(self) -> Dict[str, Any]:
-        """Returns the persistence state: {enabled, profile, path, updated_at}.
+        """Returns the persistence state: {enabled, profile, window_policy, path, updated_at}.
         By default, configuration persistence is enabled to preserve user choice across reboots,
         unless explicitly disabled in ~/.config/omnipal/persistence.json."""
         path = persistence_file_path()
         status: Dict[str, Any] = {
             "enabled": True,
             "profile": None,
+            "window_policy": None,
             "path": str(path),
             "updated_at": None
         }
@@ -723,6 +756,11 @@ class OmniPalEngine:
         if isinstance(data, dict):
             status["enabled"] = data.get("enabled", True) is not False
             status["profile"] = data.get("profile") if status["enabled"] else None
+            status["window_policy"] = (
+                normalize_window_policy(data.get("window_policy"))
+                if status["enabled"]
+                else None
+            )
             status["updated_at"] = data.get("updated_at")
         return status
 
@@ -734,18 +772,28 @@ class OmniPalEngine:
             return profile
         return None
 
+    def get_persisted_window_policy(self) -> Optional[str]:
+        """Returns the enabled persisted window policy for daemon/startup use, or None."""
+        status = self.get_persistence_status()
+        policy = status.get("window_policy")
+        if status["enabled"] and policy in ("tiled", "floating"):
+            return policy
+        return None
+
     def set_persistence(
         self,
         enabled: bool,
-        profile: Optional[str] = None
+        profile: Optional[str] = None,
+        window_policy: Optional[str] = None
     ) -> bool:
-        """Enables/disables profile persistence. Writes ONLY ~/.config/omnipal/persistence.json (H-1)."""
+        """Enables/disables profile and window policy persistence. Writes ONLY ~/.config/omnipal/persistence.json (H-1)."""
         path = persistence_file_path()
 
         if not enabled:
             data = {
                 "enabled": False,
                 "profile": None,
+                "window_policy": None,
                 "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
             try:
@@ -771,9 +819,20 @@ class OmniPalEngine:
             print(f"Error: Unknown profile '{target_profile}' for persistence. Available profiles: {valid}", file=sys.stderr)
             return False
 
+        # Resolve target window policy:
+        # passed policy -> existing persisted policy -> current window policy -> "tiled"
+        raw_policy = (
+            window_policy
+            or cur_persisted.get("window_policy")
+            or self.get_window_policy()
+            or "tiled"
+        )
+        target_policy = normalize_window_policy(raw_policy) or "tiled"
+
         data = {
             "enabled": True,
             "profile": target_profile,
+            "window_policy": target_policy,
             "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
         try:
@@ -783,26 +842,6 @@ class OmniPalEngine:
             return False
 
         return atomic_write_json(path, data)
-
-    def migrate_legacy_window_policy(self) -> List[str]:
-        """The global tiled/floating override was removed: every mode's own window_mode decides.
-        Strips any stored override (runtime state.json under $XDG_RUNTIME_DIR/omnipal and the
-        persistent persistence.json) so it is treated as follow-profile and never read again.
-        Returns the paths that were rewritten."""
-        migrated: List[str] = []
-        for path, writer in ((STATE_FILE, write_state_json), (persistence_file_path(), atomic_write_json)):
-            try:
-                if not path.exists():
-                    continue
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if isinstance(data, dict) and LEGACY_WINDOW_POLICY_KEY in data:
-                    data.pop(LEGACY_WINDOW_POLICY_KEY, None)
-                    if writer(path, data):
-                        migrated.append(str(path))
-            except Exception as _e:
-                _debug(_e)
-        return migrated
 
     def migrate_retired_modes(self) -> List[str]:
         """Retired built-in modes (kde) fall back to windows: rewrites state.json (mode / auto),
@@ -1516,15 +1555,37 @@ end
         print("Disabling float rules in place failed; falling back to config reload", file=sys.stderr)
         return True if self._reload_config_only() else None
 
-    def get_effective_window_mode(self, mode: Optional[str] = None) -> str:
-        """The mode's own window_mode decides (no global override)."""
-        if mode is None:
-            cur_m = (self.get_state().get("mode") if hasattr(self, "get_state") else "omarchy")
-        else:
-            cur_m = mode
-        return self.profile_window_mode(cur_m)
+    def get_effective_window_mode(self, mode: Optional[str] = None, policy: Optional[str] = None) -> str:
+        pol = normalize_window_policy(policy) or self.get_window_policy()
+        if pol == "follow-profile":
+            if mode is None:
+                cur_m = (self.get_state().get("mode") if hasattr(self, "get_state") else "omarchy")
+            else:
+                cur_m = mode
+            m = str(cur_m).lower().strip()
+            prof = getattr(self, "profiles", {}).get(m) or {}
+            wm = prof.get("window_mode")
+            if wm in ("floating", "tiled"):
+                return wm
+            return "floating" if m == "mac" else "tiled"
+        return "floating" if pol == "floating" else "tiled"
+
+    def get_window_policy(self) -> str:
+        if STATE_FILE.exists():
+            try:
+                with open(STATE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        pol = normalize_window_policy(data.get("window_policy"))
+                        if pol:
+                            self.window_policy = pol
+                            return pol
+            except Exception as _e:
+                _debug(_e)
+        return normalize_window_policy(getattr(self, "window_policy", None)) or "follow-profile"
 
     def profile_window_mode(self, mode_id: Any) -> str:
+        """The mode's own window_mode (tiled/floating), ignoring the global policy."""
         m = str(mode_id).lower().strip()
         prof = getattr(self, "profiles", {}).get(m) or {}
         wm = prof.get("window_mode")
@@ -1533,10 +1594,36 @@ end
         return "floating" if m == "mac" else "tiled"
 
     def window_modes_by_profile(self) -> Dict[str, str]:
-        """Effective window mode (tiled/floating) of every mode, from its own window_mode."""
+        """Each mode's own window_mode (tiled/floating), before any global override."""
         return {pid: self.profile_window_mode(pid) for pid in self.profiles}
 
+    def set_window_policy(self, policy: str) -> bool:
+        with engine_lock():
+            norm = normalize_window_policy(policy)
+            if not norm:
+                return False
+            previous_policy = self.get_window_policy()
+            self.window_policy = norm
+            cur_state = self.get_state()
+            cur_mode = cur_state.get("mode", "omarchy")
+            count = cur_state.get("active_bindings_count", 0)
+            self._write_state(cur_mode, count, policy=norm)
+            try:
+                applied = self._apply_window_policy(force=True)
+            except Exception as e:
+                print(f"Warning: Failed to apply window policy '{norm}': {e}", file=sys.stderr)
+                applied = False
+            if not applied:
+                self.window_policy = previous_policy
+                self._write_state(cur_mode, count, policy=previous_policy)
+                print(f"Warning: Compositor rejected window policy '{norm}'; previous policy restored", file=sys.stderr)
+                return False
+            if self.get_persistence_status()["enabled"]:
+                self.set_persistence(True, window_policy=norm)
+            return True
+
     def get_state(self) -> Dict[str, Any]:
+        cur_policy = self.get_window_policy()
         sock = find_socket2_path()
         compositor_connected = sock is not None and sock.exists()
         default_state = {
@@ -1546,7 +1633,8 @@ end
             "display": self.profiles.get("omarchy", {}).get("display", {"icon": "⊡", "brief": "OMA", "color": "#a3be8c"}),
             "active_bindings_count": 0,
             "status": "idle",
-            "effective_window_mode": self.get_effective_window_mode("omarchy"),
+            "window_policy": cur_policy,
+            "effective_window_mode": self.get_effective_window_mode("omarchy", cur_policy),
             "compositor_connected": compositor_connected
         }
         if not STATE_FILE.exists():
@@ -1556,9 +1644,11 @@ end
                 data = json.load(f)
                 if not isinstance(data, dict):
                     return default_state
-                data.pop(LEGACY_WINDOW_POLICY_KEY, None)
+                pol = normalize_window_policy(data.get("window_policy")) or cur_policy
+                self.window_policy = pol
+                data["window_policy"] = pol
                 cur_m = data.get("mode", "omarchy")
-                data["effective_window_mode"] = self.get_effective_window_mode(cur_m)
+                data["effective_window_mode"] = self.get_effective_window_mode(cur_m, pol)
                 data["compositor_connected"] = compositor_connected
                 if "display" not in data or not data["display"]:
                     data["display"] = self.profiles.get(cur_m, {}).get("display", {})
@@ -1572,7 +1662,7 @@ end
             return prev if isinstance(prev, dict) and prev.get("mode") == mode else None
         return auto or None
 
-    def _write_state(self, mode: str, count: int, auto: Any = _KEEP):
+    def _write_state(self, mode: str, count: int, policy: Optional[str] = None, auto: Any = _KEEP):
         auto = self._resolve_auto(mode, auto)
         self._ensure_run_dir()
         profile_data = self.profiles.get(mode, {})
@@ -1585,7 +1675,24 @@ end
             except Exception as _e:
                 _debug(_e)
 
-        effective_mode = self.get_effective_window_mode(mode)
+        if policy:
+            cur_policy = normalize_window_policy(policy)
+        else:
+            cur_policy = None
+            if STATE_FILE.exists():
+                try:
+                    with open(STATE_FILE, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, dict):
+                            cur_policy = normalize_window_policy(data.get("window_policy"))
+                except Exception as _e:
+                    _debug(_e)
+            if not cur_policy:
+                cur_policy = normalize_window_policy(getattr(self, "window_policy", None)) or "follow-profile"
+
+        cur_policy = cur_policy or "tiled"
+        self.window_policy = cur_policy
+        effective_mode = self.get_effective_window_mode(mode, cur_policy)
         sock = find_socket2_path()
         compositor_connected = sock is not None and sock.exists()
 
@@ -1599,6 +1706,7 @@ end
             "pid": os.getpid(),
             "daemon_pid": daemon_pid,
             "status": "active" if mode != "omarchy" else "native",
+            "window_policy": cur_policy,
             "effective_window_mode": effective_mode,
             "compositor_connected": compositor_connected,
         }
@@ -2459,6 +2567,7 @@ end"""
         results: Dict[str, Any] = {}
         initial_state = self.get_state()
         prev_mode = initial_state.get("mode", "omarchy")
+        prev_policy = initial_state.get("window_policy", self.get_window_policy())
         results["initial_mode"] = prev_mode
 
         try:
@@ -2492,13 +2601,14 @@ end"""
             if prev_mode != "omarchy" and prev_mode in self.profiles:
                 results["mode_restored"] = self.switch_mode(prev_mode)
             elif prev_mode == "omarchy":
-                self._write_state("omarchy", 0)
+                self._write_state("omarchy", 0, policy=prev_policy)
 
-            # Window mode follows the restored mode's own window_mode.
-            try:
-                results["policy_restored"] = self._apply_window_policy(force=True)
-            except Exception:
-                results["policy_restored"] = False
+            current_policy = self.get_window_policy()
+            results["policy_restored"] = True
+            if prev_mode == "omarchy" and prev_policy == "floating":
+                results["policy_restored"] = self.set_window_policy(prev_policy)
+            elif prev_policy != current_policy:
+                results["policy_restored"] = self.set_window_policy(prev_policy)
 
         return results
 
@@ -2590,7 +2700,8 @@ end"""
             "state": self.get_state(),
             "overlay": {"count": 0, "verified_in_hyprland": 0, "missing": []},
             "consistency": False,
-            "window_modes": self.window_modes_by_profile(),
+            "window_policy": {"policy": self.get_window_policy(),
+                              "overridden": self.get_window_policy() != "follow-profile"},
             "fixed_bindings": sorted(self.fixed_combos()),
             "takeovers": {},
             "issues": [],
@@ -2898,21 +3009,25 @@ def run_daemon():
 
     print(f"🚀 OmniPal Engine daemon started (PID: {os.getpid()}). Watching for signals & Hyprland events...", flush=True)
 
-    # Migrate away any stored global window-policy override (removed): follow each mode's window_mode.
-    for migrated in engine.migrate_legacy_window_policy():
-        print(f"📦 Dropped legacy global window policy override from {migrated}", flush=True)
     # Retired modes (kde) fall back to windows; rules targeting them are dropped.
     for line in engine.migrate_retired_modes():
         print(f"📦 Migrated retired mode: {line}", flush=True)
 
-    # Restore persisted profile on startup
+    # Check and restore persisted window policy and profile on startup
     persisted_status = engine.get_persistence_status()
+    persisted_policy = engine.get_persisted_window_policy()
     persisted_mode = engine.get_persisted_profile()
+
+    if persisted_policy:
+        print(f"📦 Restoring persisted window policy on startup: {persisted_policy}", flush=True)
+        engine.set_window_policy(persisted_policy)
+    elif persisted_status.get("enabled"):
+        engine.set_persistence(True, window_policy=engine.get_window_policy())
 
     if persisted_mode and persisted_mode != "omarchy":
         restore_persisted_profile(engine)
     elif persisted_mode == "omarchy":
-        engine._write_state("omarchy", 0)
+        engine._write_state("omarchy", 0, policy=engine.get_window_policy())
     elif persisted_status.get("enabled"):
         cur_mode = engine.get_state().get("mode") or "windows"
         engine.set_persistence(True, profile=cur_mode)

@@ -94,6 +94,11 @@ omni-profile persist status
 
 # 显式启用持久化（缺省记录当前模式，可指定模式名；非法模式将被拒绝）
 omni-profile persist enable mac
+omni-profile persist enable mac --policy floating   # 同时记住窗口策略（follow-profile / tiled / floating）
+
+# 窗口策略：查看；设置为 跟随模式 / 平铺 / 浮动（平铺或浮动会覆盖各模式自带的设置，UI 标注「已覆盖」）
+omni-profile window-policy
+omni-profile window-policy set follow-profile
 
 # 关闭持久化并清理 persistence.json
 omni-profile persist disable
