@@ -1924,7 +1924,6 @@ Item {
                           color: root.foreground
                           clip: true
                           Text {
-                            font.family: Style.font.family
                             anchors.verticalCenter: parent.verticalCenter
                             visible: classInput.text === ""
                             text: "窗口类名"
