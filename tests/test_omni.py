@@ -1150,5 +1150,34 @@ class TestAppRules(unittest.TestCase):
         self.assertIsNone(self.engine.apply_app_rule("kitty"))  # stays on kde, not back to windows
         self.assertEqual(self.engine.get_state().get("mode"), "kde")
 
+
+class TestRulesAddCurrent(unittest.TestCase):
+    """rules add/test --current read the focused window's class (via the hyprctl stub)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        fakebin = str(PROJECT_ROOT / "tests" / "fakebin")
+        self.env = dict(os.environ, OMNIPAL_CONFIG_DIR=self._tmp.name,
+                        PATH=fakebin + os.pathsep + os.environ.get("PATH", ""))
+        self.cli = [sys.executable, str(PROJECT_ROOT / "bin" / "omni-profile"), "rules"]
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *args):
+        return subprocess.run(self.cli + list(args), capture_output=True, text=True, env=self.env)
+
+    def test_add_current_uses_focused_class(self):
+        r = self.run_cli("add", "--current", "mac", "--delay", "0")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rules = json.loads(self.run_cli("list", "--json").stdout)["rules"]
+        self.assertEqual([(x["class"], x["mode"]) for x in rules], [("fake", "mac")])
+        self.assertIn("fake -> mac", self.run_cli("test", "--current", "--delay", "0").stdout)
+
+    def test_add_without_mode_is_rejected(self):
+        self.assertNotEqual(self.run_cli("add", "code").returncode, 0)
+        self.assertNotEqual(self.run_cli("add", "--current", "--delay", "0").returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

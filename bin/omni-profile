@@ -351,9 +351,38 @@ def _print_stat_rank(title: str, counts: dict, top: int = 10):
     for i, (name, cnt) in enumerate(ranked, 1):
         print(f"  {i}. {str(name).ljust(22)}{cnt} 次")
 
+def _resolve_current_class(engine: OmniPalEngine, args):
+    """For --current: count down so the user can focus the target app, then read its window class."""
+    import time
+    delay = max(0, int(getattr(args, "delay", 3) or 0))
+    if delay:
+        print(f"⏳ 请在 {delay} 秒内切换到要设置规则的应用窗口…", flush=True)
+        for left in range(delay, 0, -1):
+            print(f"   {left}…", flush=True)
+            time.sleep(1)
+    win = engine.get_active_window() or {}
+    cls = (win.get("class") or win.get("initialClass") or "").strip()
+    if not cls:
+        print("❌ 读不到当前焦点窗口的类名（Hyprland 没在运行，或焦点在桌面上）", file=sys.stderr)
+        sys.exit(1)
+    print(f"🎯 当前应用: {cls}")
+    return cls
+
 def cmd_rules(engine: OmniPalEngine, args):
     data = engine.load_app_rules()
     act = args.rules_action or "list"
+    if act in ("add", "test") and getattr(args, "current", False):
+        if act == "add":
+            # `rules add --current mac`: argparse puts the mode into window_class
+            if args.mode is None:
+                args.mode = args.window_class
+        args.window_class = _resolve_current_class(engine, args)
+    if act == "add" and (not args.window_class or not args.mode):
+        print("❌ 用法: omni-profile rules add <窗口类名> <模式>，或 omni-profile rules add --current <模式>", file=sys.stderr)
+        sys.exit(1)
+    if act == "test" and not args.window_class:
+        print("❌ 用法: omni-profile rules test <窗口类名>，或 omni-profile rules test --current", file=sys.stderr)
+        sys.exit(1)
     if act == "list":
         if getattr(args, "json", False):
             print(json.dumps(data, ensure_ascii=False))
@@ -512,8 +541,10 @@ def main():
     r_list = rules_sub.add_parser("list", help="列出规则")
     r_list.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     r_add = rules_sub.add_parser("add", help="添加或更新一条规则")
-    r_add.add_argument("window_class", help="窗口类名，可用 hyprctl activewindow 查看")
-    r_add.add_argument("mode", help="目标模式")
+    r_add.add_argument("window_class", nargs="?", help="窗口类名，可用 hyprctl activewindow 查看；用 --current 时省略")
+    r_add.add_argument("mode", nargs="?", help="目标模式")
+    r_add.add_argument("--current", action="store_true", help="倒计时后取当前焦点窗口的类名")
+    r_add.add_argument("--delay", type=int, default=3, help="--current 的倒计时秒数（默认 3，0 表示立即读取）")
     r_add.add_argument("--match", choices=["exact", "prefix", "regex"], default="exact")
     r_rm = rules_sub.add_parser("remove", help="删除一条规则")
     r_rm.add_argument("window_class")
@@ -524,7 +555,9 @@ def main():
     r_def = rules_sub.add_parser("default", help="无匹配时回到的模式（none 表示回到手动选择的模式）")
     r_def.add_argument("mode")
     r_test = rules_sub.add_parser("test", help="测试某个窗口类名会匹配到哪个模式")
-    r_test.add_argument("window_class")
+    r_test.add_argument("window_class", nargs="?")
+    r_test.add_argument("--current", action="store_true", help="倒计时后测试当前焦点窗口")
+    r_test.add_argument("--delay", type=int, default=3, help="--current 的倒计时秒数")
     p_rules.set_defaults(func=cmd_rules)
 
     p_stats = subparsers.add_parser("stats", help="查看本地使用统计（切换/吸附/动作排行，完全本地零上传；--reset 清空）")
