@@ -64,6 +64,14 @@ LUA_DISPATCHERS = {
     "workspace_prev": "hl.dsp.focus({ workspace = 'e-1' })",
 }
 
+def _debug(msg) -> None:
+    """Prints swallowed errors to stderr when OMNIPAL_DEBUG=1."""
+    if os.environ.get("OMNIPAL_DEBUG") == "1":
+        import traceback
+        caller = traceback.extract_stack(limit=2)[0]
+        print(f"[omnipal debug] {caller.name}:{caller.lineno}: {msg!r}", file=sys.stderr)
+
+
 VALID_WINDOW_POLICIES = {"tiled", "floating", "follow-profile"}
 WINDOW_POLICY_ALIASES = {
     "tile": "tiled",
@@ -162,8 +170,8 @@ class OmniPalEngine:
                     pol = normalize_window_policy(_st.get("window_policy"))
                     if pol:
                         self.window_policy = pol
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
         self._load_catalog()
         self._load_snap_schema()
         self._ensure_run_dir()
@@ -173,8 +181,8 @@ class OmniPalEngine:
         try:
             RUN_DIR.mkdir(parents=True, exist_ok=True)
             RUN_DIR.chmod(0o700)
-        except Exception:
-            pass
+        except Exception as _e:
+            _debug(_e)
 
     def _load_snap_schema(self):
         if self.snap_schema_file.exists():
@@ -197,8 +205,8 @@ class OmniPalEngine:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             tmp.replace(SNAP_LAYOUTS_FILE)
-        except Exception:
-            pass
+        except Exception as _e:
+            _debug(_e)
 
     def get_snap_layouts(self) -> List[Dict[str, Any]]:
         return self.snap_layouts
@@ -336,8 +344,8 @@ class OmniPalEngine:
             print(f"Warning: Failed to write persistence config {path}: {e}", file=sys.stderr)
             try:
                 tmp_file.unlink()
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
             return False
         return True
 
@@ -402,8 +410,8 @@ class OmniPalEngine:
             stats[bucket][key] = stats[bucket].get(key, 0) + 1
             stats["last_updated"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             self._write_stats(stats)
-        except Exception:
-            pass
+        except Exception as _e:
+            _debug(_e)
 
     def _write_stats(self, data: Dict[str, Any]) -> bool:
         path = stats_file_path()
@@ -417,8 +425,8 @@ class OmniPalEngine:
         except Exception:
             try:
                 tmp_file.unlink()
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
             return False
 
     def _eval_lua(self, lua_code: str) -> bool:
@@ -465,8 +473,8 @@ class OmniPalEngine:
                         if pol:
                             self.window_policy = pol
                             return pol
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
         return normalize_window_policy(getattr(self, "window_policy", None)) or "tiled"
 
     def set_window_policy(self, policy: str) -> bool:
@@ -523,8 +531,8 @@ class OmniPalEngine:
         if PID_FILE.exists():
             try:
                 daemon_pid = int(PID_FILE.read_text().strip())
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
 
         if policy:
             cur_policy = normalize_window_policy(policy)
@@ -536,8 +544,8 @@ class OmniPalEngine:
                         data = json.load(f)
                         if isinstance(data, dict):
                             cur_policy = normalize_window_policy(data.get("window_policy"))
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _debug(_e)
             if not cur_policy:
                 cur_policy = normalize_window_policy(getattr(self, "window_policy", None)) or "tiled"
 
@@ -608,19 +616,20 @@ class OmniPalEngine:
         try:
             if OVERLAY_FILE.exists():
                 OVERLAY_FILE.unlink()
-        except Exception:
-            pass
+        except Exception as _e:
+            _debug(_e)
 
         self._write_state("omarchy", 0)
         return success
 
-    def switch_mode(self, target_mode: str) -> bool:
+    def switch_mode(self, target_mode: str, _rollback: bool = False) -> bool:
         """Atomically switches the in-memory keybindings to target_mode with rollback on error."""
         target_mode = target_mode.lower().strip()
         if target_mode not in self.profiles:
             valid_modes = ", ".join(self.profiles.keys())
             raise ValueError(f"Unknown mode '{target_mode}'. Available modes: {valid_modes}")
 
+        previous_mode = self.get_state().get("mode", "omarchy")
         target_profile = self.profiles[target_mode]
         target_bindings = target_profile.get("bindings", [])
 
@@ -668,8 +677,12 @@ class OmniPalEngine:
             if self.get_persistence_status()["enabled"]:
                 self.set_persistence(True, target_mode)
         else:
-            print("Warning: Failed to apply overlay in Hyprland, rolling back to baseline...", file=sys.stderr)
+            print("Warning: Failed to apply overlay in Hyprland, rolling back...", file=sys.stderr)
             self.restore()
+            # Re-apply the mode the user had before, instead of dropping to baseline.
+            if not _rollback and previous_mode != "omarchy" and previous_mode != target_mode and previous_mode in self.profiles:
+                if not self.switch_mode(previous_mode, _rollback=True):
+                    print(f"Warning: Could not re-apply previous mode '{previous_mode}'.", file=sys.stderr)
 
         return success
 
@@ -807,8 +820,8 @@ class OmniPalEngine:
                 with open(tmp_snap, "w", encoding="utf-8") as f:
                     json.dump(snap_data, f, ensure_ascii=False)
                 tmp_snap.replace(SNAP_FILE)
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
 
             if not no_hud:
                 try:
@@ -825,8 +838,8 @@ class OmniPalEngine:
                         stderr=subprocess.DEVNULL,
                         start_new_session=True
                     )
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _debug(_e)
             return True
 
         # 2. Write snap.json for state/event observation
@@ -842,8 +855,8 @@ class OmniPalEngine:
             with open(tmp_snap, "w", encoding="utf-8") as f:
                 json.dump(snap_data, f, ensure_ascii=False)
             tmp_snap.replace(SNAP_FILE)
-        except Exception:
-            pass
+        except Exception as _e:
+            _debug(_e)
 
         # 3. Summon via omarchy-shell asynchronously if not suppressed
         if not no_hud:
@@ -857,8 +870,8 @@ class OmniPalEngine:
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
                 )
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
 
         focus_lua = ""
         if target_address:
@@ -1062,8 +1075,8 @@ def run_daemon():
     # Record PID
     try:
         PID_FILE.write_text(str(os.getpid()))
-    except Exception:
-        pass
+    except Exception as _e:
+        _debug(_e)
 
     print(f"🚀 OmniPal Engine daemon started (PID: {os.getpid()}). Watching for signals & Hyprland events...", flush=True)
 
@@ -1080,8 +1093,8 @@ def run_daemon():
             try:
                 if PID_FILE.exists():
                     PID_FILE.unlink()
-            except Exception:
-                pass
+            except Exception as _e:
+                _debug(_e)
             engine.restore()
 
     def sig_handler(signum, frame):

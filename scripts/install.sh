@@ -21,6 +21,13 @@ command -v hyprctl >/dev/null 2>&1 || { echo "❌ 缺少依赖: hyprctl。OmniPa
 echo "🔍 运行 Profile 与 Schema 一致性校验..."
 python3 "${PROJECT_ROOT}/scripts/check_consistency.py"
 
+# 2.5 提醒：服务和软链接都指向当前目录，移动或删除它会让 OmniPal 失效
+case "${PROJECT_ROOT}" in
+    /tmp/*|"${HOME}/Downloads"/*)
+        echo "⚠️  OmniPal 位于临时目录 ${PROJECT_ROOT}，删除后服务会失效。建议先移到 ~/.local/share/omnipal 再安装。" ;;
+esac
+echo "ℹ️  安装后请不要移动或删除 ${PROJECT_ROOT}；如需移动，请先卸载再重新安装。"
+
 # 3. 创建 CLI 符号链接
 # 记录本次安装新建的目录，卸载时只删除这些目录（且仅在为空时）
 CREATED_DIRS_FILE="${HOME}/.local/share/omnipal/created-dirs"
@@ -56,6 +63,9 @@ cat > "${SERVICE_FILE}" <<EOF
 Description=OmniPal Runtime Hot-Switching Daemon
 Documentation=https://github.com/vsex7/OmniPal
 PartOf=graphical-session.target
+ConditionPathExists=${PROJECT_ROOT}/bin/omni-profile
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
