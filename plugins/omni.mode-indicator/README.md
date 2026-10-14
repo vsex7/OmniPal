@@ -16,16 +16,7 @@ OmniPal 状态栏托盘模式指示器与右键快捷控制面板。
 - **右键快捷控制面板 (Context Menu / Panel)**：
   1. **Hero 概览区**：当前模式图标、模式全名、模式缩写胶囊、生效绑定计数与 Compositor 连通状态，带关闭按钮
   2. **模式快速切换 (PROFILES)**：动态列出所有可用预设与自定义模式，当前活动模式带有 `✓` 标识与左侧颜色条，点击即切
-  3. **窗口策略控制 (WINDOW POLICY)**：分段选择器快速切换平铺（Tiled）、浮动（Floating）或跟随模式（Follow-Profile），并动态呈现生效说明
-  4. **快捷功能入口 (ACTIONS)**：
-     - 📖 快捷键速查表 (Cheat Sheet)
-     - ⚙️ OmniPal 控制中心 (Settings)
-     - 🗂️ 任务视图 (Task View)
-     - 🪟 触发布局吸附 (Snap Layout)
-  5. **系统与控制 (SYSTEM)**：
-     - ↻ 轮转切换下一模式
-     - ↺ 还原原生快捷键（零残留热恢复）
-     - 🩺 运行系统健康诊断 (Doctor)
+  3. **打开设置**：唯一的其它入口。窗口策略、还原 Omarchy 原生模式、配置持久化、速查表等完整控制都在 OmniPal 设置里
 - **优雅降级**：
   - Engine 未运行时显示 `⊘`，颜色置灰
   - 右键面板支持点击外部区域通过 `HyprlandFocusGrab` 自动平滑关闭

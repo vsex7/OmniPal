@@ -532,6 +532,38 @@ def cmd_stats(engine: OmniPalEngine, args):
     _print_stat_rank("🧲 贴靠区域使用 Top 榜:", stats["snaps"])
     _print_stat_rank("⚡ 动作触发统计排行:", stats["actions"])
 
+DEPRECATED_POLICY_SUBCOMMANDS = ["tiled", "tile", "floating", "float", "follow-profile", "follow", "follow_profile"]
+
+
+def _canonical_policy(name: str) -> str:
+    key = name.lower().strip()
+    if key in ("follow", "follow_profile", "follow-profile"):
+        return "follow-profile"
+    if key in ("float", "floating"):
+        return "floating"
+    return "tiled"
+
+
+def _warn_deprecated_alias(args) -> None:
+    """冗余别名照常执行，但在 stderr 提示规范命令（stdout/--json 输出不受影响）。"""
+    alias_cmd = getattr(args, "deprecated_cmd", None)
+    direct = getattr(args, "deprecated_direct", None)
+    if not alias_cmd and not direct:
+        return
+    used = ["omni-profile", args.command]
+    if direct:
+        used.append(direct)
+        canonical = f"omni-profile window-policy set {_canonical_policy(direct)}"
+    else:
+        action = getattr(args, "policy_action", None) or "status"
+        if action == "set":
+            used += ["set", str(getattr(args, "policy", ""))]
+            canonical = f"omni-profile window-policy set {getattr(args, 'policy', '')}"
+        else:
+            canonical = "omni-profile window-policy" + ("" if action == "status" else f" {action}")
+    print(f"⚠️  `{' '.join(used)}` 已弃用，将在后续版本移除；请改用 `{canonical}`", file=sys.stderr)
+
+
 def main():
     engine = OmniPalEngine(PROJECT_ROOT)
 
@@ -665,11 +697,16 @@ def main():
     p_stats.add_argument("--reset", action="store_true", help="清空并重置全部本地统计")
     p_stats.set_defaults(func=cmd_stats)
 
-    # window-policy / window-mode
+    # window-policy（规范命令）；window-mode 与 tiled/tile/floating/float/follow-profile/follow/follow_profile
+    # 直达子命令是冗余别名：仍可用，但会在 stderr 打印弃用提示，指向规范写法（见 README「CLI 别名弃用」）
     for cmd_name in ["window-policy", "window-mode"]:
-        p_wp = subparsers.add_parser(cmd_name, help="查看或设置窗口策略：tiled 平铺 / floating 浮动 / follow-profile 跟随模式")
+        is_alias_cmd = cmd_name != "window-policy"
+        p_wp = subparsers.add_parser(
+            cmd_name,
+            help=("（已弃用，请用 window-policy）" if is_alias_cmd else "")
+                 + "查看或设置窗口策略：tiled 平铺 / floating 浮动 / follow-profile 跟随模式")
         p_wp.add_argument("--json", action="store_true", help="以 JSON 格式输出状态")
-        p_wp.set_defaults(func=cmd_window_policy, policy_action="status")
+        p_wp.set_defaults(func=cmd_window_policy, policy_action="status", deprecated_cmd=cmd_name if is_alias_cmd else None)
         wp_sub = p_wp.add_subparsers(dest="policy_action", help="策略操作")
 
         wp_status = wp_sub.add_parser("status", help="查看当前窗口策略状态")
@@ -681,16 +718,17 @@ def main():
         wp_set.add_argument("--json", action="store_true", help="以 JSON 格式输出结果")
         wp_set.set_defaults(func=cmd_window_policy)
 
-        for direct_p in ["tiled", "tile", "floating", "float", "follow-profile", "follow", "follow_profile"]:
-            wp_direct = wp_sub.add_parser(direct_p, help=f"快速切换至策略: {direct_p}")
+        for direct_p in DEPRECATED_POLICY_SUBCOMMANDS:
+            wp_direct = wp_sub.add_parser(direct_p, help=f"（已弃用）请用 window-policy set {_canonical_policy(direct_p)}")
             wp_direct.add_argument("--json", action="store_true", help="以 JSON 格式输出结果")
-            wp_direct.set_defaults(func=cmd_window_policy, policy_action="set", target_policy=direct_p)
+            wp_direct.set_defaults(func=cmd_window_policy, policy_action="set", target_policy=direct_p, deprecated_direct=direct_p)
 
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
         sys.exit(0)
 
+    _warn_deprecated_alias(args)
     args.func(engine, args)
 
 if __name__ == "__main__":

@@ -21,7 +21,9 @@ import "Safety.js" as Safety
 //    右键：呼出/收起快捷控制面板 (原生 KeyboardPanel)
 //    中键：呼出设置面板 (omarchy-shell shell toggle omni.settings)
 // 4. 面板全部使用原生组件：PanelHero / PanelSectionHeader / PanelSeparator /
-//    Button（列表行，selected + hasCursor）/ ButtonGroup（窗口策略），无 ✕ 关闭（Esc / 点击外部收起），包含肌肉记忆模式与窗口策略（平铺/浮动/跟随模式）控制
+//    Button（列表行，selected + hasCursor），无 ✕ 关闭（Esc / 点击外部收起）。
+//    只保留快速模式切换 + 一项「打开设置」；窗口策略、还原等完整控制都在设置面板
+//    （omni.settings，设计评审第 4 项：设置是唯一完整入口）
 // 5. 外部点击收起、bar 弹窗互斥均由 KeyboardPanel/bar 协调器负责
 // 6. 模式与策略数据 100% 来源单一事实源 (omni-profile / state.json)
 Panel {
@@ -46,10 +48,9 @@ Panel {
   property string engineStatus: "native"
   // Mirrors Panel.opened (PanelController); kept as a name for IPC/tests.
   readonly property bool panelOpen: root.opened
-  // Keyboard cursor over the panel rows: profiles, then the policy group, then actions.
+  // Keyboard cursor over the panel rows: profiles, then the single "打开设置" row.
   property bool cursorActive: false
   property int cursorIndex: 0
-  property int policyCursor: -1
   property string windowPolicy: "tiled"
   property string effectiveWindowMode: "tiled"
   property bool compositorConnected: false
@@ -63,7 +64,6 @@ Panel {
     : ""
 
   property var profiles: Model.fallbackProfiles()
-  property var policyOptions: Model.windowPolicies()
 
   function loadActionHints(rawText) {
     try {
@@ -190,65 +190,24 @@ Panel {
       if (!hintsProcess.running) hintsProcess.running = true
       root.cursorActive = false
       root.cursorIndex = 0
-      root.policyCursor = -1
     }
   }
 
   // ---- keyboard cursor (PanelKeyCatcher) ------------------------------------
-  readonly property var actionRows: [
-    { icon: Icons.glyph.cheat, label: "快捷键速查表", hintKey: "cheat_sheet", run: "cheat", closes: true },
-    { icon: Icons.glyph.settings, label: "控制中心", hintKey: "omni_settings", run: "settings", closes: true },
-    { icon: Icons.glyph.snap, label: "布局吸附", hintKey: "snap_layouts", run: "snap", closes: true },
-    { icon: Icons.glyph.overview, label: "多任务概览", hintKey: "task_view", run: "overview", closes: true }
-  ]
-  readonly property var systemRows: [
-    { icon: Icons.glyph.cycle, label: "切换下一模式", hint: "", run: "cycle", closes: false },
-    { icon: Icons.glyph.restore, label: "还原原生快捷键", hint: "", run: "restore", closes: true },
-    { icon: Icons.glyph.doctor, label: "健康诊断", hint: "", run: "doctor", closes: true }
-  ]
-  readonly property int policyRowIndex: root.profiles.length
-  readonly property int actionBase: root.profiles.length + 1
-  readonly property int systemBase: root.actionBase + root.actionRows.length
-  readonly property int cursorCount: root.systemBase + root.systemRows.length
-
-  function runAction(row) {
-    if (!row) return
-    if (row.run === "cheat") root.openCheatSheet()
-    else if (row.run === "settings") root.openSettings()
-    else if (row.run === "snap") root.triggerSnap()
-    else if (row.run === "overview") root.openOverview()
-    else if (row.run === "cycle") root.cycleMode(false)
-    else if (row.run === "restore") root.restoreBaseline()
-    else if (row.run === "doctor") root.runDoctor()
-    if (row.closes) root.closePanel()
-  }
+  readonly property var settingsRow: ({ icon: Icons.glyph.settings, label: "打开设置", hintKey: "omni_settings" })
+  readonly property int settingsRowIndex: root.profiles.length
+  readonly property int cursorCount: root.profiles.length + 1
 
   function moveCursor(dx, dy) {
     if (!root.cursorActive) { root.cursorActive = true; return }
-    if (dy !== 0) {
-      root.cursorIndex = Math.max(0, Math.min(root.cursorCount - 1, root.cursorIndex + dy))
-      root.policyCursor = -1
-    } else if (dx !== 0 && root.cursorIndex === root.policyRowIndex) {
-      var n = root.policyOptions.length
-      var cur = root.policyCursor >= 0 ? root.policyCursor : Math.max(0, root.policySelectedIndex())
-      root.policyCursor = Math.max(0, Math.min(n - 1, cur + dx))
-    }
-  }
-
-  function policySelectedIndex() {
-    for (var i = 0; i < root.policyOptions.length; i++)
-      if (root.policyOptions[i].id === Model.normalizePolicy(root.windowPolicy)) return i
-    return -1
+    if (dy !== 0) root.cursorIndex = Math.max(0, Math.min(root.cursorCount - 1, root.cursorIndex + dy))
   }
 
   function activateCursor() {
     if (!root.cursorActive) return
     var i = root.cursorIndex
     if (i < root.profiles.length) root.switchModeWithUndo(root.profiles[i].id)
-    else if (i === root.policyRowIndex) {
-      if (root.policyCursor >= 0) root.setPolicy(root.policyOptions[root.policyCursor].id)
-    } else if (i < root.systemBase) root.runAction(root.actionRows[i - root.actionBase])
-    else root.runAction(root.systemRows[i - root.systemBase])
+    else if (i === root.settingsRowIndex) { root.openSettings(); root.closePanel() }
   }
 
   function hoverRow(i, on) {
@@ -322,33 +281,8 @@ Panel {
     runCmd("omni-profile window-policy set " + norm)
   }
 
-  function restoreBaseline() {
-    root.currentMode = "omarchy"
-    root.currentName = "Omarchy 原生模式"
-    root.currentBrief = "OMA"
-    root.activeBindingsCount = 0
-    root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, "omarchy")
-    runCmd("omni-profile restore")
-  }
-
-  function openCheatSheet() {
-    runCmd("omarchy-shell shell toggle omni.cheat-sheet")
-  }
-
   function openSettings() {
     runCmd("omarchy-shell shell toggle omni.settings")
-  }
-
-  function triggerSnap() {
-    runCmd("omni-profile snap layouts")
-  }
-
-  function openOverview() {
-    runCmd("omarchy-shell shell toggle omni.overview")
-  }
-
-  function runDoctor() {
-    runCmd("which omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1 && omarchy-launch-floating-terminal-with-presentation 'omni-profile doctor' || (which xdg-terminal-exec >/dev/null 2>&1 && xdg-terminal-exec -e omni-profile doctor || omni-profile doctor)")
   }
 
   IpcHandler {
@@ -523,99 +457,11 @@ Panel {
 
         PanelSeparator { foreground: Commons.Color.popups.text }
 
-        // 3. 窗口策略控制区 (WINDOW POLICY)
-        Item {
-          width: parent.width
-          implicitHeight: Math.max(wpHeader.implicitHeight, effPolicyBadge.implicitHeight)
-
-          PanelSectionHeader {
-            id: wpHeader
-            text: "窗口策略"
-            foreground: Commons.Color.popups.text
-            anchors.left: parent.left
-            anchors.right: effPolicyBadge.left
-            anchors.rightMargin: Style.spacing.sm
-            anchors.verticalCenter: parent.verticalCenter
-            elide: Text.ElideRight
-          }
-
-          Text {
-            id: effPolicyBadge
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-            text: (root.policyOverridden ? "已覆盖 · " : "") + "生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
-            color: root.policyOverridden ? Commons.Color.accent : Qt.darker(Commons.Color.popups.text, 1.4)
-            font.family: Style.font.family
-            font.pixelSize: Style.font.body
-          }
-        }
-
-        ButtonGroup {
-          id: policyGroup
-          width: parent.width
-          focusable: false
-          options: root.policyOptions.map(function(p) { return { value: p.id, label: p.name, icon: p.icon } })
-          value: Model.normalizePolicy(root.windowPolicy)
-          cursorIndex: (root.cursorActive && root.cursorIndex === root.policyRowIndex)
-            ? (root.policyCursor >= 0 ? root.policyCursor : Math.max(0, root.policySelectedIndex())) : -1
-          foreground: Commons.Color.popups.text
-          background: "transparent"
-          fontSize: Style.font.body
-          onChanged: function(v) { root.setPolicy(v) }
-          onHovered: function(i, on) {
-            if (!on) return
-            root.hoverRow(root.policyRowIndex, true)
-            root.policyCursor = i
-          }
-        }
-
-        Text {
-          width: parent.width
-          textFormat: Text.PlainText
-          text: Model.resolvePolicyDesc(root.windowPolicy, root.currentMode)
-          color: Qt.darker(Commons.Color.popups.text, 1.4)
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-          elide: Text.ElideRight
-        }
-
-        PanelSeparator { foreground: Commons.Color.popups.text }
-
-        // 4. 快捷功能入口 (ACTIONS)
-        PanelSectionHeader {
-          text: "快捷入口"
-          foreground: Commons.Color.popups.text
-        }
-
-        Repeater {
-          model: root.actionRows
-          delegate: ActionRow {
-            required property var modelData
-            required property int index
-            row: modelData
-            rowIndex: root.actionBase + index
-            hint: root.actionHints[modelData.hintKey] || ""
-          }
-        }
-
-        PanelSeparator { foreground: Commons.Color.popups.text }
-
-        // 5. 系统与控制 (SYSTEM)
-        PanelSectionHeader {
-          text: "系统"
-          foreground: Commons.Color.popups.text
-        }
-
-        Repeater {
-          model: root.systemRows
-          delegate: ActionRow {
-            required property var modelData
-            required property int index
-            row: modelData
-            rowIndex: root.systemBase + index
-            hint: modelData.hint || ""
-          }
+        // 3. 唯一的其它入口：打开设置（窗口策略、还原、持久化等完整控制）
+        ActionRow {
+          row: root.settingsRow
+          rowIndex: root.settingsRowIndex
+          hint: root.actionHints[root.settingsRow.hintKey] || ""
         }
       }
     }
@@ -635,7 +481,7 @@ Panel {
     foreground: Commons.Color.popups.text
     hasCursor: root.cursorActive && root.cursorIndex === rowIndex
     onHovered: function(on) { root.hoverRow(rowItem.rowIndex, on) }
-    onClicked: root.runAction(rowItem.row)
+    onClicked: { root.openSettings(); root.closePanel() }
 
     RowHint {
       visible: rowItem.hint !== ""

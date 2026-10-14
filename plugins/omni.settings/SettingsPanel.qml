@@ -13,8 +13,10 @@ import "Safety.js" as Safety
 // OmniPal 设置与控制中心面板（omni.settings）
 //
 // 三分类 Tab 导航的现代控制中心：
-// 1. 🎯 模式：动态枚举 profiles，卡片网格一键热切换（活动模式高亮边框 + 悬停升起动效）
-// 2. ⚙️ 高级选项：可选配置持久化（显式开关）、Snap 布局菜单呼出、系统原生还原、速查表
+// 唯一完整入口（设计评审第 4 项）：状态栏菜单只保留快速切换 + 「打开设置」，其余控制都在这里。
+// 1. 🎯 模式：动态枚举 profiles 一键热切换；选择「Omarchy 原生模式」即还原（经确认）；
+//    窗口策略（跟随模式 / 平铺 / 浮动，非跟随时标注「已覆盖」）
+// 2. ⚙️ 高级选项：可选配置持久化（显式开关）、贴靠布局菜单呼出、速查表
 // 3. 📊 使用洞察：本地使用统计（概览摘要 / 模式切换排行 / 贴靠区域 Top 榜 + 一键重置）
 //
 // 架构铁律：本插件只做展示与触发，全部绑定/持久化/统计操作均通过 omni-profile CLI
@@ -107,6 +109,12 @@ Item {
   readonly property string fixedKeysText: "固定入口（所有模式通用）：Super+Ctrl+/ 速查表 · Super+Alt+I 控制中心 · Super+Alt+O 概览"
 
   function windowModeLabel(m) { return m === "floating" ? "浮动" : "平铺" }
+  // 窗口策略取值（docs/GLOSSARY.md：跟随模式 / 平铺 / 浮动）
+  readonly property var policyOptions: [
+    { value: "follow-profile", label: "跟随模式" },
+    { value: "tiled", label: "平铺" },
+    { value: "floating", label: "浮动" }
+  ]
 
   // 主题样式令牌：直接取 Omarchy Shell 的 qs.Commons（[menu] 表面，与 omarchy.menu /
   // omarchy.emojis 一致）。卡片/芯片用 Style 的 normal 控件 fill/border 令牌（见 Card 组件）。
@@ -200,6 +208,20 @@ Item {
     switchProc.running = true
   }
 
+  // 选择模式卡片：Omarchy 原生模式 = 还原（撤销全部覆盖，需确认），其它模式直接切换
+  function selectMode(targetMode) {
+    if (!targetMode) return
+    if (targetMode === "omarchy") root.askRestore()
+    else root.switchModeWithUndo(targetMode)
+  }
+
+  function setWindowPolicy(policy) {
+    if (!policy || policy === root.windowPolicy) return
+    root.windowPolicy = policy
+    policyProc.command = ["omni-profile", "window-policy", "set", policy]
+    policyProc.running = true
+  }
+
   function restoreNative() {
     switchProc.command = ["omni-profile", "restore"]
     switchProc.running = true
@@ -254,6 +276,11 @@ Item {
 
   // Native colour discipline: every mode renders in accent; identity = glyph + name.
   function modeColorOf(id) { return root.accent }
+  function modeWindowModeOf(id) {
+    for (var i = 0; i < root.modeItems.length; i++)
+      if (root.modeItems[i].id === id) return root.modeItems[i].windowMode
+    return "tiled"
+  }
 
   function fmtTs(s) {
     if (!s) return ""
@@ -433,6 +460,16 @@ Item {
       listProc.running = true
       persistProc.running = true
       if (root.activeTab === 2) root.refreshStats()
+    }
+  }
+
+  Process {
+    id: policyProc
+    command: ["omni-profile", "window-policy", "status"]
+    running: false
+    onExited: {
+      stateFile.reload()
+      persistProc.running = true
     }
   }
 
@@ -684,10 +721,10 @@ Item {
           z: 10
           opened: root.confirmAction !== ""
           message: root.confirmAction === "restore"
-            ? "撤销全部绑定覆盖并恢复 Omarchy 原生快捷键？"
+            ? "切换到 Omarchy 原生模式？将撤销全部快捷键覆盖。"
             : "清空全部本地使用统计？此操作不可撤销。"
           cancelText: "取消"
-          confirmText: root.confirmAction === "restore" ? "还原" : "重置"
+          confirmText: root.confirmAction === "restore" ? "切换" : "重置"
           onCanceled: root.cancelConfirm()
           onConfirmed: root.acceptConfirm()
         }
@@ -829,7 +866,7 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.switchMode(modeCard.modelData.id)
+                        onClicked: root.selectMode(modeCard.modelData.id)
                       }
 
                       Text {
@@ -870,6 +907,7 @@ Item {
                                 : "内置")
                             + " · " + root.windowModeLabel(modeCard.modelData.windowMode)
                             + (root.policyOverridden ? "（已覆盖：全局" + root.windowModeLabel(root.windowPolicy) + "）" : "")
+                            + (modeCard.modelData.id === "omarchy" ? " · 选择即还原：撤销全部快捷键覆盖（Shift+R）" : "")
                             + (modeCard.modelData.desc ? " · " + modeCard.modelData.desc : "")
                           font.family: Style.font.family
                           font.pixelSize: Style.font.body
@@ -889,6 +927,58 @@ Item {
                       }
                     }
                   }
+                }
+
+                // 窗口策略：跟随模式 / 平铺 / 浮动；非跟随模式时标注「已覆盖」
+                Item {
+                  width: parent.width
+                  implicitHeight: Math.max(policyTitle.implicitHeight, policyBadge.implicitHeight)
+
+                  Text {
+                    id: policyTitle
+                    anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                    text: "窗口策略"
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                    font.weight: Font.Medium
+                    color: root.foreground
+                  }
+
+                  Text {
+                    id: policyBadge
+                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                    textFormat: Text.PlainText
+                    text: (root.policyOverridden ? "已覆盖 · " : "") + "生效："
+                      + root.windowModeLabel(root.policyOverridden ? root.windowPolicy : root.modeWindowModeOf(root.currentMode))
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.body
+                    color: root.policyOverridden ? root.accent : Qt.darker(root.foreground, 1.4)
+                  }
+                }
+
+                ButtonGroup {
+                  id: policyGroup
+                  width: parent.width
+                  focusable: false
+                  options: root.policyOptions
+                  value: root.windowPolicy
+                  foreground: root.foreground
+                  accent: root.accent
+                  background: "transparent"
+                  fontSize: Style.font.body
+                  onChanged: function(v) { root.setWindowPolicy(v) }
+                }
+
+                Text {
+                  width: parent.width
+                  textFormat: Text.PlainText
+                  text: root.policyOverridden
+                    ? "全局" + root.windowModeLabel(root.windowPolicy) + "，已覆盖各模式自带的平铺/浮动设置；选择「跟随模式」可恢复。"
+                    : "跟随模式：由当前模式决定平铺或浮动。"
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                  color: Qt.darker(root.foreground, 1.4)
+                  wrapMode: Text.Wrap
                 }
               }
             }
@@ -1049,79 +1139,6 @@ Item {
                       accent: root.accent
                       verticalPadding: Style.space(10)
                       onClicked: root.openSnapLayouts()
-                    }
-                  }
-                }
-
-                // --- 系统原生还原卡片 ---
-                Card {
-                  width: parent.width
-                  height: restoreCardBody.implicitHeight + Style.space(28)
-                  borderSpec: Border.controlSpec(restoreCardHover.containsMouse ? "hover-cursor" : "normal", root.foreground, root.dangerColor)
-
-                  MouseArea {
-                    id: restoreCardHover
-                    anchors.fill: parent
-                    hoverEnabled: true
-                  }
-
-                  Column {
-                    id: restoreCardBody
-                    anchors {
-                      top: parent.top; topMargin: Style.space(14)
-                      left: parent.left; leftMargin: Style.space(14)
-                      right: parent.right; rightMargin: Style.space(14)
-                    }
-                    spacing: Style.space(8)
-
-                    Row {
-                      spacing: Style.space(8)
-                      Text {
-                        font.family: Style.font.family
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: Icons.glyph.restore
-                        font.pixelSize: Style.font.body
-                        color: root.dangerColor
-                      }
-                      Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "恢复 Omarchy 原生"
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.body
-                        color: root.foreground
-                      }
-                      Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "R"
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.body
-                        color: Util.alpha(root.foreground, 0.55)
-                        padding: 3
-                        Card {
-                          anchors.fill: parent
-                        }
-                      }
-                    }
-
-                    Text {
-                      width: parent.width
-                      text: "撤销全部内存绑定覆盖，把快捷键完整恢复到启动前状态，退出零残留。"
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.body
-                      color: Util.alpha(root.foreground, 0.7)
-                      wrapMode: Text.Wrap
-                    }
-
-                    // Destructive action: native Button tinted with Color.urgent
-                    // (same pattern as network's captive-portal button).
-                    Button {
-                      width: parent.width
-                      text: "切换到 Omarchy 原生模式 (Shift+R)"
-                      bordered: true
-                      foreground: root.dangerColor
-                      accent: root.dangerColor
-                      verticalPadding: Style.space(10)
-                      onClicked: root.askRestore()
                     }
                   }
                 }

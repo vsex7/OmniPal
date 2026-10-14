@@ -970,11 +970,13 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         p4 = subprocess.run([bin_path, "window-mode", "set", "follow-profile"], capture_output=True, text=True)
         self.assertEqual(p4.returncode, 0)
         self.assertIn("已更新为: follow-profile", p4.stdout)
+        self.assertIn("已弃用", p4.stderr)
 
         # 5. Direct policy shorthand: omni-profile window-policy tiled
         p5 = subprocess.run([bin_path, "window-policy", "tiled"], capture_output=True, text=True)
         self.assertEqual(p5.returncode, 0)
         self.assertIn("已更新为: tiled", p5.stdout)
+        self.assertIn("window-policy set tiled", p5.stderr)
 
         # 6. Direct alias shorthand: omni-profile window-policy float
         p6 = subprocess.run([bin_path, "window-policy", "float"], capture_output=True, text=True)
@@ -1051,9 +1053,7 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertIn("windowPolicy", content)
         self.assertIn("effectiveWindowMode", content)
         self.assertIn("compositorConnected", content)
-        self.assertIn("policyOptions", content)
-        self.assertIn("effPolicyBadge", content)
-        self.assertIn("setPolicy", content)
+        self.assertIn("setPolicy", content)  # IPC only; UI control lives in settings
         self.assertIn("getWindowPolicy", content)
         self.assertIn("getEffectiveWindowMode", content)
         self.assertIn("setWindowPolicy", content)
@@ -2354,7 +2354,7 @@ class TestUiAutoOverrideText(unittest.TestCase):
         bar = (PROJECT_ROOT / "plugins/omni.mode-indicator/BarWidget.qml").read_text(encoding="utf-8")
         self.assertIn("active: root.engineRunning && root.autoActive", bar)
         self.assertIn("离开后回到", bar)
-        self.assertIn("已覆盖", bar)
+        self.assertIn("已覆盖", bar)  # tooltip
         st = (PROJECT_ROOT / "plugins/omni.settings/SettingsPanel.qml").read_text(encoding="utf-8")
         self.assertIn("root.windowModeLabel(modeCard.modelData.windowMode)", st)
         self.assertIn("已覆盖：全局", st)
@@ -2362,3 +2362,65 @@ class TestUiAutoOverrideText(unittest.TestCase):
         for qml in (bar, st):
             self.assertNotIn("Style.font.caption", qml)
             self.assertNotIn("Style.font.bodySmall", qml)
+
+
+class TestSettingsSingleEntry(unittest.TestCase):
+    """Design review item 4: settings is the one complete entry point."""
+    def setUp(self):
+        self.bar = (PROJECT_ROOT / "plugins/omni.mode-indicator/BarWidget.qml").read_text(encoding="utf-8")
+        self.st = (PROJECT_ROOT / "plugins/omni.settings/SettingsPanel.qml").read_text(encoding="utf-8")
+
+    def test_settings_has_window_policy_control(self):
+        self.assertIn("ButtonGroup {", self.st)
+        self.assertIn('"omni-profile", "window-policy", "set", policy', self.st)
+        for label in ("跟随模式", "平铺", "浮动", "已覆盖 · "):
+            self.assertIn(label, self.st)
+
+    def test_bar_menu_only_modes_and_open_settings(self):
+        self.assertIn('label: "打开设置"', self.bar)
+        for gone in ("ButtonGroup", "actionRows", "systemRows", "omni-profile restore",
+                     "window-policy set\" + norm", "omni-profile doctor", "snap layouts"):
+            self.assertNotIn(gone, self.bar, gone)
+
+    def test_restore_merged_into_omarchy_card(self):
+        self.assertIn('if (targetMode === "omarchy") root.askRestore()', self.st)
+        self.assertIn("onClicked: root.selectMode(modeCard.modelData.id)", self.st)
+        self.assertNotIn("restoreCardBody", self.st)
+        for bad in ("恢复原生快捷键", "还原原生快捷键", "系统原生还原"):
+            self.assertNotIn(bad, self.st)
+            self.assertNotIn(bad, self.bar)
+
+
+class TestCliDeprecatedAliases(unittest.TestCase):
+    """Redundant omni-profile aliases still work but warn on stderr."""
+    def _run(self, *args):
+        bin_path = str(PROJECT_ROOT / "bin" / "omni-profile")
+        return subprocess.run([bin_path, *args], capture_output=True, text=True)
+
+    def test_window_mode_alias_warns(self):
+        p = self._run("window-mode", "--json")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("已弃用", p.stderr)
+        self.assertIn("omni-profile window-policy", p.stderr)
+        json.loads(p.stdout)  # stdout stays machine readable
+
+    def test_direct_policy_alias_points_to_canonical(self):
+        import importlib.machinery, importlib.util, types
+        loader = importlib.machinery.SourceFileLoader("omni_profile_cli", str(PROJECT_ROOT / "bin" / "omni-profile"))
+        mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+        loader.exec_module(mod)
+        import io, contextlib
+        for alias, canon in (("float", "floating"), ("tile", "tiled"), ("follow", "follow-profile"), ("follow_profile", "follow-profile")):
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                mod._warn_deprecated_alias(types.SimpleNamespace(command="window-policy", deprecated_direct=alias, deprecated_cmd=None))
+            self.assertIn(f"omni-profile window-policy set {canon}", buf.getvalue())
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            mod._warn_deprecated_alias(types.SimpleNamespace(command="window-policy", policy_action="set", policy="tiled"))
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_readme_documents_deprecation(self):
+        readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("CLI 别名弃用", readme)
+        self.assertIn("omni-profile window-policy set floating", readme)

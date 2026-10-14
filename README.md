@@ -26,7 +26,23 @@ omni-profile switch kde       # KDE Plasma 习惯
 omni-profile restore          # 回到 Omarchy 原生键位
 omni-profile cheatsheet       # 当前模式的快捷键
 omni-profile doctor           # 出问题时先跑这个
+omni-profile window-policy set follow-profile   # 窗口策略：follow-profile 跟随模式 / tiled 平铺 / floating 浮动
 ```
+
+日常操作都可以在 OmniPal 设置（`Super+Alt+I`）里完成：模式切换、窗口策略、配置持久化等。状态栏菜单只保留快速切换模式和「打开设置」。在设置里选择「Omarchy 原生模式」就是还原（等同 `omni-profile restore`）。
+
+### CLI 别名弃用
+
+以下冗余写法仍可使用，但会在 stderr 打印弃用提示，后续版本将移除。请改用规范命令：
+
+| 已弃用 | 规范命令 |
+|---|---|
+| `omni-profile window-mode …` | `omni-profile window-policy …` |
+| `omni-profile window-policy tiled` / `tile` | `omni-profile window-policy set tiled` |
+| `omni-profile window-policy floating` / `float` | `omni-profile window-policy set floating` |
+| `omni-profile window-policy follow-profile` / `follow` / `follow_profile` | `omni-profile window-policy set follow-profile` |
+
+弃用提示只写到 stderr，stdout 与 `--json` 输出不变，脚本解析不受影响。
 
 ## 固定入口（所有模式通用）
 
