@@ -204,6 +204,16 @@ def cmd_doctor(engine: OmniPalEngine, args):
         print(f"  • 后台服务: {inst.get('service')}")
         print(f"  • 颜色 Token: {'✅ 已同步' if inst.get('tokens_in_sync') else '❌ 未同步'}")
 
+    om = diag.get("omarchy", {})
+    if om:
+        st = om.get("status")
+        if st == "ok":
+            print(f"  • Omarchy 版本: ✅ {om.get('detected')} (要求 >= {om.get('minimum')})")
+        elif st == "too_old":
+            print(f"  • Omarchy 版本: ❌ {om.get('detected')} 过旧 (要求 >= {om.get('minimum')})")
+        else:
+            print(f"  • Omarchy 版本: ⚠️ 未知（无法检测，要求 >= {om.get('minimum')}）")
+
     issues = diag.get("issues", [])
     if issues:
         print("\n⚠️ 诊断发现的问题:")

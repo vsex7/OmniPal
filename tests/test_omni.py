@@ -1973,3 +1973,42 @@ class TestSettingsPanelKeys(unittest.TestCase):
     def test_manifests_declare_min_omarchy(self):
         for mf in (PROJECT_ROOT / "plugins").glob("omni.*/manifest.json"):
             self.assertEqual(json.loads(mf.read_text(encoding="utf-8")).get("minOmarchy"), "4.0.4", mf)
+
+
+class TestOmarchyVersionGate(unittest.TestCase):
+    """Shared Omarchy version detection used by install.sh and doctor."""
+    def _check(self, version):
+        from engine import omarchy_version as ov
+        old = {k: os.environ.get(k) for k in ("OMNIPAL_OMARCHY_VERSION", "OMARCHY_PATH", "PATH")}
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                os.environ["OMARCHY_PATH"] = tmp  # no version file
+                os.environ["PATH"] = tmp          # no pacman
+                if version is None:
+                    os.environ.pop("OMNIPAL_OMARCHY_VERSION", None)
+                else:
+                    os.environ["OMNIPAL_OMARCHY_VERSION"] = version
+                return ov.check_omarchy_version(PROJECT_ROOT)
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+    def test_statuses(self):
+        self.assertEqual(self._check("4.0.4")["status"], "ok")
+        self.assertEqual(self._check("4.1.0-2")["status"], "ok")
+        self.assertEqual(self._check("4.0.3")["status"], "too_old")
+        r = self._check(None)
+        self.assertEqual(r["status"], "unknown")
+        self.assertEqual(r["minimum"], "4.0.4")
+
+    def test_install_warns_on_unknown_and_points_to_doctor(self):
+        sh = (PROJECT_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("engine/omarchy_version.py", sh)
+        unknown = sh.split("*)", 1)[1].split("esac", 1)[0]
+        self.assertIn("omni-profile doctor", unknown)
+        self.assertNotIn("exit 1", unknown)
+        too_old = sh.split("too_old)", 1)[1].split(";;", 1)[0]
+        self.assertIn("exit 1", too_old)
