@@ -2271,3 +2271,172 @@ class TestModeDiffFilters(unittest.TestCase):
         t = [x for x in d["takeovers"] if x["combo"] == "SUPER + TAB"][0]
         self.assertEqual(len(t["native"]), 1)
         self.assertFalse(any(x["combo"] == fcombo for x in d["takeovers"]))
+
+
+class _FakeCompositor:
+    """Interprets the engine's Lua ops against an in-memory bind table (hl.unbind removes one bind)."""
+    import re as _re
+    TOKEN = _re.compile(
+        r'hl\.unbind\("([^"]+)"\)'
+        r'|R\.omnipal_stash\["([^"]+)"\] = \{ (.*?) \} end'
+        r'|R\.omnipal_stash = nil|debug\.getregistry\(\)\.omnipal_stash = nil'
+        r'|hl\.bind\("([^"]+)", e\.h, e\.o\)'
+        r'|hl\.bind\("([^"]+)", (?:fn_\d+|h\d+), \{ description = "([^"]*)"'
+        r'|o\.bind\("([^"]+)", "([^"]*)"')
+
+    def __init__(self, natives):
+        self.binds, self.stash, self.ref = [], {}, 100
+        for combo, desc in natives:
+            self.add(combo, desc)
+
+    def add(self, combo, desc):
+        from engine.engine import combo_signature
+        m, k = combo_signature(combo)
+        self.ref += 1
+        self.binds.append({"modmask": m, "key": k, "dispatcher": "__lua", "arg": str(self.ref), "description": desc})
+
+    def unbind(self, combo):
+        from engine.engine import combo_signature
+        sig = combo_signature(combo)
+        for i, b in enumerate(self.binds):
+            if (b["modmask"], b["key"]) == sig:
+                del self.binds[i]
+                return
+
+    def eval(self, code):
+        import re
+        for m in self.TOKEN.finditer(code):
+            g = m.groups()
+            if g[0]:
+                self.unbind(g[0])
+            elif g[1]:
+                self.stash[g[1]] = re.findall(r'description = "([^"]*)"', g[2])
+            elif m.group(0).endswith("omnipal_stash = nil"):
+                self.stash = {}
+            elif g[3]:
+                for d in self.stash.pop(g[3], []):
+                    self.add(g[3], d)
+            elif g[4]:
+                self.add(g[4], g[5])
+            elif g[6]:
+                self.add(g[6], g[7])
+        return True
+
+    def details(self):
+        out = {}
+        for b in self.binds:
+            out.setdefault((b["modmask"], b["key"]), []).append(dict(b))
+        return out
+
+    def counts(self):
+        return {k: len(v) for k, v in self.details().items()}
+
+
+class TestNoDuplicateNativeBinds(unittest.TestCase):
+    """Repeated switch / restore / daemon start cycles must leave exactly one bind per native."""
+    NATIVES = [("SUPER + RETURN", "Terminal"), ("SUPER + TAB", "Next workspace"),
+               ("SUPER + W", "Close window"), ("SUPER + SPACE", "Launch apps"),
+               ("SUPER + E", "File manager"), ("SUPER + D", "Show desktop"),
+               ("ALT + TAB", "Cycle windows"), ("ALT + TAB", "Bring to top")]
+
+    def setUp(self):
+        from engine.engine import combo_signature
+        self.sig = combo_signature
+        self.fc = _FakeCompositor(self.NATIVES)
+        self.engine = e = OmniPalEngine(PROJECT_ROOT)
+        self.overlay, self.calls = [], []
+        e._eval_lua = self.fc.eval
+        e._eval_lua_strict = self.fc.eval
+        e._reload_hyprland = self._reload
+        e._write_active_overlay = lambda recs: setattr(self, "overlay", recs)
+        e._get_active_overlay = lambda: self.overlay
+        e._write_state = lambda *a, **k: None
+        e.get_persistence_status = lambda: {"enabled": False}
+        e._live_bind_counts = self.fc.counts
+        e._live_bind_details = self.fc.details
+        e._apply_window_policy = lambda *a, **k: True
+        e._get_applied_window_mode = lambda: "tiled"
+        real_restore = e.restore
+
+        def restore(*a, **k):  # the real restore deletes the overlay file
+            ok = real_restore(*a, **k)
+            if ok:
+                self.overlay = []
+            return ok
+        e.restore = restore
+        e.baseline_bindings = {c: dict(b, combo=c) for b in self.fc.binds
+                               for c in [next(cc for cc, d in self.NATIVES if d == b["description"])]}
+
+    def _reload(self):
+        self.calls.append("reload")
+        self.fc.__init__(self.NATIVES)
+        return True
+
+    def assert_no_dups(self, where):
+        from engine.engine import find_duplicate_binds
+        self.assertEqual(find_duplicate_binds(self.fc.binds), {}, where)
+
+    def assert_natives_exact(self, where):
+        counts = self.fc.counts()
+        for combo, n in [("SUPER + RETURN", 1), ("SUPER + TAB", 1), ("ALT + TAB", 2), ("SUPER + E", 1)]:
+            self.assertEqual(counts.get(self.sig(combo), 0), n, f"{where}: {combo}")
+
+    def test_repeated_cycles_never_duplicate(self):
+        e = self.engine
+        e.dedupe_binds = lambda: 0  # prove the paths themselves are idempotent, not just self-healed
+        for i in range(12):
+            self.assertTrue(e.switch_mode("windows"))
+            self.assert_no_dups(f"switch windows #{i}")
+            self.assertTrue(e.switch_mode("mac"))
+            self.assert_no_dups(f"switch mac #{i}")
+            self.assertTrue(e.switch_mode("windows"))
+            self.assertTrue(e.restore())
+            self.assert_no_dups(f"restore #{i}")
+            self.assert_natives_exact(f"restore #{i}")
+            self.assertTrue(e.restore())  # restore twice in a row must be a no-op
+            self.assert_natives_exact(f"double restore #{i}")
+            # daemon start in omarchy mode, then a start that re-applies a persisted mode
+            self.assertTrue(e.apply_fixed_bindings())
+            self.assertTrue(e.switch_mode("windows"))
+            self.assertTrue(e.switch_mode("windows"))  # configreloaded / socket reconnect re-apply
+            self.assert_no_dups(f"restart #{i}")
+            self.assertTrue(e.restore(sync_persistence=False))  # daemon stop
+            self.assert_natives_exact(f"daemon stop #{i}")
+        self.assertEqual(self.fc.counts()[self.sig("SUPER + RETURN")], 1)
+        self.assertEqual(self.calls, [])
+
+    def test_unstash_unbinds_a_still_live_native_first(self):
+        e = self.engine
+        self.assertTrue(e.switch_mode("windows"))
+        stashed = [b["combo"] for b in self.overlay if b.get("native_count")]
+        self.assertTrue(stashed)
+        for c in stashed:  # something re-added the native behind our back
+            self.fc.add(c, "re-added")
+        self.assertTrue(e.restore())
+        for c in stashed:
+            descs = [b["description"] for b in self.fc.details().get(self.sig(c), [])]
+            self.assertNotIn("re-added", descs, c)
+        self.assert_natives_exact("restore")
+
+    def test_dedupe_collapses_existing_duplicates(self):
+        for _ in range(38):
+            self.fc.add("SUPER + RETURN", "Terminal")
+        self.fc.add("SUPER + TAB", "Next workspace")
+        self.assertEqual(self.engine.dedupe_binds(), 39)
+        self.assert_no_dups("dedupe")
+        self.assert_natives_exact("dedupe")
+
+    def test_doctor_reports_duplicates_unhealthy(self):
+        from engine.engine import find_duplicate_binds
+        for _ in range(38):
+            self.fc.add("SUPER + RETURN", "Terminal")
+        self.assertEqual(find_duplicate_binds(self.fc.binds), {self.sig("SUPER + RETURN"): 38})
+        self.engine.check_installation = lambda: {"problems": []}
+        rep = self.engine.doctor()
+        self.assertFalse(rep["healthy"])
+        self.assertEqual(rep["duplicate_binds"]["count"], 38)
+        self.assertTrue(any(i.startswith("❌ Duplicate binds: 38") for i in rep["issues"]))
+
+    def test_distinct_binds_on_same_key_are_not_duplicates(self):
+        from engine.engine import find_duplicate_binds
+        self.assertEqual(find_duplicate_binds(self.fc.binds), {})

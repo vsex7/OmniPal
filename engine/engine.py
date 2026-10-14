@@ -577,16 +577,79 @@ def _native_stash_lua(combo: str, natives: List[Dict[str, Any]], expected: int) 
         entries.append(f'{{ h = R[{int(nb["arg"])}], o = {{ {", ".join(opts)} }} }}')
     c = lua_str(combo)
     return (f'do local R = debug.getregistry(); R.omnipal_stash = R.omnipal_stash or {{}}; '
-            f'if R.omnipal_stash[{c}] == nil then R.omnipal_stash[{c}] = {{ {", ".join(entries)} }} end end')
+            f'R.omnipal_stash[{c}] = {{ {", ".join(entries)} }} end')
 
 
-def _native_unstash_lua(combo: str) -> str:
-    """Lua that rebinds a combo's stashed native handlers; raises if the stash is gone."""
+def _native_unstash_lua(combo: str, present: Optional[int] = 0) -> str:
+    """Lua that rebinds a combo's stashed native handlers; raises if the stash is gone.
+
+    Idempotent: `present` binds still live on the combo (None = unknown, assume at most one) are
+    unbound first, so the result is exactly the stashed natives and never a duplicate."""
     c = lua_str(combo)
+    n = 1 if present is None else max(0, int(present))
+    pre = "".join(f'hl.unbind({c}); ' for _ in range(n))
     return (f'do local R = debug.getregistry(); local S = R.omnipal_stash and R.omnipal_stash[{c}]; '
             f'if not S then error("omnipal: no stashed native for " .. {c}) end; '
+            f'for _, e in ipairs(S) do if e.h == nil then error("omnipal: lost native handler") end end; '
+            f'{pre}'
             f'for _, e in ipairs(S) do if e.h == nil then error("omnipal: lost native handler") end; '
             f'hl.bind({c}, e.h, e.o) end; R.omnipal_stash[{c}] = nil end')
+
+
+_MODMASK_NAMES = ((64, "SUPER"), (4, "CTRL"), (8, "ALT"), (1, "SHIFT"))
+
+
+def _sig_combo(sig: Tuple[int, str]) -> str:
+    mask, key = sig
+    mods = [n for bit, n in _MODMASK_NAMES if mask & bit]
+    return " + ".join(mods + [key])
+
+
+def find_duplicate_binds(binds: List[Dict[str, Any]]) -> Dict[Tuple[int, str], int]:
+    """(modmask, KEY) -> extra copies of an identical bind (same handler description/dispatcher/flags).
+
+    Distinct binds sharing a key (e.g. Omarchy's two ALT + TAB entries) are not duplicates."""
+    groups: Dict[Tuple[Any, ...], int] = {}
+    for b in binds:
+        if not isinstance(b, dict) or b.get("mouse") or b.get("release") or b.get("submap"):
+            continue
+        sig = (int(b.get("modmask", 0) or 0), str(b.get("key", "")).upper())
+        k = (sig, b.get("description") or "", b.get("dispatcher") or "",
+             "" if b.get("dispatcher") == "__lua" else str(b.get("arg", "")),
+             tuple(bool(b.get(f)) for f, _ in _FLAG_OPTS))
+        groups[k] = groups.get(k, 0) + 1
+    out: Dict[Tuple[int, str], int] = {}
+    for k, n in groups.items():
+        if n > 1:
+            out[k[0]] = out.get(k[0], 0) + n - 1
+    return out
+
+
+def _dedupe_binds_lua(details: Dict[Tuple[int, str], List[Dict[str, Any]]]) -> List[str]:
+    """Lua that collapses identical duplicate `__lua` binds to one per handler (self-heal)."""
+    ops = []
+    for sig, lst in details.items():
+        if not find_duplicate_binds(lst):
+            continue
+        if any(b.get("dispatcher") != "__lua" or not str(b.get("arg", "")).isdigit() for b in lst):
+            continue
+        keep, seen = [], set()
+        for b in lst:
+            k = (b.get("description") or "", tuple(bool(b.get(f)) for f, _ in _FLAG_OPTS))
+            if k not in seen:
+                seen.add(k)
+                keep.append(b)
+        c = lua_str(_sig_combo((sig[0], str(lst[0].get("key") or sig[1]))))
+        locs = "; ".join(f'local h{i} = R[{int(b["arg"])}]' for i, b in enumerate(keep))
+        check = " and ".join(f'type(h{i}) == "function"' for i in range(len(keep)))
+        unb = " ".join(f'hl.unbind({c});' for _ in lst)
+        binds = []
+        for i, b in enumerate(keep):
+            opts = [f'description = {lua_str(b.get("description") or "")}']
+            opts += [f"{lua} = true" for js, lua in _FLAG_OPTS if b.get(js)]
+            binds.append(f'hl.bind({c}, h{i}, {{ {", ".join(opts)} }})')
+        ops.append(f'do local R = debug.getregistry(); {locs}; if {check} then {unb} {"; ".join(binds)} end end')
+    return ops
 
 
 class OmniPalEngine:
@@ -1201,7 +1264,22 @@ class OmniPalEngine:
     def apply_fixed_bindings(self) -> bool:
         """(Re-)injects the fixed entry points, e.g. in omarchy mode or after a config reload."""
         ops = self._fixed_bind_ops()
-        return self._eval_lua("; ".join(ops)) if ops else True
+        ok = self._eval_lua("; ".join(ops)) if ops else True
+        if ok:
+            self.dedupe_binds()
+        return ok
+
+    def dedupe_binds(self) -> int:
+        """Self-heal: collapse identical duplicate native binds (one Super+Enter must open one
+        terminal). Returns how many duplicate copies were found."""
+        details = self._live_bind_details()
+        dups = sum(find_duplicate_binds([b for lst in details.values() for b in lst]).values())
+        if dups:
+            ops = _dedupe_binds_lua(details)
+            if ops:
+                print(f"⚠️ Collapsing {dups} duplicate key binds", file=sys.stderr, flush=True)
+                self._eval_lua("; ".join(ops))
+        return dups
 
     def _reinject_active_bindings(self, target_mode: str) -> bool:
         """Re-applies the active overlay bindings into Hyprland (e.g. after a config reload)."""
@@ -1872,9 +1950,16 @@ end
 
         return self.baseline_bindings
 
-    def _build_dynamic_restore_lua(self, filter_combos: Optional[Set[str]] = None) -> Optional[str]:
+    def _build_dynamic_restore_lua(self, filter_combos: Optional[Set[str]] = None,
+                                   native_counts: Optional[Dict[Tuple[int, str], int]] = None) -> Optional[str]:
         """Builds Lua statements to restore the exact captured baseline bindings.
-        If filter_combos is specified, only restores bindings for those combos."""
+        If filter_combos is specified, only restores bindings for those combos.
+
+        Idempotent: a combo whose native is still live (per native_counts, i.e. live binds minus
+        OmniPal's overlay) is skipped; with no live bind table every rebind is unbind-then-bind,
+        so re-running restore never stacks a second copy of a native bind."""
+        counts_known = bool(native_counts)
+        native_counts = native_counts or {}
         if not self.baseline_bindings:
             return None
 
@@ -1888,6 +1973,11 @@ end
             arg = str(b.get("arg", "")).strip()
             desc = _escape_lua_string(b.get("description", ""))
             esc_combo = _escape_lua_string(combo)
+            if counts_known:
+                if native_counts.get(combo_signature(combo), 0) > 0:
+                    continue
+            else:
+                lua_ops.append(f'hl.unbind("{esc_combo}")')
 
             if disp == "__lua" and arg.isdigit():
                 arg_num = int(arg)
@@ -1944,7 +2034,8 @@ end
             filt = None
             if stashed and self.baseline_bindings:
                 filt = set(self.baseline_bindings) - stashed
-            dynamic_lua = self._build_dynamic_restore_lua(filter_combos=filt)
+            native_counts = self._native_counts(active_overlay)
+            dynamic_lua = self._build_dynamic_restore_lua(filter_combos=filt, native_counts=native_counts)
             if dynamic_lua:
                 lua_lines.append(dynamic_lua)
             elif not stashed:
@@ -1989,7 +2080,10 @@ end
                 # A config reload above rebuilt the Lua state: natives are back and the stash is gone.
                 ok = self.apply_fixed_bindings()
             elif all(b.get("native_restorable", False) for b in unbound):
-                restore_ops = [_native_unstash_lua(b["combo"]) for b in unbound
+                restore_ops = [_native_unstash_lua(
+                                   b["combo"],
+                                   native_counts.get(combo_signature(b["combo"]), 0) if native_counts else None)
+                               for b in unbound
                                if b.get("native_count", 0) > 0]
                 if not restore_ops or self._eval_lua_strict("; ".join(restore_ops)):
                     ok = True
@@ -2004,6 +2098,8 @@ end
 
             # CLI / bar / settings / IPC restore paths share this method; keep persistence.json
             # aligned with the live mode the same way switch_mode and cycle_mode do.
+            if ok:
+                self.dedupe_binds()
             if ok and sync_persistence and self.get_persistence_status()["enabled"]:
                 self.set_persistence(True, profile="omarchy")
             return ok
@@ -2074,6 +2170,9 @@ end
 
             # Stage 1: Unbind previous overlay
             current_overlay = self._get_active_overlay()
+            # Native binds = live binds minus those our current overlay injected.
+            native_counts = self._native_counts(current_overlay)
+            native_details = self._native_details(current_overlay)
             lua_ops = []
             if current_overlay:
                 current_combos = set()
@@ -2091,15 +2190,13 @@ end
                 }
                 released_combos = current_combos - target_combos
                 if released_combos:
-                    dynamic_lua = self._build_dynamic_restore_lua(filter_combos=released_combos)
+                    dynamic_lua = self._build_dynamic_restore_lua(filter_combos=released_combos,
+                                                                  native_counts=native_counts)
                     if dynamic_lua:
                         lua_ops.append(dynamic_lua)
 
 
             # Stage 3: Unbind-before-bind for every target combo (incl. forwarded shortcuts)
-            # Native binds = live binds minus those our current overlay injected.
-            native_counts = self._native_counts(current_overlay)
-            native_details = self._native_details(current_overlay)
             bind_ops, new_overlay_records = self._build_bind_ops(target_bindings, native_counts, native_details)
             lua_ops.extend(bind_ops)
             lua_ops.extend(self._fixed_bind_ops())
@@ -2108,6 +2205,7 @@ end
             success = self._eval_lua("; ".join(lua_ops))
 
             if success:
+                self.dedupe_binds()
                 self._write_active_overlay(new_overlay_records)
                 self._write_state(target_mode, len(new_overlay_records), auto=auto)
                 # Configuration persistence: mirror the successful switch when persistence is enabled.
@@ -2786,6 +2884,20 @@ end"""
                     f"Conflict: {len(report['conflicts'])} overlay combos also have a native bind (fire twice): "
                     + ", ".join(report["conflicts"]))
                 report["fixes"].append("omni-profile switch <当前模式>（会自动解绑冲突的原生快捷键）")
+
+        # 3.6 Duplicate binds: the same (key, modmask) bound twice with the same handler fires N times
+        report["duplicate_binds"] = {"count": 0, "combos": []}
+        try:
+            dups = find_duplicate_binds([b for lst in self._live_bind_details().values() for b in lst])
+        except Exception:
+            dups = {}
+        if dups:
+            total = sum(dups.values())
+            report["duplicate_binds"] = {"count": total,
+                                         "combos": sorted(f"{_sig_combo(s)} x{n + 1}" for s, n in dups.items())}
+            report["issues"].append(f"❌ Duplicate binds: {total} extra copies on {len(dups)} key combos ("
+                                    + ", ".join(report["duplicate_binds"]["combos"][:8]) + ")")
+            report["fixes"].append("omni-profile restore（会自动合并重复绑定）或 hyprctl reload")
 
         # 4. Installation self-check (CLI link, plugin links, systemd unit, token copies)
         install = self.check_installation()
