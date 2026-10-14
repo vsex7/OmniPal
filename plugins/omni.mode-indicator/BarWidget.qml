@@ -446,7 +446,7 @@ Panel {
             + "  ·  " + (root.compositorConnected ? "hyprland connected" : "hyprland disconnected")
           color: (!root.engineRunning || !root.compositorConnected) ? Commons.Color.urgent : Qt.darker(Commons.Color.popups.text, 1.4)
           font.family: Style.font.family
-          font.pixelSize: Style.font.caption
+          font.pixelSize: Style.font.body
           elide: Text.ElideRight
         }
 
@@ -458,7 +458,7 @@ Panel {
           text: root.toastText
           color: Commons.Color.accent
           font.family: Style.font.family
-          font.pixelSize: Style.font.caption
+          font.pixelSize: Style.font.body
           leftPadding: Style.spacing.controlPaddingX
           MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.undoSwitch() }
         }
@@ -528,7 +528,7 @@ Panel {
             text: "生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
             color: Qt.darker(Commons.Color.popups.text, 1.4)
             font.family: Style.font.family
-            font.pixelSize: Style.font.caption
+            font.pixelSize: Style.font.body
           }
         }
 
@@ -542,7 +542,7 @@ Panel {
             ? (root.policyCursor >= 0 ? root.policyCursor : Math.max(0, root.policySelectedIndex())) : -1
           foreground: Commons.Color.popups.text
           background: "transparent"
-          fontSize: Style.font.caption
+          fontSize: Style.font.body
           onChanged: function(v) { root.setPolicy(v) }
           onHovered: function(i, on) {
             if (!on) return
@@ -557,7 +557,7 @@ Panel {
           text: Model.resolvePolicyDesc(root.windowPolicy, root.currentMode)
           color: Qt.darker(Commons.Color.popups.text, 1.4)
           font.family: Style.font.family
-          font.pixelSize: Style.font.caption
+          font.pixelSize: Style.font.body
           elide: Text.ElideRight
         }
 
@@ -632,7 +632,7 @@ Panel {
     anchors.verticalCenter: parent.verticalCenter
     color: Qt.darker(Commons.Color.popups.text, 1.4)
     font.family: Style.font.family
-    font.pixelSize: Style.font.caption
+    font.pixelSize: Style.font.body
   }
 
 }

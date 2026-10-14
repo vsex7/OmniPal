@@ -77,7 +77,7 @@ Item {
     Text {
       text: cardRoot.isSelected ? "active" : cardRoot.shortcutKey
       color: cardRoot.isSelected ? cardRoot.theme.selectedText : cardRoot.theme.textMuted
-      font.pixelSize: Style.font.caption
+      font.pixelSize: Style.font.body
       font.family: Style.font.family
       anchors.horizontalCenter: parent.horizontalCenter
     }

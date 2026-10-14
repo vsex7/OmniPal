@@ -611,7 +611,7 @@ Item {
 
             // 顶部横条：ACTIVE WINDOW: [APP_NAME]
             BorderSurface {
-              height: Math.max(Style.space(24), Style.font.bodySmall + Style.spacing.controlPaddingY * 2)
+              height: Math.max(Style.space(24), Style.font.body + Style.spacing.controlPaddingY * 2)
               width: parent.width
               radius: Style.cornerRadius
               color: Util.alpha(root.theme.text, root.currentSelectedWin ? 0.08 : 0.04)
@@ -621,7 +621,7 @@ Item {
                 anchors.centerIn: parent
                 text: root.currentSelectedWin ? String(root.currentSelectedWin.activeName) : "no window"
                 color: root.currentSelectedWin ? root.theme.accent : root.theme.textMuted
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: Style.font.body
                 font.family: Style.font.family
                 elide: Text.ElideRight
                 width: parent.width - 16
@@ -681,8 +681,8 @@ Item {
                   id: statLine
                   required property var modelData
                   spacing: Style.spacing.lg
-                  Text { text: statLine.modelData.k; width: Style.space(64); color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
-                  Text { text: statLine.modelData.v; color: root.theme.text; font.pixelSize: Style.font.caption; font.family: Style.font.family }
+                  Text { text: statLine.modelData.k; width: Style.space(64); color: root.theme.textMuted; font.pixelSize: Style.font.body; font.family: Style.font.family }
+                  Text { text: statLine.modelData.v; color: root.theme.text; font.pixelSize: Style.font.body; font.family: Style.font.family }
                 }
               }
             }
@@ -764,7 +764,7 @@ Item {
             Text {
               text: root.draggedSlotData ? String(root.draggedSlotData.appName || "") : ""
               color: root.theme.textStrong
-              font.pixelSize: Style.font.bodySmall
+              font.pixelSize: Style.font.body
               font.family: Style.font.family
               elide: Text.ElideRight
               width: 85
@@ -772,7 +772,7 @@ Item {
             Text {
               text: portalHole.isDragOver ? "release to move" : "dragging"
               color: portalHole.isDragOver ? root.theme.accent : root.theme.textMuted
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.body
               font.family: Style.font.family
             }
           }
@@ -806,7 +806,7 @@ Item {
             ? (Safety.CLOSE_AGAIN_TEXT + " · esc 取消")
             : ("type to search · arrows select · enter focus · alt+1-9 jump · alt+m move to workspace " + root.targetTransferWorkspaceId + " · del close · esc exit")
           color: root.closeArmedAddress !== "" ? root.theme.danger : root.theme.textMuted
-          font.pixelSize: Style.font.caption
+          font.pixelSize: Style.font.body
           font.family: Style.font.family
         }
       }

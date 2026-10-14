@@ -9,7 +9,7 @@ import qs.Ui
 import "Icons.js" as Icons
 import "Model.js" as Model
 
-// OmniPal 窗口吸附反馈与 Snap Layouts 布局选择器 (omni.snap-feedback)
+// OmniPal 窗口贴靠反馈与 Snap Layouts 布局选择器 (omni.snap-feedback)
 //
 // 双模架构：
 // 1. 被动 HUD 模式 (interactive: false)：
@@ -17,8 +17,8 @@ import "Model.js" as Model
 // 2. 交互布局选择器模式 (interactive: true)：
 //    通过 Super + Z 呼出，提供类似 Windows 11 的 6 大分屏模板：
 //    • 阶梯 1（模板选择）：按 1–6 选定模板并显示各分区数字微标 [1]、[2]...
-//    • 阶梯 2（分区选择）：直接按数字键盲操即刻吸附（如 Super+Z -> 2 -> 1）！
-//    • 键盘全流：支持方向键在 2x3 网格及分区中穿梭、Tab 循环、回车吸附、Esc 优雅回退与关闭。
+//    • 阶梯 2（分区选择）：直接按数字键盲操即刻贴靠（如 Super+Z -> 2 -> 1）！
+//    • 键盘全流：支持方向键在 2x3 网格及分区中穿梭、Tab 循环、回车贴靠、Esc 优雅回退与关闭。
 //    • 鼠标悬停实时全屏几何投影并展示物理像素分辨率。
 Item {
   id: root
@@ -309,7 +309,7 @@ Item {
             if (curTpl && curTpl.slots) {
               var slotIdx = num - 1
               if (slotIdx >= 0 && slotIdx < curTpl.slots.length) {
-                // 按下有效分区编号，立即吸附！
+                // 按下有效分区编号，立即贴靠！
                 root.executeSnap(curTpl.slots[slotIdx].id)
                 event.accepted = true
                 return
@@ -407,7 +407,7 @@ Item {
           return
         }
 
-        // Enter / Space 键吸附当前聚焦项
+        // Enter / Space 键贴靠当前聚焦项
         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
           if (root.focusedTemplateIndex >= 0 && root.focusedTemplateIndex < root.effectiveTemplates.length) {
             var tplEnter = root.effectiveTemplates[root.focusedTemplateIndex]
@@ -545,7 +545,7 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                   text: previewContainer.boxGeom.label || ""
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.bodySmall
+                  font.pixelSize: Style.font.body
                   color: root.theme.textStrong
                 }
 
@@ -564,7 +564,7 @@ Item {
                     anchors.centerIn: parent
                     text: previewContainer.boxGeom.dim || ""
                     font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.body
                     color: Util.alpha(Color.foreground, 0.85)
                   }
                 }
@@ -572,9 +572,9 @@ Item {
 
               Text {
                 visible: root.interactive
-                text: "按回车、点击或按对应数字直接吸附"
+                text: "按回车、点击或按对应数字直接贴靠"
                 font.family: Style.font.family
-                font.pixelSize: Style.font.caption
+                font.pixelSize: Style.font.body
                 color: Util.alpha(Color.foreground, 0.6)
               }
             }
@@ -662,9 +662,9 @@ Item {
             }
 
             Text {
-              text: "Snap Layouts"
+              text: "贴靠布局"
               font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
+              font.pixelSize: Style.font.body
               color: root.theme.textStrong
               anchors.verticalCenter: parent.verticalCenter
             }
@@ -687,7 +687,7 @@ Item {
                 Text {
                   text: root.targetWindowTitle || root.targetWindowClass || root.targetWindowAddress
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: Style.font.body
                   color: Util.alpha(Color.foreground, 0.85)
                   elide: Text.ElideRight
                   maximumLineCount: 1
@@ -721,7 +721,7 @@ Item {
                 Text {
                   text: root.focusedTemplateIndex === -1 ? "1~6 模板" : ("模板 [" + (root.focusedTemplateIndex + 1) + "] 就绪")
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: Style.font.body
                   color: root.focusedTemplateIndex !== -1 ? root.snapColor : Util.alpha(Color.foreground, 0.70)
                   anchors.verticalCenter: parent.verticalCenter
                 }
@@ -800,7 +800,7 @@ Item {
                     Text {
                       text: tplCard.modelData.title
                       font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
+                      font.pixelSize: Style.font.body
                       color: tplCard.isSelectedTpl ? root.snapColor : root.theme.text
                       anchors.verticalCenter: parent.verticalCenter
                     }
@@ -808,7 +808,7 @@ Item {
                     Text {
                       text: tplCard.modelData.hint ? ("· " + tplCard.modelData.hint) : ""
                       font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
+                      font.pixelSize: Style.font.body
                       color: Util.alpha(Color.foreground, 0.40)
                       anchors.verticalCenter: parent.verticalCenter
                       elide: Text.ElideRight
@@ -831,7 +831,7 @@ Item {
                       font.family: Style.font.family
                       anchors.centerIn: parent
                       text: tplCard.modelData.key || String(tplCard.index + 1)
-                      font.pixelSize: Style.font.caption
+                      font.pixelSize: Style.font.body
                       color: tplCard.isSelectedTpl ? root.theme.onAccent : Util.alpha(Color.foreground, 0.75)
                     }
                   }
@@ -894,7 +894,7 @@ Item {
                           font.family: Style.font.family
                           anchors.centerIn: parent
                           text: String(slotRect.index + 1)
-                          font.pixelSize: Style.font.caption
+                          font.pixelSize: Style.font.body
                           color: slotRect.isSlotFocused ? root.theme.onAccent : root.theme.textStrong
                         }
                       }
@@ -905,7 +905,7 @@ Item {
                         anchors.centerIn: parent
                         text: slotRect.modelData.label
                         font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
+                        font.pixelSize: Style.font.body
                         color: root.theme.textStrong
                       }
 
@@ -977,17 +977,17 @@ Item {
               text: {
                 if (root.hoveredZone !== "") {
                   var zInfo = Model.ZONES[root.hoveredZone]
-                  return "落点: " + (zInfo ? zInfo.label : root.hoveredZone) + " · 点击或回车吸附"
+                  return "落点: " + (zInfo ? zInfo.label : root.hoveredZone) + " · 点击或回车贴靠"
                 }
                 if (root.focusedTemplateIndex !== -1) {
                   var curT = root.effectiveTemplates[root.focusedTemplateIndex]
                   var sc = (curT && curT.slots) ? curT.slots.length : 2
-                  return "模板 [" + (root.focusedTemplateIndex + 1) + "]: 按 1–" + sc + " 吸附 · 方向键导航 · Esc 返回"
+                  return "模板 [" + (root.focusedTemplateIndex + 1) + "]: 按 1–" + sc + " 贴靠 · 方向键导航 · Esc 返回"
                 }
                 return "按 1–6 快捷跳选 · 悬停桌面高亮轮廓 · Esc 退出"
               }
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.body
               color: root.hoveredZone !== "" ? root.snapColor : Util.alpha(Color.foreground, 0.60)
               anchors.verticalCenter: parent.verticalCenter
             }
@@ -1002,7 +1002,7 @@ Item {
             Repeater {
               model: [
                 { key: "1~6", desc: "模板" },
-                { key: "1~4", desc: "吸附" },
+                { key: "1~4", desc: "贴靠" },
                 { key: "Esc", desc: "退出" }
               ]
 
@@ -1025,7 +1025,7 @@ Item {
                   Text {
                     text: kbdChip.modelData.key
                     font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.body
                     color: root.theme.textStrong
                     anchors.verticalCenter: parent.verticalCenter
                   }
@@ -1033,7 +1033,7 @@ Item {
                   Text {
                     text: kbdChip.modelData.desc
                     font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.body
                     color: Util.alpha(Color.foreground, 0.45)
                     anchors.verticalCenter: parent.verticalCenter
                   }

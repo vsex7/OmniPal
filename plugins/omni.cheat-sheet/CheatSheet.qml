@@ -322,7 +322,7 @@ Item {
     }
     if (sheetRc !== 0) {
       root.failWith("cli-failed", root.commandFor(root.requestedMode),
-        "读取快捷键失败（退出码 " + sheetRc + "）。请确认 Engine 与 profile 文件完好。")
+        "读取快捷键失败（退出码 " + sheetRc + "）。请确认 Engine 与模式文件（profiles/*.json）完好。")
       return
     }
     if (!sheetJson.trim()) {
@@ -489,7 +489,7 @@ Item {
               foreground: root.foreground
               accent: root.accent
               fontFamily: root.fontFamily
-              fontSize: Style.font.bodySmall
+              fontSize: Style.font.body
               tooltipText: engineActive ? "Engine 当前生效模式" : ""
               onClicked: root.previewMode(previewPill.modelData.id)
             }
@@ -505,7 +505,7 @@ Item {
 
           Text {
             textFormat: Text.PlainText
-            text: "快捷键速查"
+            text: "快捷键速查表"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
@@ -517,7 +517,7 @@ Item {
             color: root.foreground
             opacity: 0.5
             font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
+            font.pixelSize: Style.font.body
           }
         }
 
@@ -586,7 +586,7 @@ Item {
               foreground: root.foreground
               accent: root.accent
               fontFamily: root.fontFamily
-              fontSize: Style.font.caption
+              fontSize: Style.font.body
               verticalPadding: Style.spacing.xs
               onClicked: root.selectCategory(catPill.modelData.id)
             }
@@ -701,7 +701,7 @@ Item {
                             text: SheetData.formatKeyCap(String(keyCap.modelData), root.displayMode)
                             color: (keyCap.capLive || binding.rowLive) ? root.accent : root.foreground
                             font.family: root.fontFamily
-                            font.pixelSize: Style.font.bodySmall
+                            font.pixelSize: Style.font.body
                           }
                         }
                       }
@@ -736,7 +736,7 @@ Item {
                       color: root.foreground
                       opacity: 0.5
                       font.family: root.fontFamily
-                      font.pixelSize: Style.font.bodySmall
+                      font.pixelSize: Style.font.body
                       elide: Text.ElideRight
                       verticalAlignment: Text.AlignVCenter
                     }
@@ -789,7 +789,7 @@ Item {
             color: root.foreground
             opacity: 0.5
             font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: Style.font.body
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
           }
@@ -810,7 +810,7 @@ Item {
               text: root.placeholderCommand
               color: root.accent
               font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
+              font.pixelSize: Style.font.body
             }
           }
         }
@@ -835,7 +835,7 @@ Item {
           color: root.foreground
           opacity: 0.42
           font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          font.pixelSize: Style.font.body
         }
 
         Text {
@@ -846,7 +846,7 @@ Item {
           color: root.foreground
           opacity: 0.32
           font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          font.pixelSize: Style.font.body
         }
       }
     }
@@ -866,7 +866,7 @@ Item {
     : root.requestedMode !== "" ? "模式 " + root.displayMode + " 没有可用定义"
     : "当前没有生效的快捷键覆盖"
 
-  readonly property string placeholderBody: root.loading ? "正在向 Engine 读取当前 Profile。"
+  readonly property string placeholderBody: root.loading ? "正在向 Engine 读取当前模式。"
     : root.errorMessage !== "" ? root.errorMessage
     : root.groups.length > 0 ? ""
     : root.filterNoMatches ? "换一个搜索词，或点击「全部」分类胶囊重试。"

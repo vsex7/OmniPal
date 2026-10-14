@@ -950,7 +950,7 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         # 1. Status string output
         p1 = subprocess.run([bin_path, "window-policy"], capture_output=True, text=True)
         self.assertEqual(p1.returncode, 0)
-        self.assertIn("OmniPal 窗口布局策略", p1.stdout)
+        self.assertIn("OmniPal 窗口策略", p1.stdout)
 
         # 2. JSON status
         p2 = subprocess.run([bin_path, "window-policy", "--json"], capture_output=True, text=True)
@@ -1529,15 +1529,22 @@ class TestDoctorInstallCheck(unittest.TestCase):
 
 
 class TestSettingsCounts(unittest.TestCase):
-    def test_settings_panel_counts_match_profiles(self):
+    def test_settings_panel_has_no_hardcoded_mode_metadata(self):
+        """Mode name/description/count come only from profiles via `omni-profile list --json`."""
         import re
         qml = (PROJECT_ROOT / "plugins" / "omni.settings" / "SettingsPanel.qml").read_text(encoding="utf-8")
+        self.assertRegex(qml, r"property var modeItems:\s*\[\s*\]")
+        self.assertIn('"omni-profile", "list", "--json"', qml)
         for mid in ("windows", "mac", "kde"):
-            m = re.search(r'id:\s*"%s".*?count:\s*(\d+)' % mid, qml, re.S)
-            self.assertIsNotNone(m, mid)
             prof = json.loads((PROJECT_ROOT / "profiles" / f"{mid}.json").read_text(encoding="utf-8"))
-            self.assertEqual(int(m.group(1)), len(prof["bindings"]), mid)
+            self.assertNotIn(prof["name"], qml, mid)
 
+    def test_profile_descriptions_follow_glossary(self):
+        """docs/GLOSSARY.md: Super/Space spelled in English, 贴靠 not 吸附."""
+        for f in (PROJECT_ROOT / "profiles").glob("*.json"):
+            desc = json.loads(f.read_text(encoding="utf-8")).get("description", "")
+            for bad in ("空格", "Meta+", "Win+", "吸附", "Snap"):
+                self.assertNotIn(bad, desc, f.name)
 
 
 class TestAppRules(unittest.TestCase):

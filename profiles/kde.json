@@ -1,7 +1,7 @@
 {
   "id": "kde",
   "name": "KDE Plasma 习惯模式",
-  "description": "还原 KDE Plasma 6 默认快捷键（Meta+方向键贴边、Alt+Space 搜索、Ctrl+Alt+L 锁屏、Meta+W 概览等）",
+  "description": "还原 KDE Plasma 6 默认快捷键（Super+方向键贴靠、Alt+Space 启动器、Ctrl+Alt+L 锁屏、Super+W 概览等）",
   "version": "1.0.0",
   "display": {
     "icon": "❖",

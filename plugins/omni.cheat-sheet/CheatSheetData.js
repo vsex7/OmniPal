@@ -17,7 +17,7 @@
 
 var CATEGORY_LABELS = {
   window: "窗口管理",
-  snap: "窗口吸附",
+  snap: "窗口贴靠",
   navigation: "工作区 / 导航",
   launcher: "启动器",
   apps: "系统应用",

@@ -1,7 +1,7 @@
 {
   "id": "windows",
   "name": "Windows 11 习惯模式",
-  "description": "还原 Windows 常用快捷键习惯（Alt+F4 关闭、Super+方向键吸附、Super+E 文件管理器等）",
+  "description": "还原 Windows 11 常用快捷键（Alt+F4 关闭窗口、Super+方向键贴靠、Super+E 文件管理器、Super+L 锁屏等）",
   "version": "1.0.0",
   "display": {
     "icon": "⊞",
