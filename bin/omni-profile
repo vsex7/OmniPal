@@ -412,6 +412,47 @@ def cmd_rules(engine: OmniPalEngine, args):
         data["enabled"] = act == "enable"
     elif act == "default":
         data["default_mode"] = None if args.mode == "none" else args.mode
+    elif act == "export":
+        text = json.dumps({"omnipal_app_rules": 1, **data}, ensure_ascii=False, indent=2) + "\n"
+        if not args.output or args.output == "-":
+            sys.stdout.write(text); return
+        out = Path(args.output).expanduser()
+        if out.exists() and not args.force:
+            print(f"❌ {out} 已存在，加 --force 覆盖", file=sys.stderr); sys.exit(1)
+        out.write_text(text, encoding="utf-8")
+        print(f"✅ 已导出 {len(data['rules'])} 条应用规则到 {out}")
+        return
+    elif act == "import":
+        try:
+            raw = sys.stdin.read() if args.file == "-" else Path(args.file).expanduser().read_text(encoding="utf-8")
+            incoming = json.loads(raw)
+        except Exception as e:
+            print(f"❌ 读取失败: {e}", file=sys.stderr); sys.exit(1)
+        if not isinstance(incoming, dict) or not isinstance(incoming.get("rules"), list):
+            print("❌ 不是有效的应用规则文件（缺少 rules 列表）", file=sys.stderr); sys.exit(1)
+        new_rules, skipped = [], []
+        for r in incoming["rules"]:
+            if not isinstance(r, dict) or not r.get("class") or not r.get("mode"):
+                skipped.append(str(r)); continue
+            if r["mode"] not in engine.profiles:
+                skipped.append(f"{r['class']} -> {r['mode']}（本机没有这个模式，可先用 import 导入对应 profile）"); continue
+            new_rules.append({"class": str(r["class"]), "match": r.get("match", "exact"),
+                              "mode": r["mode"], "enabled": bool(r.get("enabled", True))})
+        if args.replace:
+            data["rules"] = new_rules
+            if incoming.get("default_mode") in engine.profiles or incoming.get("default_mode") is None:
+                data["default_mode"] = incoming.get("default_mode")
+        else:
+            incoming_classes = {r["class"] for r in new_rules}
+            data["rules"] = [r for r in data["rules"] if r["class"] not in incoming_classes] + new_rules
+        try:
+            engine.save_app_rules(data)
+        except (ValueError, Exception) as e:
+            print(f"❌ {e}", file=sys.stderr); sys.exit(1)
+        print(f"✅ 已导入 {len(new_rules)} 条应用规则（{'替换' if args.replace else '合并'}）")
+        for sk in skipped:
+            print(f"  ⚠️  跳过: {sk}")
+        return
     elif act == "test":
         r = engine.match_app_rule(args.window_class, data)
         print(f"{args.window_class} -> {r['mode'] if r else '无匹配'}")
@@ -554,6 +595,12 @@ def main():
     rules_sub.add_parser("disable", help="停用自动切换")
     r_def = rules_sub.add_parser("default", help="无匹配时回到的模式（none 表示回到手动选择的模式）")
     r_def.add_argument("mode")
+    r_exp = rules_sub.add_parser("export", help="导出应用规则为 JSON")
+    r_exp.add_argument("-o", "--output", help="输出文件（默认打印到终端）")
+    r_exp.add_argument("--force", action="store_true", help="覆盖已存在的输出文件")
+    r_imp = rules_sub.add_parser("import", help="导入应用规则（默认按类名合并，- 表示标准输入）")
+    r_imp.add_argument("file")
+    r_imp.add_argument("--replace", action="store_true", help="用导入的规则整体替换现有规则")
     r_test = rules_sub.add_parser("test", help="测试某个窗口类名会匹配到哪个模式")
     r_test.add_argument("window_class", nargs="?")
     r_test.add_argument("--current", action="store_true", help="倒计时后测试当前焦点窗口")

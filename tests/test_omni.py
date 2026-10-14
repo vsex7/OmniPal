@@ -1195,5 +1195,39 @@ class TestCheatSheetHighlight(unittest.TestCase):
         self.assertEqual(b, "abc")
 
 
+
+class TestAppRulesExportImport(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.env = dict(os.environ, OMNIPAL_CONFIG_DIR=self._tmp.name)
+        self.cli = [sys.executable, str(PROJECT_ROOT / "bin" / "omni-profile")]
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_cli(self, *a, stdin=None):
+        return subprocess.run(self.cli + list(a), env=self.env, capture_output=True, text=True, input=stdin)
+
+    def test_roundtrip_merge_and_skip_unknown_mode(self):
+        self.assertEqual(self.run_cli("rules", "add", "code", "mac").returncode, 0)
+        exported = self.run_cli("rules", "export").stdout
+        self.assertIn('"code"', exported)
+        bundle = json.dumps({"rules": [{"class": "code", "mode": "windows"},
+                                       {"class": "kitty", "mode": "omarchy"},
+                                       {"class": "x", "mode": "does-not-exist"}]})
+        res = self.run_cli("rules", "import", "-", stdin=bundle)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("跳过", res.stdout)
+        data = json.loads((Path(self._tmp.name) / "app_rules.json").read_text())
+        modes = {r["class"]: r["mode"] for r in data["rules"]}
+        self.assertEqual(modes, {"code": "windows", "kitty": "omarchy"})
+
+    def test_replace(self):
+        self.run_cli("rules", "add", "code", "mac")
+        res = self.run_cli("rules", "import", "-", "--replace", stdin=json.dumps({"rules": [{"class": "kitty", "mode": "mac"}]}))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        data = json.loads((Path(self._tmp.name) / "app_rules.json").read_text())
+        self.assertEqual([r["class"] for r in data["rules"]], ["kitty"])
+
 if __name__ == "__main__":
     unittest.main()
