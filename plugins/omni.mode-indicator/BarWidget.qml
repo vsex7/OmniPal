@@ -6,8 +6,8 @@ import Quickshell.Hyprland
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "Icons.js" as Icons
 import "Model.js" as Model
-import "Tokens.js" as Tokens
 
 // OmniPal 托盘模式指示器与右键快捷控制面板（omni.mode-indicator）
 //
@@ -20,7 +20,7 @@ import "Tokens.js" as Tokens
 //    右键：呼出/收起快捷控制面板 (原生 KeyboardPanel)
 //    中键：呼出设置面板 (omarchy-shell shell toggle omni.settings)
 // 4. 面板全部使用原生组件：PanelHero / PanelSectionHeader / PanelSeparator /
-//    Button（列表行，selected + hasCursor）/ ButtonGroup（窗口策略）/ PanelActionButton，包含肌肉记忆模式与窗口策略（平铺/浮动/跟随模式）控制
+//    Button（列表行，selected + hasCursor）/ ButtonGroup（窗口策略），无 ✕ 关闭（Esc / 点击外部收起），包含肌肉记忆模式与窗口策略（平铺/浮动/跟随模式）控制
 // 5. 外部点击收起、bar 弹窗互斥均由 KeyboardPanel/bar 协调器负责
 // 6. 模式与策略数据 100% 来源单一事实源 (omni-profile / state.json)
 Panel {
@@ -28,21 +28,8 @@ Panel {
 
   // ---- Theme ----------------------------------------------------------------
   // All chrome comes from qs.Commons (Color / Style) and qs.Ui components, exactly
-  // like first-party panels. The only thing Commons does not expose is the extended
-  // colors.toml palette (green/blue/cyan/...), which we use for per-mode identity
-  // colours — so Tokens.js stays as that palette reader/fallback only.
-  property var themePalette: Tokens.fallback
-  readonly property var modeColors: Tokens.modeColors(themePalette)
-  readonly property color okColor: themePalette.green || Commons.Color.accent
-  FileView {
-    id: omniThemeFile
-    property bool legacy: false
-    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
-    watchChanges: true
-    onFileChanged: reload()
-    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
-    onLoadFailed: if (!legacy) legacy = true
-  }
+  // like first-party panels. Only the native colour roles are used; mode identity
+  // is the Nerd Font glyph + name (Icons.js), never a per-mode colour.
   moduleName: "omni.mode-indicator"
   ipcTarget: "omni.mode-indicator"
   // We own the single IpcHandler for this target (extra methods below), like omarchy.power.
@@ -51,9 +38,8 @@ Panel {
   property string statePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/omnipal/state.json"
   property string currentMode: "omarchy"
   property string currentName: "Omarchy 原生模式"
-  property string currentIcon: "⊡"
+  readonly property string currentIcon: Icons.mode(root.currentMode)
   property string currentBrief: "OMA"
-  property color currentColor: root.modeColors.omarchy
   property int activeBindingsCount: 0
   property bool engineRunning: false
   property string engineStatus: "native"
@@ -97,9 +83,7 @@ Panel {
       root.currentName = data.name || Model.resolveName(data)
       root.activeBindingsCount = data.active_bindings_count || 0
       root.engineStatus = data.status || (root.currentMode !== "omarchy" ? "active" : "native")
-      root.currentIcon = (data.display && data.display.icon) || Model.defaultIcon(root.currentMode)
       root.currentBrief = (data.display && data.display.brief) || Model.defaultBrief(root.currentMode)
-      root.currentColor = (data.display && data.display.color) || Model.defaultColor(root.currentMode)
       root.windowPolicy = Model.normalizePolicy(data.window_policy) || "tiled"
       root.effectiveWindowMode = data.effective_window_mode || Model.computeEffectiveMode(root.windowPolicy, root.currentMode)
       root.compositorConnected = (data.compositor_connected !== undefined)
@@ -203,15 +187,15 @@ Panel {
 
   // ---- keyboard cursor (PanelKeyCatcher) ------------------------------------
   readonly property var actionRows: [
-    { icon: "📖", label: "快捷键速查表 (Cheat Sheet)", hintKey: "cheat_sheet", run: "cheat", closes: true },
-    { icon: "⚙️", label: "OmniPal 控制中心 (Settings)", hintKey: "omni_settings", run: "settings", closes: true },
-    { icon: "🪟", label: "触发布局吸附 (Snap Layout)", hintKey: "snap_layouts", run: "snap", closes: true },
-    { icon: "🗂️", label: "多任务空间概览 (Overview)", hintKey: "task_view", run: "overview", closes: true }
+    { icon: Icons.glyph.cheat, label: "快捷键速查表", hintKey: "cheat_sheet", run: "cheat", closes: true },
+    { icon: Icons.glyph.settings, label: "控制中心", hintKey: "omni_settings", run: "settings", closes: true },
+    { icon: Icons.glyph.snap, label: "布局吸附", hintKey: "snap_layouts", run: "snap", closes: true },
+    { icon: Icons.glyph.overview, label: "多任务概览", hintKey: "task_view", run: "overview", closes: true }
   ]
   readonly property var systemRows: [
-    { icon: "↻", label: "轮转切换下一模式 (Cycle Next)", hint: "Cycle", run: "cycle", closes: false },
-    { icon: "↺", label: "还原原生快捷键 (Restore Baseline)", hint: "0 覆盖", run: "restore", closes: true },
-    { icon: "🩺", label: "运行系统健康诊断 (Doctor)", hint: "Doctor", run: "doctor", closes: true }
+    { icon: Icons.glyph.cycle, label: "切换下一模式", hint: "", run: "cycle", closes: false },
+    { icon: Icons.glyph.restore, label: "还原原生快捷键", hint: "", run: "restore", closes: true },
+    { icon: Icons.glyph.doctor, label: "健康诊断", hint: "", run: "doctor", closes: true }
   ]
   readonly property int policyRowIndex: root.profiles.length
   readonly property int actionBase: root.profiles.length + 1
@@ -280,9 +264,7 @@ Panel {
       if (root.profiles[i].id === cleanMode) {
         var p = root.profiles[i]
         root.currentName = Model.resolveName(p)
-        root.currentIcon = Model.resolveIcon(p)
         root.currentBrief = Model.resolveBrief(p)
-        root.currentColor = Model.resolveColor(p)
         root.activeBindingsCount = p.bindings_count || 0
         break
       }
@@ -301,9 +283,7 @@ Panel {
   function restoreBaseline() {
     root.currentMode = "omarchy"
     root.currentName = "Omarchy 原生模式"
-    root.currentIcon = "⊡"
     root.currentBrief = "OMA"
-    root.currentColor = root.modeColors.omarchy
     root.activeBindingsCount = 0
     root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, "omarchy")
     runCmd("omni-profile restore")
@@ -360,8 +340,7 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.engineRunning ? root.currentIcon : "⊘"
-    foreground: root.engineRunning ? root.currentColor : Commons.Color.muted
+    text: root.engineRunning ? root.currentIcon : Icons.glyph.pause
     tooltipText: root.engineRunning
       ? ("OmniPal: " + root.currentName + "\n生效快捷键: " + root.activeBindingsCount + "\n窗口策略: " + Model.resolvePolicyName(root.windowPolicy) + " (" + root.effectiveWindowMode + ")\n左键: 轮转模式 | 右键: 快捷控制面板 | 中键: 设置")
       : "OmniPal Engine 未运行\n左键: 启动/切换 | 右键: 快捷控制面板"
@@ -416,39 +395,30 @@ Panel {
             : "引擎已停止"
           iconComponent: Text {
             textFormat: Text.PlainText
-            text: root.engineRunning ? root.currentIcon : "⊘"
-            color: root.engineRunning ? root.currentColor : Commons.Color.muted
+            text: root.engineRunning ? root.currentIcon : Icons.glyph.pause
+            color: Commons.Color.popups.text
             font.family: Style.font.family
             font.pixelSize: Style.font.display
           }
-          trailingControl: PanelActionButton {
-            iconText: "✕"
-            tooltipText: "关闭"
-            foreground: Commons.Color.popups.text
-            onClicked: root.closePanel()
-          }
         }
 
-        // Status lamps (engine / compositor) — the bits PanelHero's meta line can't colour.
-        Row {
-          spacing: Style.spacing.lg
-          StatusLamp {
-            on: root.engineRunning
-            lampColor: root.engineRunning ? (root.engineStatus === "active" ? root.okColor : Commons.Color.accent) : Commons.Color.muted
-            label: root.engineRunning ? "Engine" : "Engine 停止"
-          }
-          StatusLamp {
-            on: root.compositorConnected
-            lampColor: root.compositorConnected ? root.okColor : Commons.Color.urgent
-            label: "Compositor"
-          }
+        // Status line: foreground text, urgent only when something is wrong.
+        Text {
+          width: parent.width
+          textFormat: Text.PlainText
+          text: (root.engineRunning ? "engine " + (root.engineStatus || "running") : "engine stopped")
+            + "  ·  " + (root.compositorConnected ? "hyprland connected" : "hyprland disconnected")
+          color: (!root.engineRunning || !root.compositorConnected) ? Commons.Color.urgent : Qt.darker(Commons.Color.popups.text, 1.4)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
         }
 
         PanelSeparator { foreground: Commons.Color.popups.text }
 
         // 2. 肌肉记忆模式选择区 (PROFILES)
         PanelSectionHeader {
-          text: "肌肉记忆模式 (PROFILES)"
+          text: "模式"
           foreground: Commons.Color.popups.text
         }
 
@@ -464,23 +434,20 @@ Panel {
               required property var modelData
               required property int index
               readonly property bool isActive: root.engineRunning && root.currentMode === modelData.id
-              readonly property color itemColor: Model.resolveColor(modelData)
 
               width: parent.width
               leftAlign: true
-              iconText: Model.resolveIcon(modelData)
+              iconText: Icons.mode(modelData.id)
               text: Model.resolveName(modelData)
               selected: isActive
               hasCursor: root.cursorActive && root.cursorIndex === index
               foreground: Commons.Color.popups.text
-              accent: itemColor
               onHovered: function(on) { root.hoverRow(profileRow.index, on) }
               onClicked: root.switchMode(profileRow.modelData.id)
 
               RowHint {
-                text: profileRow.isActive ? "✓ 已启用" : (profileRow.modelData.bindings_count + "项")
-                color: profileRow.isActive ? profileRow.itemColor : Qt.darker(Commons.Color.popups.text, 1.4)
-                font.bold: profileRow.isActive
+                text: profileRow.isActive ? "active" : String(profileRow.modelData.bindings_count)
+                color: profileRow.isActive ? Commons.Color.accent : Qt.darker(Commons.Color.popups.text, 1.4)
               }
             }
           }
@@ -495,7 +462,7 @@ Panel {
 
           PanelSectionHeader {
             id: wpHeader
-            text: "窗口策略 (WINDOW POLICY)"
+            text: "窗口策略"
             foreground: Commons.Color.popups.text
             anchors.left: parent.left
             anchors.right: effPolicyBadge.left
@@ -504,29 +471,15 @@ Panel {
             elide: Text.ElideRight
           }
 
-          // Same pill chrome PanelHero uses for its detail badge.
-          BorderSurface {
+          Text {
             id: effPolicyBadge
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            implicitWidth: effPolicyText.implicitWidth + Style.space(10)
-            implicitHeight: effPolicyText.implicitHeight + Style.space(4)
-            width: implicitWidth
-            height: implicitHeight
-            color: "transparent"
-            radius: Style.cornerRadius
-            borderSpec: Border.controlSpec("normal", root.currentColor, Commons.Color.accent)
-
-            Text {
-              id: effPolicyText
-              textFormat: Text.PlainText
-              anchors.centerIn: parent
-              text: "生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
-              color: root.currentColor
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              font.bold: true
-            }
+            textFormat: Text.PlainText
+            text: "生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
+            color: Qt.darker(Commons.Color.popups.text, 1.4)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
           }
         }
 
@@ -552,7 +505,7 @@ Panel {
         Text {
           width: parent.width
           textFormat: Text.PlainText
-          text: "ℹ " + Model.resolvePolicyDesc(root.windowPolicy, root.currentMode)
+          text: Model.resolvePolicyDesc(root.windowPolicy, root.currentMode)
           color: Qt.darker(Commons.Color.popups.text, 1.4)
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
@@ -563,7 +516,7 @@ Panel {
 
         // 4. 快捷功能入口 (ACTIONS)
         PanelSectionHeader {
-          text: "快捷入口 (ACTIONS)"
+          text: "快捷入口"
           foreground: Commons.Color.popups.text
         }
 
@@ -582,7 +535,7 @@ Panel {
 
         // 5. 系统与控制 (SYSTEM)
         PanelSectionHeader {
-          text: "系统与控制 (SYSTEM)"
+          text: "系统"
           foreground: Commons.Color.popups.text
         }
 
@@ -633,24 +586,4 @@ Panel {
     font.pixelSize: Style.font.caption
   }
 
-  component StatusLamp: Row {
-    property bool on: false
-    property color lampColor: Commons.Color.muted
-    property string label: ""
-    spacing: Style.spacing.sm
-    Rectangle {
-      width: Style.space(6)
-      height: Style.space(6)
-      radius: Style.cornerRadius > 0 ? width / 2 : 0
-      color: parent.lampColor
-      anchors.verticalCenter: parent.verticalCenter
-    }
-    Text {
-      textFormat: Text.PlainText
-      text: parent.label
-      color: Qt.darker(Commons.Color.popups.text, 1.4)
-      font.family: Style.font.family
-      font.pixelSize: Style.font.caption
-    }
-  }
 }

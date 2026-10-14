@@ -37,7 +37,7 @@ class DesignTokenTests(unittest.TestCase):
                 # is only the colors.toml palette fallback.
                 self.assertIn("import qs.Commons", s, f.name)
                 self.assertIn("import qs.Ui", s, f.name)
-                self.assertIn("Tokens.themeFiles", s, f.name)
+                self.assertNotIn('import "Tokens.js"', s, f.name)
                 self.assertNotIn("Tokens.build(", s, f.name)
                 self.assertRegex(s, r"\b(BorderSurface|Button|OverlayWindow|Panel)\s*\{", f.name)
 
@@ -65,6 +65,46 @@ console.log(JSON.stringify([p.accent, p.red, p.background, p.bogus || null, t.da
         s = TOKENS.read_text(encoding="utf-8")
         self.assertIn("radius = { none: 0, sm: 0, md: 0", s)
         self.assertIn("normal: 2", s)
+
+
+    # ---- designer gap list (native Omarchy look) --------------------------
+    def ui_files(self):
+        return [f for f in PLUGINS.glob("omni.*/*.qml") if f.name != "OmniTheme.qml"]
+
+    def _hits(self, pattern):
+        rx = re.compile(pattern)
+        out = []
+        for f in self.ui_files():
+            for n, l in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                if l.strip().startswith("//"):
+                    continue
+                if rx.search(l):
+                    out.append(f"{f.relative_to(ROOT)}:{n}: {l.strip()}")
+        return out
+
+    def test_no_emoji_in_ui(self):
+        # Monochrome Nerd Font glyphs only (Icons.js); emoji/pictographs are banned.
+        self.assertEqual(self._hits(r"[\U0001F000-\U0001FAFF\u2600-\u27BF]"), [])
+
+    def test_no_bold_caps_or_tracking(self):
+        self.assertEqual(self._hits(r"font\.bold|letterSpacing|toUpperCase\(|Font\.Bold|Font\.DemiBold"), [])
+
+    def test_no_hover_lift_animation(self):
+        self.assertEqual(self._hits(r"Behavior on (scale|y)\b"), [])
+
+    def test_no_custom_status_or_mode_colours(self):
+        self.assertEqual(self._hits(r"modeColors|modeColor\(|currentColor|display\.color|theme\.(ok|warn|info|special|highlight)\b"), [])
+
+    def test_icons_are_shared_nerd_glyphs(self):
+        src = (PLUGINS / "shared" / "Icons.js").read_text(encoding="utf-8")
+        glyphs = re.findall(r'^  \w+: "(.)",$', src, re.M)
+        self.assertTrue(glyphs)
+        for g in glyphs:
+            cp = ord(g)
+            self.assertTrue(0xE000 <= cp <= 0xF8FF or 0xF0000 <= cp <= 0xFFFFD, hex(cp))
+        for d in PLUGINS.glob("omni.*/"):
+            if (d / "Icons.js").exists():
+                self.assertEqual((d / "Icons.js").read_text(encoding="utf-8"), src, d.name)
 
 
 if __name__ == "__main__":

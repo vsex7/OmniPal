@@ -6,8 +6,8 @@ import QtQuick
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "Icons.js" as Icons
 import "CheatSheetData.js" as SheetData
-import "Tokens.js" as Tokens
 
 // OmniPal 快捷键 HUD（omni.cheat-sheet）
 //
@@ -24,19 +24,7 @@ Item {
   // ---- Theme ----------------------------------------------------------------
   // Chrome is 100% native: qs.Commons Color.menu.* / Style.* + qs.Ui OverlayWindow,
   // BorderSurface, Button, TextField, PanelSectionHeader, PanelSeparator — the same
-  // kit omarchy.emojis / omarchy.menu use. Tokens.js only supplies the extended
-  // colors.toml palette (the "engine active" green dot), which Commons doesn't expose.
-  property var themePalette: Tokens.fallback
-  readonly property color okColor: themePalette.green || Commons.Color.accent
-  FileView {
-    id: omniThemeFile
-    property bool legacy: false
-    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
-    watchChanges: true
-    onFileChanged: reload()
-    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
-    onLoadFailed: if (!legacy) legacy = true
-  }
+  // kit omarchy.emojis / omarchy.menu use. Only the five native colour roles.
 
   // ------------------------------------------------------- host contract
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
@@ -67,10 +55,10 @@ Item {
 
   // 顶部 Profile 快速预览胶囊（只有模式 id 与装饰图标，键位真值仍归 Engine，铁律 3）
   readonly property var previewModes: [
-    { id: "windows", label: "🪟 Windows 11" },
-    { id: "mac", label: "🍎 macOS" },
-    { id: "kde", label: "❖ KDE Plasma" },
-    { id: "omarchy", label: "⊡ Omarchy 原生" }
+    { id: "windows", label: "windows" },
+    { id: "mac", label: "macos" },
+    { id: "kde", label: "kde" },
+    { id: "omarchy", label: "omarchy" }
   ]
 
   function applyFilter() {
@@ -140,7 +128,9 @@ Item {
   // ------------------------------------------------------------ theming
   // 复用 [menu] 表面令牌（与 omarchy.emojis 完全一致）：任何为 Omarchy 菜单配色的
   // 主题会同时给 HUD 配色。
-  property color background: Commons.Color.menu.background
+  // Solid card: no reliance on Hyprland blur behind a translucent surface.
+  readonly property color _menuBg: Commons.Color.menu.background
+  property color background: Qt.rgba(_menuBg.r, _menuBg.g, _menuBg.b, 1)
   property color foreground: Commons.Color.menu.text
   property color border: Commons.Color.menu.border
   property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
@@ -491,8 +481,10 @@ Item {
               readonly property bool engineActive: root.stateKnown
                 && String(root.engineState.mode || "") === modelData.id
 
+              iconText: Icons.mode(modelData.id)
               text: modelData.label
               bordered: true
+              active: engineActive
               selected: root.displayMode === modelData.id
               foreground: root.foreground
               accent: root.accent
@@ -500,18 +492,6 @@ Item {
               fontSize: Style.font.bodySmall
               tooltipText: engineActive ? "Engine 当前生效模式" : ""
               onClicked: root.previewMode(previewPill.modelData.id)
-
-              Rectangle {
-                // Engine 当前生效模式绿点标记（预览≠生效时一目了然）
-                visible: previewPill.engineActive
-                width: Style.space(5)
-                height: Style.space(5)
-                radius: Style.cornerRadius > 0 ? width / 2 : 0
-                color: root.okColor
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.margins: Style.spacing.xs
-              }
             }
           }
         }
@@ -529,7 +509,6 @@ Item {
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
-            font.bold: true
           }
 
           Text {
@@ -684,10 +663,9 @@ Item {
                     BorderSurface {
                       anchors.fill: parent
                       radius: root.cornerRadius
-                      color: bindingMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent)
-                        : (binding.rowLive ? Style.selectedFillFor(root.foreground, root.accent) : "transparent")
-                      borderSpec: binding.rowLive ? Border.controlSpec("selected", root.foreground, root.accent) : Border.none()
-                      Behavior on color { ColorAnimation { duration: Style.duration(120) } }
+                      // Native menu selection: fg@0.08 fill, accent text, no border.
+                      color: (bindingMouse.containsMouse || binding.rowLive) ? Util.alpha(root.foreground, 0.08) : "transparent"
+                      borderSpec: Border.none()
                     }
 
                     Flow {
@@ -712,28 +690,18 @@ Item {
                           width: keyLabel.implicitWidth + Style.spacing.controlPaddingX * 2
                           height: Math.max(Style.space(21), Style.font.body + Style.spacing.controlPaddingY)
                           radius: Style.cornerRadius
-                          color: keyCap.capLive ? Style.selectedFillFor(root.foreground, root.accent)
-                            : Style.normalFillFor(root.foreground, root.accent)
-                          borderSpec: Border.controlSpec(keyCap.capLive ? "focus" : "normal", root.foreground, root.accent)
-
-                          // 实时按键高亮反馈：按住修饰键时关联键帽呼吸
-                          SequentialAnimation on opacity {
-                            loops: Animation.Infinite
-                            running: keyCap.capLive && !Style.reduceMotion
-                            alwaysRunToEnd: true
-                            NumberAnimation { to: 0.55; duration: Style.duration(420) }
-                            NumberAnimation { to: 1.0; duration: Style.duration(420) }
-                          }
+                          // Square keycap = native bordered Button (1px fg@0.4, fg@0.04 fill, cornerRadius).
+                          color: Style.normalFillFor(root.foreground, root.accent)
+                          borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
 
                           Text {
                             id: keyLabel
                             textFormat: Text.PlainText
                             anchors.centerIn: parent
                             text: SheetData.formatKeyCap(String(keyCap.modelData), root.displayMode)
-                            color: keyCap.capLive ? root.accent : root.foreground
+                            color: (keyCap.capLive || binding.rowLive) ? root.accent : root.foreground
                             font.family: root.fontFamily
                             font.pixelSize: Style.font.bodySmall
-                            font.bold: true
                           }
                         }
                       }
@@ -749,7 +717,7 @@ Item {
                       text: root.filterText.trim() !== ""
                         ? SheetData.highlightMatches(binding.modelData.name, root.filterText, String(root.accent))
                         : binding.modelData.name
-                      color: root.foreground
+                      color: (bindingMouse.containsMouse || binding.rowLive) ? root.accent : root.foreground
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
                       elide: Text.ElideRight
@@ -811,7 +779,6 @@ Item {
             opacity: 0.9
             font.family: root.fontFamily
             font.pixelSize: Style.font.subtitle
-            font.bold: true
           }
 
           Text {

@@ -90,15 +90,10 @@ function formatAppName(cls, title) {
   return c
 }
 
+// Native colour discipline: no per-app hues. Kept for API compatibility; the UI
+// colours items with Color.accent (selected) / Color.foreground (otherwise).
 function getAppCyberColor(cls, appType) {
-  var c = (cls || "").toLowerCase()
-  if (appType === "terminal" || c.indexOf("foot") !== -1 || c.indexOf("kitty") !== -1 || c.indexOf("agent") !== -1) return "#00f0ff" // 极光青
-  if (appType === "code" || c.indexOf("antigravity") !== -1 || c.indexOf("code") !== -1) return "#c084fc" // 赛博紫
-  if (appType === "browser" || c.indexOf("chrome") !== -1 || c.indexOf("firefox") !== -1) return "#fb923c" // 高能橙
-  if (appType === "graphics" || c.indexOf("pen") !== -1 || c.indexOf("gimp") !== -1) return "#f472b6" // 电光粉
-  if (appType === "files" || c.indexOf("thunar") !== -1) return "#38bdf8" // 深邃蓝
-  if (appType === "media" || c.indexOf("spotify") !== -1) return "#4ade80" // 极客绿
-  return "#00f0ff"
+  return ""
 }
 
 function resolveIconName(cls, appType) {

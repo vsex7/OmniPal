@@ -6,7 +6,7 @@ import QtQuick
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
-import "Tokens.js" as Tokens
+import "Icons.js" as Icons
 
 // OmniPal macOS 风格底部 Dock 栏（omni.mac-dock）
 //
@@ -23,17 +23,7 @@ Item {
   // Native first: qs.Commons Color/Style + qs.Ui widgets wherever Omarchy has one.
   // `theme` (OmniTheme.qml) resolves the remaining custom-surface roles straight from
   // qs.Commons; the colors.toml palette below only feeds the extended status hues.
-  property var themePalette: Tokens.fallback
-  readonly property OmniTheme theme: OmniTheme { palette: root.themePalette }
-  FileView {
-    id: omniThemeFile
-    property bool legacy: false
-    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
-    watchChanges: true
-    onFileChanged: reload()
-    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
-    onLoadFailed: if (!legacy) legacy = true
-  }
+  readonly property OmniTheme theme: OmniTheme {}
 
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
@@ -42,13 +32,17 @@ Item {
   property bool opened: false
   readonly property string pluginId: (root.manifest && root.manifest.id) || "omni.mac-dock"
 
+  // Native Omarchy has no magnification/bounce; keep the macOS feel strictly opt-in
+  // (OMNI_DOCK_MAGNIFY=1). Default = static icons, hover fill only.
+  readonly property bool magnify: Quickshell.env("OMNI_DOCK_MAGNIFY") === "1"
+
   // 默认常用应用
   readonly property var defaultFavorites: [
-    { id: "term", name: "终端", icon: "", exec: "xdg-terminal-exec", matchClass: ["kitty", "alacritty", "foot", "terminal"] },
-    { id: "browser", name: "浏览器", icon: "🌐", exec: "google-chrome", matchClass: ["google-chrome", "firefox", "chromium", "zen"] },
-    { id: "files", name: "访达/文件", icon: "📁", exec: "omarchy-file-manager", matchClass: ["thunar", "nautilus", "dolphin", "org.gnome.nautilus"] },
-    { id: "code", name: "代码编辑", icon: "", exec: "code", matchClass: ["code", "cursor", "vscodium"] },
-    { id: "settings", name: "Omni 控制中心", icon: "⚙", exec: "omarchy-shell shell toggle omni.settings", matchClass: [] }
+    { id: "term", name: "终端", icon: Icons.glyph.terminal, exec: "xdg-terminal-exec", matchClass: ["kitty", "alacritty", "foot", "terminal"] },
+    { id: "browser", name: "浏览器", icon: Icons.glyph.browser, exec: "google-chrome", matchClass: ["google-chrome", "firefox", "chromium", "zen"] },
+    { id: "files", name: "访达/文件", icon: Icons.glyph.folder, exec: "omarchy-file-manager", matchClass: ["thunar", "nautilus", "dolphin", "org.gnome.nautilus"] },
+    { id: "code", name: "代码编辑", icon: Icons.glyph.code, exec: "code", matchClass: ["code", "cursor", "vscodium"] },
+    { id: "settings", name: "Omni 控制中心", icon: Icons.glyph.settings, exec: "omarchy-shell shell toggle omni.settings", matchClass: [] }
   ]
 
   property var runningClients: []
@@ -183,16 +177,16 @@ Item {
     var acts = []
     if (!item) return acts
     if (item.isRunning && item.windowCount > 0) {
-      acts.push({ key: "focus", icon: "🎯", label: "聚焦前台窗口", danger: false })
+      acts.push({ key: "focus", icon: Icons.glyph.focus, label: "聚焦", danger: false })
       if (item.windowCount > 1) {
-        acts.push({ key: "cycle", icon: "🔁", label: "轮转下一窗口 (" + item.windowCount + " 实例)", danger: false })
+        acts.push({ key: "cycle", icon: Icons.glyph.cycle, label: "下一窗口 (" + item.windowCount + ")", danger: false })
       }
     }
     if (item.exec) {
-      acts.push({ key: "new", icon: "➕", label: item.isRunning ? "新开实例" : "启动应用", danger: false })
+      acts.push({ key: "new", icon: Icons.glyph.plus, label: item.isRunning ? "新建" : "启动", danger: false })
     }
     if (item.isRunning && item.windowCount > 0) {
-      acts.push({ key: "close", icon: "✕", label: "关闭该应用", danger: true })
+      acts.push({ key: "close", icon: Icons.glyph.close, label: "关闭", danger: true })
     }
     return acts
   }
@@ -215,17 +209,7 @@ Item {
   }
 
   function resolveAppGlyph(cls) {
-    if (!cls) return "🗔"
-    var c = cls.toLowerCase()
-    if (c.indexOf("kitty") !== -1 || c.indexOf("alacritty") !== -1 || c.indexOf("term") !== -1 || c.indexOf("foot") !== -1 || c.indexOf("ghostty") !== -1) return ""
-    if (c.indexOf("chrome") !== -1 || c.indexOf("firefox") !== -1 || c.indexOf("chromium") !== -1 || c.indexOf("zen") !== -1 || c.indexOf("edge") !== -1 || c.indexOf("brave") !== -1) return "🌐"
-    if (c.indexOf("thunar") !== -1 || c.indexOf("nautilus") !== -1 || c.indexOf("dolphin") !== -1 || c.indexOf("file") !== -1) return "📁"
-    if (c.indexOf("code") !== -1 || c.indexOf("cursor") !== -1 || c.indexOf("vscodium") !== -1 || c.indexOf("sublime") !== -1 || c.indexOf("neovim") !== -1 || c.indexOf("nvim") !== -1) return ""
-    if (c.indexOf("settings") !== -1 || c.indexOf("control") !== -1 || c.indexOf("pavucontrol") !== -1) return "⚙"
-    if (c.indexOf("spotify") !== -1 || c.indexOf("music") !== -1 || c.indexOf("sound") !== -1) return "🎵"
-    if (c.indexOf("discord") !== -1 || c.indexOf("telegram") !== -1 || c.indexOf("wechat") !== -1 || c.indexOf("slack") !== -1 || c.indexOf("qq") !== -1) return "💬"
-    if (c.indexOf("image") !== -1 || c.indexOf("gimp") !== -1 || c.indexOf("photo") !== -1) return "🖼"
-    return cls.charAt(0).toUpperCase()
+    return Icons.appForClass(cls)
   }
 
   function rebuildItems() {
@@ -287,7 +271,7 @@ Item {
       items.push({
         id: "app:" + clsKey,
         classKey: clsKey,
-        name: clsKey.charAt(0).toUpperCase() + clsKey.slice(1),
+        name: clsKey.charAt(0) + clsKey.slice(1),
         icon: root.resolveAppGlyph(clsKey),
         exec: "",
         isRunning: true,
@@ -386,7 +370,7 @@ Item {
               var sigma = Style.space(54)
               return Math.exp(-(d * d) / (2 * sigma * sigma))
             }
-            readonly property real iconScale: 1.0 + 0.35 * dockItemWrapper.waveFalloff
+            readonly property real iconScale: root.magnify ? 1.0 + 0.35 * dockItemWrapper.waveFalloff : 1.0
 
             width: Style.space(50)
             height: Style.space(56)
@@ -398,7 +382,7 @@ Item {
             }
 
             function bounce() {
-              bounceAnim.restart()
+              if (root.magnify && !Style.reduceMotion) bounceAnim.restart()
             }
 
             // 纵向弹性起跳槽：点击/激活时整槽上跳，带阻尼回落
@@ -437,8 +421,7 @@ Item {
                   ? Style.hoverFillFor(Commons.Color.popups.text, Commons.Color.accent)
                   : Style.normalFillFor(Commons.Color.popups.text, Commons.Color.accent)
                 borderSpec: Border.controlSpec(dockItemWrapper.waveFalloff > 0.5 ? "hover-cursor" : "normal", Commons.Color.popups.text, Commons.Color.accent)
-                Behavior on width { SpringAnimation { spring: 3.2; damping: 0.62; epsilon: 0.001 } }
-                Behavior on color { ColorAnimation { duration: Style.duration(140) } }
+                Behavior on width { enabled: root.magnify; SpringAnimation { spring: 3.2; damping: 0.62; epsilon: 0.001 } }
 
                 Text {
                   font.family: Style.font.family
@@ -461,9 +444,7 @@ Item {
                   width: Math.max(Style.space(16), badgeText.implicitWidth + Style.space(8))
                   height: Style.space(16)
                   radius: Style.cornerRadius
-                  color: root.dangerColor
-                  border.width: 1
-                  border.color: Commons.Color.popups.background
+                  color: Commons.Color.accent
 
                   Text {
                     id: badgeText
@@ -471,7 +452,6 @@ Item {
                     text: dockItemWrapper.modelData.windowCount
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
-                    font.bold: true
                     color: Commons.Color.background
                   }
                 }
@@ -582,7 +562,6 @@ Item {
       borderSpec: root.popupBorderSpec
       padding: Style.spacing.sm
       opacity: root.contextItem !== null ? 1 : 0
-      scale: 1.0
       visible: root.contextItem !== null || opacity > 0
       Behavior on opacity { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutQuad } }
 

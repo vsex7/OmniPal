@@ -8,7 +8,6 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
-import "Tokens.js" as Tokens
 
 // OmniPal Overview - GTA V 战术武器轮盘多任务视界 (终极精细打磨版)
 Item {
@@ -18,17 +17,7 @@ Item {
   // Native first: qs.Commons Color/Style + qs.Ui widgets wherever Omarchy has one.
   // `theme` (OmniTheme.qml) resolves the remaining custom-surface roles straight from
   // qs.Commons; the colors.toml palette below only feeds the extended status hues.
-  property var themePalette: Tokens.fallback
-  readonly property OmniTheme theme: OmniTheme { palette: root.themePalette }
-  FileView {
-    id: omniThemeFile
-    property bool legacy: false
-    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
-    watchChanges: true
-    onFileChanged: reload()
-    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
-    onLoadFailed: if (!legacy) legacy = true
-  }
+  readonly property OmniTheme theme: OmniTheme {}
 
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
@@ -519,7 +508,7 @@ Item {
               // 扇区两端高光刻度线 (GTA 武器槽位精密咬合锁扣)
               var midA = item.midAngle
               ctx.lineWidth = 3
-              ctx.strokeStyle = root.theme.textStrong
+              ctx.strokeStyle = root.theme.accent
               var notchR1 = rIn + 10
               var notchR2 = rIn + 26
               ctx.beginPath()
@@ -572,7 +561,7 @@ Item {
         // 中心深黑大圆盘底座 (带多层倒角金属轮廓)
         BorderSurface {
           anchors.fill: parent
-          radius: width / 2
+          radius: Style.cornerRadius
           color: root.theme.bg
           // [menu] surface border when a window is picked, normal control border otherwise.
           borderSpec: root.currentSelectedWin
@@ -591,20 +580,18 @@ Item {
               height: Math.max(Style.space(24), Style.font.bodySmall + Style.spacing.controlPaddingY * 2)
               width: parent.width
               radius: Style.cornerRadius
-              color: root.currentSelectedWin ? Style.selectedFillFor(root.theme.text, root.theme.accent) : Style.normalFillFor(root.theme.text, root.theme.accent)
-              borderSpec: Border.controlSpec(root.currentSelectedWin ? "selected" : "normal", root.theme.text, root.theme.accent)
+              color: Util.alpha(root.theme.text, root.currentSelectedWin ? 0.08 : 0.04)
+              borderSpec: Border.none()
 
               Text {
                 anchors.centerIn: parent
-                text: "ACTIVE: [" + (root.currentSelectedWin ? root.currentSelectedWin.activeName : "NONE") + "]"
-                color: root.theme.selectedText
+                text: root.currentSelectedWin ? String(root.currentSelectedWin.activeName) : "no window"
+                color: root.currentSelectedWin ? root.theme.accent : root.theme.textMuted
                 font.pixelSize: Style.font.bodySmall
-                font.bold: true
                 font.family: Style.font.family
                 elide: Text.ElideRight
                 width: parent.width - 16
                 horizontalAlignment: Text.AlignHCenter
-                font.letterSpacing: 1
               }
             }
 
@@ -633,10 +620,9 @@ Item {
 
             // 真实窗口标题
             Text {
-              text: (root.currentSelectedWin && (root.currentSelectedWin.title || root.currentSelectedWin.appName)) ? String(root.currentSelectedWin.title || root.currentSelectedWin.appName) : "No Window Selected"
+              text: (root.currentSelectedWin && (root.currentSelectedWin.title || root.currentSelectedWin.appName)) ? String(root.currentSelectedWin.title || root.currentSelectedWin.appName) : "no window selected"
               color: root.theme.textStrong
               font.pixelSize: Style.font.body
-              font.bold: true
               font.family: Style.font.family
               horizontalAlignment: Text.AlignHCenter
               maximumLineCount: 2
@@ -646,65 +632,26 @@ Item {
               lineHeight: 1.15
             }
 
-            // GTA 5 风格战术属性状态条组 (Tactical Stat Bars)
+            // Terse key/value lines (lowercase, muted labels, single colour).
             Column {
               width: parent.width
-              spacing: 6
+              spacing: Style.spacing.xs
 
-              // 属性 1: Workspace
-              Row {
-                width: parent.width
-                spacing: 8
-                Text { text: "WORKSPACE:"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family; width: 85 }
-                Rectangle {
-                  height: 6
-                  width: parent.width - 93
-                  radius: Style.cornerRadius
-                  color: root.theme.surfaceAlt
-                  anchors.verticalCenter: parent.verticalCenter
-                  Rectangle {
-                    height: parent.height
-                    width: parent.width * 0.85
-                    radius: Style.cornerRadius
-                    color: root.theme.accent
-                  }
+              Repeater {
+                model: [
+                  { k: "workspace", v: root.currentSelectedWin ? String(root.currentSelectedWin.workspaceId) : "-" },
+                  { k: "layout", v: root.currentSelectedWin ? String(root.currentSelectedWin.layoutMode || "").toLowerCase() : "-" },
+                  { k: "pid", v: root.currentSelectedWin ? (String(root.currentSelectedWin.pid) + " · " + (root.currentSelectedWin.resolutionStr || "")) : "-" }
+                ]
+                delegate: Row {
+                  id: statLine
+                  required property var modelData
+                  spacing: Style.spacing.lg
+                  Text { text: statLine.modelData.k; width: Style.space(64); color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
+                  Text { text: statLine.modelData.v; color: root.theme.text; font.pixelSize: Style.font.caption; font.family: Style.font.family }
                 }
               }
-
-              // 属性 2: Layout Mode
-              Row {
-                width: parent.width
-                spacing: 8
-                Text { text: "LAYOUT MODE:"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family; width: 85 }
-                Rectangle {
-                  height: 6
-                  width: parent.width - 93
-                  radius: Style.cornerRadius
-                  color: root.theme.surfaceAlt
-                  anchors.verticalCenter: parent.verticalCenter
-                  Rectangle {
-                    height: parent.height
-                    width: root.currentSelectedWin && root.currentSelectedWin.layoutMode === "FLOAT" ? parent.width * 0.45 : parent.width * 0.95
-                    radius: Style.cornerRadius
-                    color: root.theme.info
-                  }
-                }
-              }
-
-              // 属性 3: Process PID
-              Row {
-                width: parent.width
-                spacing: 8
-                Text { text: "PROCESS PID:"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family; width: 85 }
-                Text {
-                  text: root.currentSelectedWin ? (String(root.currentSelectedWin.pid) + " · " + (root.currentSelectedWin.resolutionStr || "1280×800")) : "-"
-                  color: root.theme.text
-                  font.pixelSize: Style.font.caption
-                  font.bold: true
-                  font.family: Style.font.family
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-              }
+            }
             }
           }
         }
@@ -756,17 +703,15 @@ Item {
         width: 155
         height: 82
         radius: Style.cornerRadius
-        color: portalHole.isDragOver ? Style.selectedFillFor(root.theme.danger, root.theme.danger) : root.theme.popupBg
+        color: root.theme.popupBg
         borderSpec: portalHole.isDragOver
-          ? Border.flat(root.theme.danger, Math.max(1, Style.space(2)))
+          ? Border.flat(root.theme.accent, Math.max(1, Style.space(2)))
           : Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
         z: 999
 
         x: root.dragGlobalX - width / 2
         y: root.dragGlobalY - height / 2
 
-        scale: portalHole.isDragOver ? 0.65 : 1.0
-        Behavior on scale { NumberAnimation { duration: Style.duration(90); easing.type: Easing.OutCubic } }
         Row {
           anchors.centerIn: parent
           spacing: 10
@@ -783,19 +728,17 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 2
             Text {
-              text: root.draggedSlotData ? String(root.draggedSlotData.appName || "").toUpperCase() : ""
+              text: root.draggedSlotData ? String(root.draggedSlotData.appName || "") : ""
               color: root.theme.textStrong
               font.pixelSize: Style.font.bodySmall
-              font.bold: true
               font.family: Style.font.family
               elide: Text.ElideRight
               width: 85
             }
             Text {
-              text: portalHole.isDragOver ? "ENTERING HOLE..." : "DRAGGING"
-              color: portalHole.isDragOver ? root.theme.danger : root.theme.info
+              text: portalHole.isDragOver ? "release to move" : "dragging"
+              color: portalHole.isDragOver ? root.theme.accent : root.theme.textMuted
               font.pixelSize: Style.font.caption
-              font.bold: true
               font.family: Style.font.family
             }
           }
@@ -803,7 +746,7 @@ Item {
       }
 
       // ==========================================
-      // 6. 底部 GTA 风格操作指示 Bar
+      // 6. 底部操作提示
       // ==========================================
       // Hint strip = [menu] surface card, same chrome as the overlay cards.
       BorderSurface {
@@ -820,48 +763,15 @@ Item {
         color: root.theme.bg
         borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, Math.max(1, Style.space(2)))
 
-        Row {
+        // Single muted caption line, one colour (designer gap list).
+        Text {
           id: footerRow
           anchors.centerIn: parent
-          spacing: Style.spacing.xxxl
-
-          Row {
-            spacing: 6
-            Text { text: "MOUSE"; color: root.theme.accent; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family }
-            Text { text: "FLICK TO SELECT"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
-          }
-
-          Text { text: "·"; color: Util.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
-
-          Row {
-            spacing: 6
-            Text { text: "DRAG → HOLE"; color: root.theme.danger; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family }
-            Text { text: "MOVE TO WORKSPACE [" + root.targetTransferWorkspaceId + "]"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
-          }
-
-          Text { text: "·"; color: Util.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
-
-          Row {
-            spacing: 6
-            Text { text: "[M]"; color: root.theme.info; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family }
-            Text { text: "QUICK TRANSFER"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
-          }
-
-          Text { text: "·"; color: Util.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
-
-          Row {
-            spacing: 6
-            Text { text: "ENTER / CLICK"; color: root.theme.textStrong; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family }
-            Text { text: "EQUIP / FOCUS"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
-          }
-
-          Text { text: "·"; color: Util.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
-
-          Row {
-            spacing: 6
-            Text { text: "ESC"; color: root.theme.textStrong; font.pixelSize: Style.font.caption; font.bold: true; font.family: Style.font.family }
-            Text { text: "CANCEL"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
-          }
+          textFormat: Text.PlainText
+          text: "enter focus · drag move to workspace " + root.targetTransferWorkspaceId + " · m move · esc close"
+          color: root.theme.textMuted
+          font.pixelSize: Style.font.caption
+          font.family: Style.font.family
         }
       }
     }

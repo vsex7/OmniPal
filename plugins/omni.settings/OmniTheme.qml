@@ -1,7 +1,6 @@
 import QtQuick
 import qs.Commons
 import qs.Commons as Commons
-import "Tokens.js" as Tokens
 
 // OmniPal semantic roles for the few *custom* surfaces Omarchy has no widget for
 // (overview wheel canvas, snap zone previews, dock tiles, black-hole portal).
@@ -11,8 +10,10 @@ import "Tokens.js" as Tokens
 // change, a shell.toml [menu]/[controls] override, or Style.reduceMotion reaches
 // these surfaces exactly like first-party ones.
 //
-// Tokens.js is fallback ONLY for the extended colors.toml hues Commons does not
-// publish (green/yellow/cyan/magenta/orange → ok/warn/info/special/highlight).
+// Colour discipline (designer gap list): ONLY the five native roles —
+// foreground / background / accent / urgent / muted(dim). Legacy status role
+// names (ok/warn/info/special/highlight) are kept as aliases onto those roles
+// so no custom hue can reach the UI.
 // Anything that has a native widget (Button, TextField, ToggleSwitch, PanelHero,
 // PanelSectionHeader, PanelSeparator, ...) must use that widget instead of this.
 //
@@ -21,8 +22,8 @@ import "Tokens.js" as Tokens
 QtObject {
   id: t
 
-  // colors.toml palette (owner re-reads it on theme change); fallback tokyo-night.
-  property var palette: Tokens.fallback
+  // Kept for API compatibility only; no longer used for rendering.
+  property var palette: ({})
 
   // ---- surfaces (Color.menu = overlay family, Color.popups = bar panels)
   readonly property color bg: Commons.Color.menu.background
@@ -34,7 +35,7 @@ QtObject {
   readonly property color sunken: Qt.darker(Commons.Color.background, 1.25)
   readonly property color scrim: Commons.Color.menu.scrim
   readonly property color menuScrim: Commons.Color.menu.scrim
-  readonly property color shadow: Util.alpha(Commons.Color.background, 0.35)
+  readonly property color shadow: "transparent" // native: no shadows
 
   // ---- text (dim = the Qt.darker(fg, 1.4) first-party panels use for meta text)
   readonly property color text: Commons.Color.menu.text
@@ -58,13 +59,13 @@ QtObject {
   // ---- status hues
   readonly property color danger: Commons.Color.urgent
   readonly property color onDanger: Commons.Color.background
-  readonly property color ok: t.palette.green || Commons.Color.accent
-  readonly property color warn: t.palette.yellow || Commons.Color.urgent
-  readonly property color info: t.palette.cyan || Commons.Color.accent
-  readonly property color special: t.palette.magenta || Commons.Color.accent
-  readonly property color highlight: t.palette.orange || Commons.Color.urgent
-  readonly property color white: t.palette.white || Commons.Color.foreground
-  readonly property color black: t.palette.black || Commons.Color.background
+  readonly property color ok: Commons.Color.accent
+  readonly property color warn: Commons.Color.urgent
+  readonly property color info: Commons.Color.accent
+  readonly property color special: t.textMuted
+  readonly property color highlight: Commons.Color.accent
+  readonly property color white: Commons.Color.foreground
+  readonly property color black: Commons.Color.background
 
   // ---- geometry (all native)
   readonly property int radius: Style.cornerRadius

@@ -6,8 +6,8 @@ import QtQuick
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "Icons.js" as Icons
 import "Model.js" as Model
-import "Tokens.js" as Tokens
 
 // OmniPal 窗口吸附反馈与 Snap Layouts 布局选择器 (omni.snap-feedback)
 //
@@ -27,17 +27,7 @@ Item {
   // Native first: qs.Commons Color/Style + qs.Ui widgets wherever Omarchy has one.
   // `theme` (OmniTheme.qml) resolves the remaining custom-surface roles straight from
   // qs.Commons; the colors.toml palette below only feeds the extended status hues.
-  property var themePalette: Tokens.fallback
-  readonly property OmniTheme theme: OmniTheme { palette: root.themePalette }
-  FileView {
-    id: omniThemeFile
-    property bool legacy: false
-    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
-    watchChanges: true
-    onFileChanged: reload()
-    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
-    onLoadFailed: if (!legacy) legacy = true
-  }
+  readonly property OmniTheme theme: OmniTheme {}
 
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
@@ -500,11 +490,6 @@ Item {
           color: "transparent"
           border.width: Math.max(1, Style.normalBorderWidth)
           border.color: root.theme.line
-
-          Behavior on x { NumberAnimation { duration: Style.duration(90) } }
-          Behavior on y { NumberAnimation { duration: Style.duration(90) } }
-          Behavior on width { NumberAnimation { duration: Style.duration(90) } }
-          Behavior on height { NumberAnimation { duration: Style.duration(90) } }
         }
       }
 
@@ -521,11 +506,6 @@ Item {
         color: Util.alpha(root.snapColor, 0.12)
         border.width: root.hudBorder
         border.color: root.snapColor
-
-        Behavior on x { NumberAnimation { duration: Style.duration(90) } }
-        Behavior on y { NumberAnimation { duration: Style.duration(90) } }
-        Behavior on width { NumberAnimation { duration: Style.duration(90) } }
-        Behavior on height { NumberAnimation { duration: Style.duration(90) } }
 
 
         // 浮动指示徽章（展示区域图标、中文说明与物理像素分辨率）
@@ -549,7 +529,7 @@ Item {
             Text {
               font.family: Style.font.family
               anchors.verticalCenter: parent.verticalCenter
-              text: previewContainer.boxGeom.icon || "◧"
+              text: Icons.glyph.snap
               font.pixelSize: Style.font.iconLarge || 18
               color: root.snapColor
             }
@@ -566,7 +546,6 @@ Item {
                   text: previewContainer.boxGeom.label || ""
                   font.family: Style.font.family
                   font.pixelSize: Style.font.bodySmall
-                  font.bold: true
                   color: root.theme.textStrong
                 }
 
@@ -586,7 +565,6 @@ Item {
                     text: previewContainer.boxGeom.dim || ""
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
-                    font.bold: true
                     color: Util.alpha(Color.foreground, 0.85)
                   }
                 }
@@ -635,8 +613,6 @@ Item {
       anchors.centerIn: parent
       width: Math.min(Style.space(560), parent.width - Style.space(32))
       height: Math.min(Style.space(370), parent.height - Style.space(32))
-
-      scale: 1.0
       opacity: root.interactive ? 1.0 : 0.0
             Behavior on opacity { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic } }
 
@@ -676,31 +652,19 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(8)
 
-            // 标志性视觉微徽标
-            Rectangle {
-              width: Style.space(24)
-              height: Style.space(24)
-              radius: Style.cornerRadius
-              color: Util.alpha(root.snapColor, 0.16)
-              border.color: Util.alpha(root.snapColor, 0.40)
-              border.width: 1
+            // 标志性视觉微徽标 — plain Nerd glyph, no tinted tile
+            Text {
               anchors.verticalCenter: parent.verticalCenter
-
-              Text {
-                font.family: Style.font.family
-                anchors.centerIn: parent
-                text: "⊞"
-                font.pixelSize: Style.font.body
-                font.bold: true
-                color: root.snapColor
-              }
+              font.family: Style.font.family
+              text: Icons.glyph.snap
+              font.pixelSize: Style.font.body
+              color: root.theme.text
             }
 
             Text {
               text: "Snap Layouts"
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
-              font.bold: true
               color: root.theme.textStrong
               anchors.verticalCenter: parent.verticalCenter
             }
@@ -720,19 +684,10 @@ Item {
                 anchors.centerIn: parent
                 spacing: 4
 
-                Rectangle {
-                  width: 5
-                  height: 5
-                  radius: Style.cornerRadius
-                  color: root.theme.ok
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-
                 Text {
                   text: root.targetWindowTitle || root.targetWindowClass || root.targetWindowAddress
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
-                  font.bold: true
                   color: Util.alpha(Color.foreground, 0.85)
                   elide: Text.ElideRight
                   maximumLineCount: 1
@@ -767,20 +722,10 @@ Item {
                   text: root.focusedTemplateIndex === -1 ? "1~6 模板" : ("模板 [" + (root.focusedTemplateIndex + 1) + "] 就绪")
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
-                  font.bold: true
                   color: root.focusedTemplateIndex !== -1 ? root.snapColor : Util.alpha(Color.foreground, 0.70)
                   anchors.verticalCenter: parent.verticalCenter
                 }
               }
-            }
-
-            // 关闭按钮 — native PanelActionButton
-            PanelActionButton {
-              iconText: "✕"
-              tooltipText: "关闭 (Esc)"
-              foreground: Commons.Color.menu.text
-              anchors.verticalCenter: parent.verticalCenter
-              onClicked: root.dismiss()
             }
           }
         }
@@ -856,7 +801,6 @@ Item {
                       text: tplCard.modelData.title
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
-                      font.bold: true
                       color: tplCard.isSelectedTpl ? root.snapColor : root.theme.text
                       anchors.verticalCenter: parent.verticalCenter
                     }
@@ -888,7 +832,6 @@ Item {
                       anchors.centerIn: parent
                       text: tplCard.modelData.key || String(tplCard.index + 1)
                       font.pixelSize: Style.font.caption
-                      font.bold: true
                       color: tplCard.isSelectedTpl ? root.theme.onAccent : Util.alpha(Color.foreground, 0.75)
                     }
                   }
@@ -952,7 +895,6 @@ Item {
                           anchors.centerIn: parent
                           text: String(slotRect.index + 1)
                           font.pixelSize: Style.font.caption
-                          font.bold: true
                           color: slotRect.isSlotFocused ? root.theme.onAccent : root.theme.textStrong
                         }
                       }
@@ -964,7 +906,6 @@ Item {
                         text: slotRect.modelData.label
                         font.family: Style.font.family
                         font.pixelSize: Style.font.caption
-                        font.bold: true
                         color: root.theme.textStrong
                       }
 
@@ -1047,7 +988,6 @@ Item {
               }
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
-              font.bold: root.hoveredZone !== ""
               color: root.hoveredZone !== "" ? root.snapColor : Util.alpha(Color.foreground, 0.60)
               anchors.verticalCenter: parent.verticalCenter
             }
@@ -1086,7 +1026,6 @@ Item {
                     text: kbdChip.modelData.key
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
-                    font.bold: true
                     color: root.theme.textStrong
                     anchors.verticalCenter: parent.verticalCenter
                   }

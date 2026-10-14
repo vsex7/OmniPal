@@ -18,7 +18,7 @@ Item {
   signal closeRequested(string address)
 
   readonly property var slot: cardRoot.windowData || ({})
-  readonly property string appName: (slot.appName || "").toUpperCase()
+  readonly property string appName: (slot.appName || "")
   readonly property string winTitle: slot.title || appName
   readonly property string winAddress: slot.address || ""
   readonly property string shortcutKey: slot.shortcutKey || String(cardRoot.cardIndex + 1)
@@ -28,9 +28,8 @@ Item {
   width: 176
   height: 100
 
-  // 选中态微凸起动效 (GTA 5 扇区浮升感与高亮)
+  // density scale only (many windows); no hover lift.
   scale: cardRoot.cardScale
-  Behavior on scale { NumberAnimation { duration: Style.duration(90); easing.type: Easing.OutCubic } }
 
   Column {
     anchors.centerIn: parent
@@ -49,8 +48,9 @@ Item {
         width: 38
         height: 38
         radius: Style.cornerRadius
-        color: cardRoot.isSelected ? Style.selectedFillFor(cardRoot.theme.text, cardRoot.theme.accent) : "transparent"
-        borderSpec: cardRoot.isSelected ? Border.controlSpec("focus", cardRoot.theme.text, cardRoot.theme.accent) : Border.none()
+        // Native selection: fg@0.08 fill, no border.
+        color: cardRoot.isSelected ? Util.alpha(cardRoot.theme.text, 0.08) : "transparent"
+        borderSpec: Border.none()
       }
 
       Image {
@@ -62,14 +62,12 @@ Item {
       }
     }
 
-    // 粗体全大写应用名 (GTA 5 经典战术排版：高字间距、粗黑对比)
+    // 应用名：常规字重、原样大小写
     Text {
       text: cardRoot.appName
-      color: cardRoot.isSelected ? cardRoot.theme.textStrong : cardRoot.theme.text
+      color: cardRoot.isSelected ? cardRoot.theme.accent : cardRoot.theme.text
       font.pixelSize: Style.font.body
-      font.bold: true
       font.family: Style.font.family
-      font.letterSpacing: 0.8
       anchors.horizontalCenter: parent.horizontalCenter
       elide: Text.ElideRight
       width: Math.min(implicitWidth, 168)
@@ -77,12 +75,10 @@ Item {
 
     // 状态标识 (选中时为亮橙加亮 ACTIVE，未选中为快捷键 [1])
     Text {
-      text: cardRoot.isSelected ? "ACTIVE" : ("[" + cardRoot.shortcutKey + "]")
+      text: cardRoot.isSelected ? "active" : cardRoot.shortcutKey
       color: cardRoot.isSelected ? cardRoot.theme.selectedText : cardRoot.theme.textMuted
       font.pixelSize: Style.font.caption
-      font.bold: true
       font.family: Style.font.family
-      font.letterSpacing: 1
       anchors.horizontalCenter: parent.horizontalCenter
     }
   }

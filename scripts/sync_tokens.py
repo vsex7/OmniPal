@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SHARED_FILES = ("Tokens.js", "OmniTheme.qml")
+SHARED_FILES = ("Tokens.js", "OmniTheme.qml", "Icons.js")
 
 
 def plugin_dirs():

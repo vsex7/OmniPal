@@ -7,7 +7,7 @@ import QtQuick.Layouts
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
-import "Tokens.js" as Tokens
+import "Icons.js" as Icons
 
 // OmniPal 设置与控制中心面板（omni.settings）
 //
@@ -25,18 +25,7 @@ Item {
   // Native first: qs.Commons Color/Style + qs.Ui widgets wherever Omarchy has one.
   // `theme` (OmniTheme.qml) resolves the remaining custom-surface roles straight from
   // qs.Commons; the colors.toml palette below only feeds the extended status hues.
-  property var themePalette: Tokens.fallback
-  readonly property var modeColors: Tokens.modeColors(themePalette)
-  readonly property OmniTheme theme: OmniTheme { palette: root.themePalette }
-  FileView {
-    id: omniThemeFile
-    property bool legacy: false
-    path: (Quickshell.env("HOME") || "") + (legacy ? Tokens.themeFiles.legacyRel : Tokens.themeFiles.stateRel)
-    watchChanges: true
-    onFileChanged: reload()
-    onLoaded: root.themePalette = Tokens.mergePalette(Tokens.parseColorsToml(text()))
-    onLoadFailed: if (!legacy) legacy = true
-  }
+  readonly property OmniTheme theme: OmniTheme {}
 
   property string omarchyPath: Quickshell.env("OMARCHY_PATH")
   property var shell: null
@@ -110,41 +99,37 @@ Item {
   property var modeItems: [
     {
       id: "windows",
-      icon: "⊞",
+      icon: Icons.mode("windows"),
       name: "Windows 11 习惯模式",
       desc: "Alt+F4 关闭窗口 · Win+方向键智能吸附 · Win+E 文件管理器 · Win+Tab 任务视图",
       count: 19,
-      color: root.modeColors.windows,
       source: "project",
       override: false
     },
     {
       id: "mac",
-      icon: "◆",
+      icon: Icons.mode("mac"),
       name: "macOS 习惯模式",
       desc: "Super+Q 退出程序 · Super+Space 聚焦搜索 · Super+Shift+3/4 截图 · Super+H 最小化",
       count: 42,
-      color: root.modeColors.mac,
       source: "project",
       override: false
     },
     {
       id: "kde",
-      icon: "❖",
+      icon: Icons.mode("kde"),
       name: "KDE Plasma 习惯模式",
       desc: "Meta+方向键贴边 · Alt+Space 搜索 · Ctrl+Alt+L 锁屏 · Meta+W 概览",
       count: 19,
-      color: root.modeColors.kde,
       source: "project",
       override: false
     },
     {
       id: "omarchy",
-      icon: "⊡",
+      icon: Icons.mode("omarchy"),
       name: "Omarchy 原生模式",
       desc: "",
       count: 0,
-      color: root.modeColors.omarchy,
       source: "project",
       override: false
     }
@@ -163,7 +148,7 @@ Item {
   readonly property int cornerRadius: Style.cornerRadius
 
   readonly property color accent: Commons.Color.accent
-  readonly property color okColor: root.theme.ok
+  readonly property color okColor: root.accent
   readonly property color dangerColor: Commons.Color.urgent
   readonly property color chipColor: Style.normalFillFor(root.foreground, root.accent)
 
@@ -253,12 +238,8 @@ Item {
     return id
   }
 
-  function modeColorOf(id) {
-    for (var i = 0; i < root.modeItems.length; i++) {
-      if (root.modeItems[i].id === id) return root.modeItems[i].color
-    }
-    return root.accent
-  }
+  // Native colour discipline: every mode renders in accent; identity = glyph + name.
+  function modeColorOf(id) { return root.accent }
 
   function fmtTs(s) {
     if (!s) return ""
@@ -394,7 +375,7 @@ Item {
       waitForEnd: true
       onStreamFinished: function() {
         var t = (text || "").trim()
-        if (t.indexOf("❌") === 0) root.rulesError = t.replace("❌", "").trim()
+        if (t.indexOf("\u274C") === 0) root.rulesError = t.replace("\u274C", "").trim()
       }
     }
     onExited: rulesListProc.running = true
@@ -447,16 +428,12 @@ Item {
         try {
           var parsed = JSON.parse(data)
           if (Array.isArray(parsed) && parsed.length > 0) {
-            var iconMap = { "windows": "⊞", "mac": "◆", "kde": "❖", "omarchy": "⊡" }
-            var colorMap = { "windows": root.modeColors.windows, "mac": root.modeColors.mac, "kde": root.modeColors.kde, "omarchy": root.modeColors.omarchy }
-            var customColors = root.modeColors.custom
             var items = []
             for (var i = 0; i < parsed.length; i++) {
               var p = parsed[i]
-              // 显示元数据取自 profile 的 display 块（单一事实源），本地仅保留兜底值
-              var disp = (p && p.display) || {}
-              var icon = disp.icon || "◇"
-              var color = disp.color || customColors[i % customColors.length]
+              // 名称/计数来自 profile（单一事实源）
+              // display.icon / display.color stay in the schema but are not rendered.
+              var icon = Icons.mode(p.id)
               var desc = p.description || (p.source === "user" ? "用户自定义配置模式" : "")
               items.push({
                 id: p.id,
@@ -464,7 +441,6 @@ Item {
                 name: p.name || p.id,
                 desc: desc,
                 count: p.bindings_count || 0,
-                color: color,
                 source: p.source || "project",
                 override: p.override || false
               })
@@ -564,7 +540,6 @@ Item {
       text: rankRow.entry.count + " 次"
       font.family: Style.font.family
       font.pixelSize: Style.font.bodySmall
-      font.bold: true
       color: rankRow.barColor
     }
 
@@ -588,7 +563,7 @@ Item {
   component Card: BorderSurface {
     radius: Style.cornerRadius
     color: Style.normalFillFor(root.foreground, root.accent)
-    borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
+    borderSpec: Border.none() // single border = the outer surface (designer gap list)
   }
 
   // Bordered native Button used for every chip / action in this panel.
@@ -627,7 +602,6 @@ Item {
       color: root.glassColor
       borderSpec: root.borderSpec
       padding: Style.space(20)
-      scale: 1.0
       opacity: root.opened ? 1.0 : 0.0
       Behavior on opacity { NumberAnimation { duration: Style.duration(140) } }
 
@@ -671,7 +645,6 @@ Item {
               text: "OmniPal 控制中心"
               font.family: Style.font.family
               font.pixelSize: Style.font.heading
-              font.bold: true
               color: root.foreground
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
@@ -682,19 +655,9 @@ Item {
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
               color: Util.alpha(root.foreground, 0.55)
-              anchors.right: closeBtn.left
+              anchors.right: parent.right
               anchors.rightMargin: Style.space(12)
               anchors.verticalCenter: parent.verticalCenter
-            }
-
-            PanelActionButton {
-              id: closeBtn
-              iconText: "✕"
-              tooltipText: "关闭 (Esc)"
-              foreground: root.foreground
-              anchors.verticalCenter: parent.verticalCenter
-              anchors.right: parent.right
-              onClicked: root.dismiss()
             }
           }
 
@@ -702,7 +665,7 @@ Item {
           // Native ButtonGroup ("pick one of N"), same control the shell's own settings use.
           ButtonGroup {
             id: tabBar
-            readonly property var tabs: ["🎯 模式方案", "⚙️ 高级选项", "📊 使用洞察", "🧩 应用规则"]
+            readonly property var tabs: ["模式", "选项", "统计", "规则"]
             options: tabs.map(function(t, i) { return { value: String(i), label: t } })
             value: String(root.activeTab)
             focusable: false
@@ -721,39 +684,10 @@ Item {
               anchors.fill: parent
               anchors.margins: Style.space(12)
 
-              Rectangle {
-                id: engineDot
-                width: 8; height: 8; radius: Style.cornerRadius
-                color: root.engineRunning ? root.okColor : root.dangerColor
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              BorderSurface {
-                id: enginePill
-                anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                visible: root.engineRunning
-                width: enginePillText.implicitWidth + Style.space(14)
-                height: Style.space(22)
-                radius: Style.cornerRadius
-                color: "transparent"
-                borderSpec: Border.controlSpec("normal", root.okColor, root.okColor)
-
-                Text {
-                  id: enginePillText
-                  anchors.centerIn: parent
-                  text: "● 内存热生效"
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  font.bold: true
-                  color: root.okColor
-                }
-              }
-
               Text {
                 anchors {
-                  left: engineDot.right; leftMargin: Style.space(10)
-                  right: enginePill.left; rightMargin: Style.space(10)
+                  left: parent.left
+                  right: parent.right
                   verticalCenter: parent.verticalCenter
                 }
                 text: root.engineRunning
@@ -761,7 +695,7 @@ Item {
                   : "Engine 未检测到运行 · 执行 omni-profile daemon 启动常驻"
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
-                color: Util.alpha(root.foreground, 0.8)
+                color: root.engineRunning ? Qt.darker(root.foreground, 1.4) : root.dangerColor
                 elide: Text.ElideRight
               }
             }
@@ -784,7 +718,6 @@ Item {
             id: profilesTab
             anchors.fill: parent
             opacity: root.activeTab === 0 ? 1.0 : 0.0
-            scale: 1.0
             visible: root.activeTab === 0 || opacity > 0.0
             Behavior on opacity { NumberAnimation { duration: Style.duration(200); easing.type: Easing.OutQuad } }
 
@@ -807,36 +740,27 @@ Item {
                   color: Util.alpha(root.foreground, 0.7)
                 }
 
-                GridLayout {
+                // Single-column selectable rows (plugins/menu/Menu.qml style):
+                // no row border, selected = fg@0.08 fill + accent text, glyph in fg.
+                Column {
                   width: parent.width
-                  columns: 2
-                  rowSpacing: Style.space(10)
-                  columnSpacing: Style.space(10)
+                  spacing: Style.space(3)
 
                   Repeater {
                     model: root.modeItems
 
-                    // Mode card: Style state tokens (normal → hover-cursor → selected/focus),
-                    // accent = the mode's identity colour so the selected border carries it.
-                    delegate: BorderSurface {
+                    delegate: Rectangle {
                       id: modeCard
                       required property var modelData
                       required property int index
 
                       readonly property bool isActive: root.currentMode === modelData.id
-                      Layout.fillWidth: true
-                      Layout.preferredHeight: Style.space(148)
+                      readonly property bool hot: modeCardHover.containsMouse
+                      readonly property color rowText: isActive ? root.accent : root.foreground
+                      width: parent.width
+                      height: Math.max(Style.space(50), modeCol.implicitHeight + Style.spacing.lg * 2)
                       radius: Style.cornerRadius
-                      color: isActive
-                        ? Style.selectedFillFor(root.foreground, modelData.color)
-                        : modeCardHover.containsMouse
-                          ? Style.hoverFillFor(root.foreground, modelData.color)
-                          : Style.normalFillFor(root.foreground, modelData.color)
-                      borderSpec: isActive
-                        ? Border.flat(modelData.color, Math.max(1, Style.space(2)))
-                        : Border.controlSpec(modeCardHover.containsMouse ? "hover-cursor" : "normal", root.foreground, modelData.color)
-                      z: modeCardHover.containsMouse ? 2 : 1
-                      Behavior on color { ColorAnimation { duration: Style.duration(120) } }
+                      color: (isActive || hot) ? Util.alpha(root.foreground, 0.08) : "transparent"
 
                       MouseArea {
                         id: modeCardHover
@@ -846,109 +770,58 @@ Item {
                         onClicked: root.switchMode(modeCard.modelData.id)
                       }
 
-                      // 图标徽章 + 序号键帽
-                      Rectangle {
+                      Text {
                         id: modeBadge
-                        x: Style.space(13); y: Style.space(13)
-                        width: Style.space(38); height: Style.space(38)
-                        radius: Style.cornerRadius
-                        color: Util.alpha(modeCard.modelData.color, 0.25)
-                        border.width: 1
-                        border.color: Util.alpha(modeCard.modelData.color, 0.35)
+                        anchors { left: parent.left; leftMargin: Style.spacing.rowPaddingX; verticalCenter: parent.verticalCenter }
+                        width: Style.space(28)
+                        text: Icons.mode(modeCard.modelData.id)
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.iconLarge
+                        color: modeCard.rowText
+                      }
+
+                      Column {
+                        id: modeCol
+                        anchors {
+                          left: modeBadge.right; leftMargin: Style.spacing.lg
+                          right: modeKeycap.left; rightMargin: Style.spacing.lg
+                          verticalCenter: parent.verticalCenter
+                        }
+                        spacing: Style.spacing.xxs
 
                         Text {
+                          id: modeNameText
+                          width: parent.width
+                          text: modeCard.modelData.name
+                          font.family: Style.font.menuFamily
+                          font.pixelSize: Style.font.body
+                          font.weight: Font.Medium
+                          color: modeCard.rowText
+                          elide: Text.ElideRight
+                        }
+
+                        Text {
+                          width: parent.width
+                          text: modeCard.modelData.count + " 组按键 · "
+                            + (modeCard.modelData.source === "user"
+                                ? (modeCard.modelData.override ? "用户自定义（覆盖内置）" : "用户自定义")
+                                : "内置")
+                            + (modeCard.modelData.desc ? " · " + modeCard.modelData.desc : "")
                           font.family: Style.font.family
-                          text: modeCard.modelData.icon
-                          font.pixelSize: Style.font.heading
-                          font.bold: true
-                          color: modeCard.modelData.color
-                          anchors.centerIn: parent
+                          font.pixelSize: Style.font.caption
+                          color: Qt.darker(root.foreground, 1.4)
+                          elide: Text.ElideRight
                         }
                       }
 
-                      Card {
+                      // Number hint (1..N) or plain "active" in accent; no pill.
+                      Text {
                         id: modeKeycap
-                        anchors { right: parent.right; rightMargin: Style.space(11); top: parent.top; topMargin: Style.space(11) }
-                        width: Style.space(20); height: Style.space(20)
-                        visible: !modeCard.isActive
-
-                        Text {
-                          anchors.centerIn: parent
-                          text: modeCard.index + 1
-                          font.family: Style.font.family
-                          font.pixelSize: Style.font.caption
-                          font.bold: true
-                          color: Util.alpha(root.foreground, 0.75)
-                        }
-                      }
-
-                      // “当前激活”高亮标签
-                      Rectangle {
-                        id: activePill
-                        visible: modeCard.isActive
-                        anchors { right: parent.right; rightMargin: Style.space(11); top: parent.top; topMargin: Style.space(11) }
-                        width: activePillText.implicitWidth + Style.space(12)
-                        height: activePillText.implicitHeight + Style.space(6)
-                        radius: Style.cornerRadius
-                        color: modeCard.modelData.color
-
-                        Text {
-                          id: activePillText
-                          anchors.centerIn: parent
-                          text: "当前激活"
-                          font.family: Style.font.family
-                          font.pixelSize: Style.font.caption
-                          font.bold: true
-                          color: root.theme.onAccent
-                        }
-                      }
-
-                      Text {
-                        id: modeNameText
-                        anchors {
-                          left: modeBadge.right; leftMargin: Style.space(10)
-                          right: parent.right; rightMargin: Style.space(11)
-                          top: parent.top; topMargin: Style.space(15)
-                        }
-                        text: modeCard.modelData.name
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.body
-                        font.bold: true
-                        color: root.foreground
-                        elide: Text.ElideRight
-                      }
-
-                      Text {
-                        anchors {
-                          left: modeNameText.left
-                          top: modeNameText.bottom; topMargin: Style.space(3)
-                          right: parent.right; rightMargin: Style.space(11)
-                        }
-                        width: modeNameText.width
-                        text: "⌨ " + modeCard.modelData.count + " 组生效按键 · "
-                          + (modeCard.modelData.source === "user"
-                              ? (modeCard.modelData.override ? "用户自定义（覆盖内置）" : "用户自定义")
-                              : "项目内置")
+                        anchors { right: parent.right; rightMargin: Style.spacing.rowPaddingX; verticalCenter: parent.verticalCenter }
+                        text: modeCard.isActive ? "active" : String(modeCard.index + 1)
                         font.family: Style.font.family
                         font.pixelSize: Style.font.caption
-                        color: Util.alpha(root.foreground, 0.65)
-                        elide: Text.ElideRight
-                      }
-
-                      Text {
-                        anchors {
-                          left: parent.left; leftMargin: Style.space(13)
-                          right: parent.right; rightMargin: Style.space(13)
-                          bottom: parent.bottom; bottomMargin: Style.space(12)
-                        }
-                        height: Style.space(30)
-                        text: modeCard.modelData.desc
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
-                        color: Util.alpha(root.foreground, 0.72)
-                        wrapMode: Text.Wrap
-                        maximumLineCount: 2
-                        elide: Text.ElideRight
+                        color: modeCard.isActive ? root.accent : Qt.darker(root.foreground, 1.4)
                       }
                     }
                   }
@@ -962,7 +835,6 @@ Item {
             id: prefsTab
             anchors.fill: parent
             opacity: root.activeTab === 1 ? 1.0 : 0.0
-            scale: 1.0
             visible: root.activeTab === 1 || opacity > 0.0
             Behavior on opacity { NumberAnimation { duration: Style.duration(200); easing.type: Easing.OutQuad } }
 
@@ -1006,7 +878,7 @@ Item {
                         Text {
                           font.family: Style.font.family
                           anchors.verticalCenter: parent.verticalCenter
-                          text: "💾"
+                          text: Icons.glyph.save
                           font.pixelSize: Style.font.body
                         }
                         Text {
@@ -1014,7 +886,6 @@ Item {
                           text: "配置持久化（关机/重启记忆）"
                           font.family: Style.font.family
                           font.pixelSize: Style.font.body
-                          font.bold: true
                           color: root.foreground
                         }
                       }
@@ -1049,10 +920,10 @@ Item {
                         id: persistStatusText
                         anchors { fill: parent; leftMargin: Style.space(10); rightMargin: Style.space(10); topMargin: Style.space(6); bottomMargin: Style.space(6) }
                         text: root.persistBusy
-                          ? "⏳ 正在同步持久化状态…"
+                          ? "正在同步持久化状态…"
                           : (root.persistEnabled
-                              ? ("✅ 已启用 · 自动记忆关机前配置：" + root.modeNameOf(root.persistProfile) + "（" + root.persistProfile + "）" + (root.persistPolicy ? " · " + (root.persistPolicy === "floating" ? "浮动" : "平铺") : "") + (root.persistUpdatedAt ? " · 更新于 " + root.fmtTs(root.persistUpdatedAt) : ""))
-                              : "⏸ 已禁用 · 关机/重启恢复默认，磁盘零残留")
+                              ? ("已启用 · 自动记忆关机前配置：" + root.modeNameOf(root.persistProfile) + "（" + root.persistProfile + "）" + (root.persistPolicy ? " · " + (root.persistPolicy === "floating" ? "浮动" : "平铺") : "") + (root.persistUpdatedAt ? " · 更新于 " + root.fmtTs(root.persistUpdatedAt) : ""))
+                              : "已禁用 · 关机/重启恢复默认，磁盘零残留")
                         font.family: Style.font.family
                         font.pixelSize: Style.font.caption
                         color: root.persistEnabled ? root.okColor : Util.alpha(root.foreground, 0.65)
@@ -1083,7 +954,7 @@ Item {
                       Text {
                         font.family: Style.font.family
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "🧲"
+                        text: Icons.glyph.magnet
                         font.pixelSize: Style.font.body
                       }
                       Text {
@@ -1091,7 +962,6 @@ Item {
                         text: "窗口吸附快捷操作"
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
-                        font.bold: true
                         color: root.foreground
                       }
                     }
@@ -1107,7 +977,7 @@ Item {
 
                     Button {
                       width: parent.width
-                      iconText: "▦"
+                      iconText: Icons.glyph.snap
                       text: "呼出 Snap 布局菜单"
                       bordered: true
                       active: true
@@ -1145,9 +1015,8 @@ Item {
                       Text {
                         font.family: Style.font.family
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "↺"
+                        text: Icons.glyph.restore
                         font.pixelSize: Style.font.body
-                        font.bold: true
                         color: root.dangerColor
                       }
                       Text {
@@ -1155,7 +1024,6 @@ Item {
                         text: "恢复 Omarchy 原生"
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
-                        font.bold: true
                         color: root.foreground
                       }
                       Text {
@@ -1163,7 +1031,6 @@ Item {
                         text: "R"
                         font.family: Style.font.family
                         font.pixelSize: Style.font.caption
-                        font.bold: true
                         color: Util.alpha(root.foreground, 0.55)
                         padding: 3
                         Card {
@@ -1198,7 +1065,7 @@ Item {
                 // --- 快捷键速查表入口 ---
                 Button {
                   width: parent.width
-                  iconText: "📖"
+                  iconText: Icons.glyph.cheat
                   text: "快捷键速查表 (S)"
                   bordered: true
                   foreground: root.foreground
@@ -1215,7 +1082,6 @@ Item {
             id: analyticsTab
             anchors.fill: parent
             opacity: root.activeTab === 2 ? 1.0 : 0.0
-            scale: 1.0
             visible: root.activeTab === 2 || opacity > 0.0
             Behavior on opacity { NumberAnimation { duration: Style.duration(200); easing.type: Easing.OutQuad } }
 
@@ -1250,7 +1116,7 @@ Item {
                       Text {
                         font.family: Style.font.family
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "📈"
+                        text: Icons.glyph.stats
                         font.pixelSize: Style.font.body
                       }
                       Text {
@@ -1258,7 +1124,6 @@ Item {
                         text: "概览摘要"
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
-                        font.bold: true
                         color: root.foreground
                       }
                     }
@@ -1286,7 +1151,7 @@ Item {
                             value: root.statsLoaded
                               ? (root.statsLastReset ? root.fmtTs(root.statsLastReset) : "从未")
                               : "…",
-                            tint: root.persistEnabled ? root.theme.warn : Util.alpha(root.foreground, 0.6)
+                            tint: root.persistEnabled ? root.accent : Util.alpha(root.foreground, 0.6)
                           }
                         ]
                         delegate: Card {
@@ -1304,7 +1169,6 @@ Item {
                               text: statCard.modelData.value
                               font.family: Style.font.family
                               font.pixelSize: statCard.modelData.label === "累计总操作数" ? Style.font.heading : Style.font.bodySmall
-                              font.bold: true
                               color: statCard.modelData.tint
                             }
                             Text {
@@ -1345,7 +1209,7 @@ Item {
                         Text {
                           font.family: Style.font.family
                           anchors.verticalCenter: parent.verticalCenter
-                          text: "🔁"
+                          text: Icons.glyph.cycle
                           font.pixelSize: Style.font.bodySmall
                         }
                         Text {
@@ -1353,7 +1217,6 @@ Item {
                           text: "模式切换排行"
                           font.family: Style.font.family
                           font.pixelSize: Style.font.bodySmall
-                          font.bold: true
                           color: root.foreground
                         }
                       }
@@ -1424,7 +1287,7 @@ Item {
                         Text {
                           font.family: Style.font.family
                           anchors.verticalCenter: parent.verticalCenter
-                          text: "🧭"
+                          text: Icons.glyph.compass
                           font.pixelSize: Style.font.bodySmall
                         }
                         Text {
@@ -1432,7 +1295,6 @@ Item {
                           text: "常用吸附区域 Top 榜"
                           font.family: Style.font.family
                           font.pixelSize: Style.font.bodySmall
-                          font.bold: true
                           color: root.foreground
                         }
                       }
@@ -1481,7 +1343,7 @@ Item {
                 // --- 重置统计数据操作 ---
                 Button {
                   width: parent.width
-                  text: root.statsBusy ? "⏳ 正在重置统计…" : "🧹 重置统计数据"
+                  text: root.statsBusy ? "正在重置统计…" : "重置统计数据"
                   bordered: true
                   enabled: !root.statsBusy
                   foreground: root.dangerColor
@@ -1539,7 +1401,6 @@ Item {
                         text: "按应用自动切换"
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
-                        font.bold: true
                         color: root.foreground
                       }
                       ToggleSwitch {
@@ -1568,7 +1429,7 @@ Item {
                         color: Util.alpha(root.foreground, 0.7)
                       }
                       Repeater {
-                        model: [{ id: "none", label: "手动选择的模式" }].concat(root.modeItems.map(function(m) { return { id: m.id, label: (m.icon ? m.icon + " " : "") + m.id } }))
+                        model: [{ id: "none", label: "手动选择的模式" }].concat(root.modeItems.map(function(m) { return { id: m.id, icon: Icons.mode(m.id), label: m.id } }))
                         delegate: Chip {
                           id: defChip
                           required property var modelData
@@ -1622,8 +1483,7 @@ Item {
                         text: "→ " + ruleRow.modelData.mode
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
-                        font.bold: true
-                        color: Tokens.modeColor(ruleRow.modelData.mode, ruleRow.index)
+                        color: root.accent
                       }
                     }
 
@@ -1704,16 +1564,16 @@ Item {
                           id: modeChip
                           required property var modelData
                           required property int index
-                          text: (modelData.icon ? modelData.icon + " " : "") + modelData.id
+                          iconText: Icons.mode(modelData.id)
+                          text: modelData.id
                           selected: root.newRuleMode === modelData.id
-                          accent: modelData.color || Tokens.modeColor(modelData.id, index)
                           onClicked: root.newRuleMode = modeChip.modelData.id
                         }
                       }
                       Chip {
                         readonly property bool ready: root.newRuleClass.trim() !== "" && root.newRuleMode !== ""
                         text: "添加"
-                        iconText: "＋"
+                        iconText: Icons.glyph.plus
                         active: ready
                         enabled: ready
                         opacity: ready ? 1.0 : 0.5
@@ -1729,7 +1589,7 @@ Item {
                 // --- 当前匹配 ---
                 Text {
                   width: parent.width
-                  text: root.rulesError !== "" ? ("⚠ " + root.rulesError)
+                  text: root.rulesError !== "" ? root.rulesError
                     : (root.appRuleMatch && root.appRuleMatch.window_class
                       ? ("当前应用 " + root.appRuleMatch.window_class + "：" + (root.appRuleMatch.rule
                           ? ("命中规则，切到 " + root.appRuleMatch.rule.mode) : "没有命中规则"))
