@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#101315"/><stop offset="1" stop-color="#1b2027"/></linearGradient></defs>
+  <rect width="1280" height="400" fill="url(#g)"/>
+  <g transform="translate(110,120) scale(1.25)">
+    <rect x="0" y="0" width="128" height="128" rx="28" fill="#0d0f11"/>
+    <rect x="20" y="20" width="40" height="40" rx="9" fill="#0078d4"/>
+    <rect x="68" y="20" width="40" height="40" rx="9" fill="#a2aaad"/>
+    <rect x="20" y="68" width="88" height="40" rx="9" fill="#a3be8c"/>
+  </g>
+  <text x="330" y="190" font-family="Inter,Helvetica,Arial,sans-serif" font-size="84" font-weight="700" fill="#eceff4">OmniPal</text>
+  <text x="334" y="245" font-family="Noto Sans CJK SC,sans-serif" font-size="30" fill="#d8dee9">从 Windows 或 Mac 搬到 Omarchy，第一天就顺手</text>
+  <g font-family="Inter,Helvetica,Arial,sans-serif" font-size="20" font-weight="600">
+    <rect x="334" y="280" width="120" height="36" rx="18" fill="#0078d4" fill-opacity=".2" stroke="#0078d4"/><text x="394" y="304" text-anchor="middle" fill="#7fb8ea">Windows</text>
+    <rect x="466" y="280" width="100" height="36" rx="18" fill="#a2aaad" fill-opacity=".2" stroke="#a2aaad"/><text x="516" y="304" text-anchor="middle" fill="#d0d4d6">macOS</text>
+    <rect x="578" y="280" width="120" height="36" rx="18" fill="#a3be8c" fill-opacity=".2" stroke="#a3be8c"/><text x="638" y="304" text-anchor="middle" fill="#c6dbb5">Omarchy</text>
+  </g>
+</svg>

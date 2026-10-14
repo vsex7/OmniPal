@@ -256,7 +256,7 @@ def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = No
     # Validate Quickshell plugins
     plugins_dir = project_root / "plugins"
     if plugins_dir.exists():
-        plugin_dirs = [p for p in plugins_dir.iterdir() if p.is_dir()]
+        plugin_dirs = [p for p in plugins_dir.iterdir() if p.is_dir() and p.name != "shared"]
         print(f"\n🧩 Validating {len(plugin_dirs)} Quickshell plugins in {plugins_dir.name}...")
         for p_dir in sorted(plugin_dirs):
             manifest_file = p_dir / "manifest.json"
