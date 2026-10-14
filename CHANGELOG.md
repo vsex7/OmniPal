@@ -9,6 +9,8 @@
 ### ✨ 新功能
 - **mac 模式快捷键转发**：Super+W、T、Shift+T、F、Z、Shift+Z、A、S、L、R 和 1–9 会转成对应的 Ctrl 组合发给当前应用，比如 Cmd+W 在浏览器里只关标签页，Cmd+1 切到第一个标签。终端里改发 Ctrl+Shift，Ctrl+W 删单词、Ctrl+C 中断不受影响。
 - **mac 模式应用切换**：Super+Tab 和 Super+Shift+Tab 在当前工作区的窗口之间切换，不切走工作区。
+- 转发完全在 Hyprland 的 Lua 里完成，不启动外部进程，连按不发黏。
+- 可在 `~/.config/omnipal/terminals.json` 自定义终端名单，末尾 `*` 表示前缀匹配。
 - 新命令 `omni-profile send <MOD> <KEY> [--class <类名>]`，手动把快捷键发给当前窗口。
 
 ### 🔧 变更
@@ -16,8 +18,7 @@
 - mac 模式不再用 Super+数字切换工作区，改用 Super+Ctrl+←/→。
 
 ### 🚧 发版前待办
-- 把转发从外部 Python 进程改成纯 Lua 调用，避免连按时发黏（需真机确认 Hyprland Lua 接口支持 sendshortcut）。
-- 终端名单改为复用应用规则的匹配逻辑，允许用户自己添加。
+- 真机确认 `hl.dispatch(hl.dsp.send_shortcut{...})` 的调用写法。
 - 在真机 Hyprland 上验证 v1.8.0 / v1.9.0 的界面和转发。
 
 ---
