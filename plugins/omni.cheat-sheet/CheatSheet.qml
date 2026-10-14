@@ -50,6 +50,7 @@ Item {
   readonly property var previewModes: [
     { id: "windows", label: "🪟 Windows 11" },
     { id: "mac", label: "🍎 macOS" },
+    { id: "kde", label: "❖ KDE Plasma" },
     { id: "omarchy", label: "⊡ Omarchy 原生" }
   ]
 

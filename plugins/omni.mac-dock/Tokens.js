@@ -4,7 +4,7 @@
 var base = { bg: "#16161a", surface: "#1e1e23", line: "#3a3a40",
              text: "#e6e1d6", muted: "#8a867d", accent: "#e2a03f" };
 // 模式识别色：降饱和，和琥珀同一色温
-var mode = { windows: "#6f93b8", mac: "#b5ada0", omarchy: "#8fa77a",
+var mode = { windows: "#6f93b8", mac: "#b5ada0", omarchy: "#8fa77a", kde: "#7f9fc4",
              custom: ["#a98bb0", "#c9a36a", "#7fa3a3", "#c08066", "#8a97b5"] };
 var semantic = { accent: base.accent, ok: "#8fa77a", warn: "#e2a03f", danger: "#c4624f", info: "#7fa3a3" };
 var radius = { none: 0, sm: 2, md: 4, lg: 6 };   // 键帽风格：直角为主

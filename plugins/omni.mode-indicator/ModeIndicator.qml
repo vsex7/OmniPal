@@ -21,16 +21,19 @@ Item {
     readonly property var modeIcons: ({
         "windows": "⊞",
         "mac":     "◆",
+        "kde":     "❖",
         "omarchy": "⊡"
     })
     readonly property var modeColors: ({
         "windows": Tokens.mode.windows,
         "mac":     Tokens.mode.mac,
+        "kde":     Tokens.mode.kde,
         "omarchy": Tokens.mode.omarchy
     })
     readonly property var modeNames: ({
         "windows": "Windows 11 习惯模式",
         "mac":     "macOS 习惯模式",
+        "kde":     "KDE Plasma 习惯模式",
         "omarchy": "Omarchy 原生模式"
     })
 

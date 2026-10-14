@@ -16,6 +16,7 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
 - **三大内置习惯模式 + 自定义配置支持**：
   - **Windows 11 习惯模式 (`windows`)**：Alt+F4 关闭窗口、Win+方向键智能吸附、Win+E 文件管理器、Win+Tab 任务视图、Win+V 剪贴板、Win+I 设置中心等。
   - **macOS 习惯模式 (`mac`)**：Super+Q 退出程序、Super+空格启动器、Super+Shift+3/4 截图、Super+Up 调度中心、Super+Opt+D 呼出 Dock、Super+, 偏好设置等。
+  - **KDE Plasma 习惯模式 (`kde`)**：Meta+方向键贴边、Meta+PgUp/PgDn 最大化与还原、Alt+Space 搜索启动、Ctrl+Alt+L 锁屏、Meta+W 概览、Meta+Ctrl+左右切换工作区等。
   - **Omarchy 原生模式 (`omarchy`)**：零拦截、零覆盖，纯粹的 Hyprland 原生平铺体验。
   - **用户自定义与覆盖模式**：支持 `~/.config/omnipal/profiles/*.json`，可任意添加专属模式（如 KDE Plasma、Vim 风格）或按 `id` 覆盖内置预设，支持自动无缝轮转。
 - **丰富窗口吸附布局（Rich Snap Layouts）**：
@@ -74,7 +75,7 @@ omni-profile switch windows
 # 切换至 macOS 习惯模式
 omni-profile switch mac
 
-# 轮转切换模式 (Omarchy -> Windows -> macOS -> 用户自定义 -> Omarchy)
+# 轮转切换模式 (Omarchy -> Windows -> macOS -> KDE -> 用户自定义 -> Omarchy)
 omni-profile cycle
 
 # 查看当前模式的快捷键速查表（终端高亮输出）
@@ -151,7 +152,8 @@ OmniPal/
 ├── profiles/
 │   ├── omarchy.json          # 原生模式（0 覆盖）
 │   ├── windows.json          # Windows 11 习惯模式（14 覆盖）
-│   └── mac.json              # macOS 习惯模式（19 覆盖）
+│   ├── mac.json              # macOS 习惯模式（19 覆盖）
+│   └── kde.json              # KDE Plasma 习惯模式（19 覆盖）
 ├── engine/
 │   └── engine.py             # 核心运行时引擎（Lua 批量求值、信号捕获与 tmpfs 广播）
 ├── bin/

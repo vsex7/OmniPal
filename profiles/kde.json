@@ -1,0 +1,32 @@
+{
+  "id": "kde",
+  "name": "KDE Plasma 习惯模式",
+  "description": "还原 KDE Plasma 6 默认快捷键（Meta+方向键贴边、Alt+Space 搜索、Ctrl+Alt+L 锁屏、Meta+W 概览等）",
+  "version": "1.0.0",
+  "display": {
+    "icon": "❖",
+    "brief": "KDE",
+    "color": "#7f9fc4"
+  },
+  "bindings": [
+    { "action": "close_window", "mod": "ALT", "key": "F4" },
+    { "action": "snap_left", "mod": "SUPER", "key": "Left" },
+    { "action": "snap_right", "mod": "SUPER", "key": "Right" },
+    { "action": "snap_top", "mod": "SUPER", "key": "Up" },
+    { "action": "snap_bottom", "mod": "SUPER", "key": "Down" },
+    { "action": "maximize_window", "mod": "SUPER", "key": "Prior" },
+    { "action": "restore_window", "mod": "SUPER", "key": "Next" },
+    { "action": "app_launcher", "mod": "ALT", "key": "space" },
+    { "action": "file_manager", "mod": "SUPER", "key": "E" },
+    { "action": "lock_screen", "mod": "CTRL ALT", "key": "L" },
+    { "action": "clipboard_history", "mod": "SUPER", "key": "V" },
+    { "action": "screenshot_region", "mod": "SUPER SHIFT", "key": "Print" },
+    { "action": "screenshot_fullscreen", "mod": "", "key": "Print" },
+    { "action": "emoji_picker", "mod": "SUPER", "key": "period" },
+    { "action": "task_view", "mod": "SUPER", "key": "W" },
+    { "action": "workspace_next", "mod": "SUPER CTRL", "key": "Right" },
+    { "action": "workspace_prev", "mod": "SUPER CTRL", "key": "Left" },
+    { "action": "cheat_sheet", "mod": "SUPER", "key": "slash" },
+    { "action": "omni_settings", "mod": "SUPER", "key": "I" }
+  ]
+}

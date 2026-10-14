@@ -208,18 +208,18 @@ class TestOmniPal(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp_dir:
             user_dir = Path(tmp_dir)
-            # 1. Create a brand new custom profile 'kde'
-            kde_file = user_dir / "kde.json"
-            kde_data = {
-                "id": "kde",
+            # 1. Create a brand new custom profile 'gnome'
+            gnome_file = user_dir / "gnome.json"
+            gnome_data = {
+                "id": "gnome",
                 "name": "KDE Plasma 模式",
                 "description": "User custom KDE bindings",
                 "bindings": [
                     {"action": "file_manager", "mod": "CTRL ALT", "key": "e"}
                 ]
             }
-            with open(kde_file, "w", encoding="utf-8") as f:
-                json.dump(kde_data, f)
+            with open(gnome_file, "w", encoding="utf-8") as f:
+                json.dump(gnome_data, f)
 
             # 2. Create an override profile for 'windows'
             win_override_file = user_dir / "windows.json"
@@ -237,20 +237,21 @@ class TestOmniPal(unittest.TestCase):
             user_engine = OmniPalEngine(PROJECT_ROOT, user_profiles_dir=user_dir)
             profiles_meta = {p["id"]: p for p in user_engine.list_profiles()}
 
-            self.assertIn("kde", user_engine.profiles)
-            self.assertEqual(profiles_meta["kde"]["source"], "user")
-            self.assertFalse(profiles_meta["kde"]["override"])
+            self.assertIn("gnome", user_engine.profiles)
+            self.assertEqual(profiles_meta["gnome"]["source"], "user")
+            self.assertFalse(profiles_meta["gnome"]["override"])
 
             self.assertIn("windows", user_engine.profiles)
             self.assertEqual(profiles_meta["windows"]["source"], "user")
             self.assertTrue(profiles_meta["windows"]["override"])
             self.assertEqual(user_engine.profiles["windows"]["name"], "Windows (Custom Overridden)")
 
-            # Test dynamic cycling order: omarchy -> windows -> mac -> kde -> omarchy
+            # Test dynamic cycling order: omarchy -> windows -> mac -> kde -> gnome -> omarchy
             user_engine.switch_mode("omarchy")
             self.assertEqual(user_engine.cycle_mode(), "windows")
             self.assertEqual(user_engine.cycle_mode(), "mac")
             self.assertEqual(user_engine.cycle_mode(), "kde")
+            self.assertEqual(user_engine.cycle_mode(), "gnome")
             self.assertEqual(user_engine.cycle_mode(), "omarchy")
 
             # Test consistency checker passes on valid user profiles
@@ -280,14 +281,17 @@ class TestOmniPal(unittest.TestCase):
 
         self.assertIn("omarchy", profiles)
         self.assertEqual(profiles["omarchy"]["display"].get("icon"), "⊡")
+        self.assertIn("kde", profiles)
+        self.assertEqual(profiles["kde"]["display"].get("brief"), "KDE")
 
         # Test state includes display
         self.engine.switch_mode("windows")
         state = self.engine.get_state()
         self.assertEqual(state.get("display", {}).get("icon"), "⊞")
 
-        # Test reverse cycle: windows -> omarchy -> mac -> windows
+        # Test reverse cycle: windows -> omarchy -> kde -> mac -> windows
         self.assertEqual(self.engine.cycle_mode(reverse=True), "omarchy")
+        self.assertEqual(self.engine.cycle_mode(reverse=True), "kde")
         self.assertEqual(self.engine.cycle_mode(reverse=True), "mac")
         self.assertEqual(self.engine.cycle_mode(reverse=True), "windows")
 

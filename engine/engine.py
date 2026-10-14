@@ -689,8 +689,8 @@ class OmniPalEngine:
         return success
 
     def cycle_mode(self, reverse: bool = False) -> str:
-        """Cycles to the next mode in sequence: omarchy -> windows -> mac -> user profiles -> omarchy."""
-        curated = ["omarchy", "windows", "mac"]
+        """Cycles to the next mode in sequence: omarchy -> windows -> mac -> kde -> user profiles -> omarchy."""
+        curated = ["omarchy", "windows", "mac", "kde"]
         user_modes = sorted([m for m in self.profiles if m not in curated])
         modes = [m for m in curated if m in self.profiles] + user_modes
         if not modes:

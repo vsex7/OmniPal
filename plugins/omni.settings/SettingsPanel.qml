@@ -67,7 +67,7 @@ Item {
       icon: "⊞",
       name: "Windows 11 习惯模式",
       desc: "Alt+F4 关闭窗口 · Win+方向键智能吸附 · Win+E 文件管理器 · Ctrl+Shift+Esc 任务管理器",
-      count: 13,
+      count: 14,
       color: Tokens.mode.windows,
       source: "project",
       override: false
@@ -77,8 +77,18 @@ Item {
       icon: "◆",
       name: "macOS 习惯模式",
       desc: "Super+Q 退出程序 · Super+Space 聚焦搜索 · Super+Shift+3/4 截图 · Super+H 最小化",
-      count: 12,
+      count: 19,
       color: Tokens.mode.mac,
+      source: "project",
+      override: false
+    },
+    {
+      id: "kde",
+      icon: "❖",
+      name: "KDE Plasma 习惯模式",
+      desc: "Meta+方向键贴边 · Alt+Space 搜索 · Ctrl+Alt+L 锁屏 · Meta+W 概览",
+      count: 19,
+      color: Tokens.mode.kde,
       source: "project",
       override: false
     },
@@ -325,8 +335,8 @@ Item {
         try {
           var parsed = JSON.parse(data)
           if (Array.isArray(parsed) && parsed.length > 0) {
-            var iconMap = { "windows": "⊞", "mac": "◆", "omarchy": "⊡" }
-            var colorMap = { "windows": Tokens.mode.windows, "mac": Tokens.mode.mac, "omarchy": Tokens.mode.omarchy }
+            var iconMap = { "windows": "⊞", "mac": "◆", "kde": "❖", "omarchy": "⊡" }
+            var colorMap = { "windows": Tokens.mode.windows, "mac": Tokens.mode.mac, "kde": Tokens.mode.kde, "omarchy": Tokens.mode.omarchy }
             var customColors = Tokens.mode.custom
             var items = []
             for (var i = 0; i < parsed.length; i++) {
