@@ -1355,6 +1355,7 @@ end
                 )
                 # Do not unfloat special windows (PiP, scratchpad, micro-windows) or dialogs
                 if skip or is_dlg:
+                    print(f"unfloat skip {c.get('address')} {cls_name!r} special={skip} dialog={is_dlg}", file=sys.stderr)
                     continue
 
                 addr = c.get("address")
@@ -1371,20 +1372,21 @@ end
                     f'if type(hl) == "table" and type(hl.dispatch) == "function" and type(hl.dsp) == "table" and type(hl.dsp.window) == "table" then '
                     f'hl.dispatch(hl.dsp.window.float({{ action = "off", window = "address:{esc_addr}" }})) end'
                 )
-            ok = self._eval_lua("; ".join(lua_ops))
+            print(f"unfloat {to_unfloat}", file=sys.stderr)
+            ok = self._eval_lua_strict("; ".join(lua_ops))
             if not ok:
                 for addr in to_unfloat:
                     try:
                         _ensure_hyprland_instance()
                         subprocess.run(
-                            ["hyprctl", "dispatch", "togglefloating", f"address:{addr}"],
+                            ["hyprctl", "dispatch", "settiled", f"address:{addr}"],
                             capture_output=True,
                             timeout=0.5
                         )
                     except Exception:
                         pass
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"unfloat failed: {e}", file=sys.stderr)
 
     def _apply_window_policy(self, force: bool = False) -> bool:
         """Applies the current effective window policy (tiled vs floating) to Hyprland."""

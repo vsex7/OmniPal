@@ -1263,7 +1263,7 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
 
         e.get_windows = lambda: fake_clients
         captured_lua = []
-        e._eval_lua = lambda code: captured_lua.append(code) or True
+        e._eval_lua_strict = lambda code: captured_lua.append(code) or True
 
         e._unfloat_existing_windows()
 
