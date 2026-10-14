@@ -58,7 +58,7 @@ Item {
         text: "workspace " + blackHoleRoot.targetWorkspaceId
         color: blackHoleRoot.theme.textMuted
         font.family: Style.font.family
-        font.pixelSize: Style.font.caption
+        font.pixelSize: Style.font.body
       }
     }
   }

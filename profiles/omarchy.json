@@ -1,12 +1,13 @@
 {
   "id": "omarchy",
   "name": "Omarchy 原生模式",
-  "description": "系统默认原生快捷键，无任何覆盖修改，适合学习与原生对比",
+  "description": "Omarchy 原生快捷键，不做任何覆盖，适合学习与对照",
   "version": "1.0.0",
   "display": {
     "icon": "⊡",
     "brief": "OMA",
     "color": "#a3be8c"
   },
-  "bindings": []
+  "bindings": [],
+  "window_mode": "tiled"
 }

@@ -23,6 +23,10 @@ def cmd_status(engine: OmniPalEngine, args):
         print("OmniPal 状态信息:")
         print(f"  当前模式: {state.get('name', state.get('mode'))} ({state.get('mode')})")
         print(f"  生效快捷键数: {state.get('active_bindings_count', 0)}")
+        auto = state.get("auto")
+        if auto:
+            ret = engine.mode_display_name(auto.get("return_to"))
+            print(f"  自动切换: 因为聚焦了 {auto.get('app')}，离开后回到 {ret}")
         print(f"  窗口策略: {state.get('window_policy', 'tiled')} (生效: {state.get('effective_window_mode', 'tiled')})")
         print(f"  Compositor: {'已连通' if state.get('compositor_connected') else '未连通'}")
         print(f"  引擎状态: {state.get('status', 'idle')}")
@@ -36,7 +40,7 @@ def cmd_window_policy(engine: OmniPalEngine, args):
     if action == "set" or target_policy or (action and action not in ["status"] and not getattr(args, "json", False)):
         policy = (target_policy or action).lower().strip()
         if not engine.set_window_policy(policy):
-            print(f"❌ 无效的窗口策略: {policy}。可用策略: tiled, floating, follow-profile (或别名: tile, float, follow)", file=sys.stderr)
+            print(f"❌ 无效的窗口策略: {policy}。可用策略: tiled（平铺）, floating（浮动）, follow-profile（跟随模式）；别名: tile, float, follow", file=sys.stderr)
             sys.exit(1)
         state = engine.get_state()
         if getattr(args, "json", False):
@@ -57,15 +61,18 @@ def cmd_window_policy(engine: OmniPalEngine, args):
         }, indent=2, ensure_ascii=False))
         return
 
-    print("📐 OmniPal 窗口布局策略 (Window Policy):")
+    print("📐 OmniPal 窗口策略:")
     print(f"  • 当前策略: {state.get('window_policy', 'tiled')}")
     print(f"  • 实际生效: {state.get('effective_window_mode', 'tiled')}")
 
 def cmd_switch(engine: OmniPalEngine, args):
     mode = args.mode.lower().strip()
     try:
+        # Manual switch: cancels any app-rule auto-return; this mode becomes the new base.
+        prev_auto = engine.cancel_auto()
         success = engine.switch_mode(mode)
         if success:
+            engine.notify_manual_override(prev_auto, mode)
             state = engine.get_state()
             print(f"✅ 已切换至: {state.get('name')} ({mode})")
         else:
@@ -78,7 +85,9 @@ def cmd_switch(engine: OmniPalEngine, args):
 def cmd_cycle(engine: OmniPalEngine, args):
     try:
         reverse = getattr(args, "reverse", False)
+        prev_auto = engine.cancel_auto()
         next_mode = engine.cycle_mode(reverse=reverse)
+        engine.notify_manual_override(prev_auto, next_mode)
         state = engine.get_state()
         print(f"🔄 已轮转至: {state.get('name')} ({next_mode})")
     except Exception as e:
@@ -87,8 +96,10 @@ def cmd_cycle(engine: OmniPalEngine, args):
 
 def cmd_restore(engine: OmniPalEngine, args):
     try:
+        prev_auto = engine.cancel_auto()
         success = engine.restore()
         if success:
+            engine.notify_manual_override(prev_auto, "omarchy")
             print("✅ 已恢复系统原始快捷键绑定（零残留）")
         else:
             print("❌ 恢复原始绑定时发生错误", file=sys.stderr)
@@ -143,7 +154,7 @@ def cmd_snap_layouts(engine: OmniPalEngine, args):
     if args.json:
         print(json.dumps(data, indent=2, ensure_ascii=False))
         return
-    print("📐 OmniPal 规范窗口吸附布局与区域:")
+    print("📐 OmniPal 规范窗口贴靠布局与区域:")
     for tpl in engine.get_snap_layouts():
         print(f"  • [{tpl['key']}] {tpl['title']} ({tpl['hint']}): {len(tpl['slots'])} 个分区")
 
@@ -153,7 +164,7 @@ def cmd_benchmark(engine: OmniPalEngine, args):
         print(json.dumps(res, indent=2))
         return
     print("⚡ OmniPal 性能基准测试与耗时统计:")
-    print(f"  • Schema & Profile 解析: {res.get('parse_ms')} ms")
+    print(f"  • Schema 与模式文件解析: {res.get('parse_ms')} ms")
     print(f"  • 批量绑定覆盖 (Windows): {res.get('switch_windows_ms')} ms")
     print(f"  • 批量绑定覆盖 (macOS):   {res.get('switch_mac_ms')} ms")
     print(f"  • 撤销清理耗时 (Restore): {res.get('restore_ms')} ms")
@@ -195,7 +206,7 @@ def cmd_doctor(engine: OmniPalEngine, args):
     conflicts = diag.get("conflicts", [])
     print(f"  • 与原生快捷键冲突: {'✅ 无' if not conflicts else '⚠️ ' + str(len(conflicts)) + ' 项 (' + ', '.join(conflicts) + ')'}")
 
-    print(f"  • Schema 与 Profile 一致性: {'✅ 100% 校验通过' if diag.get('consistency') else '❌ 校验失败'}")
+    print(f"  • Schema 与模式文件一致性: {'✅ 100% 校验通过' if diag.get('consistency') else '❌ 校验失败'}")
 
     inst = diag.get("install", {})
     if inst:
@@ -215,6 +226,17 @@ def cmd_doctor(engine: OmniPalEngine, args):
             print(f"  • Omarchy 版本: ❌ {om.get('detected')} 过旧 (要求 >= {om.get('minimum')})")
         else:
             print(f"  • Omarchy 版本: ⚠️ 未知（无法检测，要求 >= {om.get('minimum')}）")
+
+    wp = diag.get("window_policy", {})
+    if wp.get("overridden"):
+        name = {"tiled": "平铺", "floating": "浮动"}.get(wp.get("policy"), wp.get("policy"))
+        print(f"  • 窗口策略: ⚠️ 已覆盖：全局{name}覆盖了各模式自带的平铺/浮动设置；"
+              f"恢复跟随模式请运行 omni-profile window-policy follow-profile")
+    else:
+        print("  • 窗口策略: ✅ 跟随模式")
+    fixed = diag.get("fixed_bindings", [])
+    if fixed:
+        print(f"  • 固定入口: {', '.join(fixed)}（所有模式通用）")
 
     issues = diag.get("issues", [])
     if issues:
@@ -276,7 +298,7 @@ def cmd_import(engine: OmniPalEngine, args):
         print(f"❌ 读取失败: {e}", file=sys.stderr)
         sys.exit(1)
     if not isinstance(p_data, dict) or not isinstance(p_data.get("bindings", []), list):
-        print("❌ 文件不是有效的 OmniPal profile", file=sys.stderr)
+        print("❌ 文件不是有效的 OmniPal 模式文件", file=sys.stderr)
         sys.exit(1)
     p_data = _clean_profile(p_data)
     if args.id:
@@ -308,7 +330,7 @@ def cmd_import(engine: OmniPalEngine, args):
         if b.get("action") not in LUA_DISPATCHERS and b.get("arg"):
             commands.append(f"  {b.get('mod', '')} {b.get('key', '')}  ->  {b['arg']}")
     if commands:
-        print("⚠️  这个 profile 会在按键时执行以下命令，请确认来源可信：")
+        print("⚠️  这个模式会在按键时执行以下命令，请确认来源可信：")
         print("\n".join(commands))
         if not args.yes:
             if not sys.stdin.isatty() or args.file == "-":
@@ -339,8 +361,8 @@ def cmd_persist(engine: OmniPalEngine, args):
             return
         if status["enabled"]:
             print("💾 OmniPal 配置持久化: ✅ 已启用（关机/重启自动记住上次配置）")
-            print(f"  • 持久化模式 (Profile): {status.get('profile') or '跟随当前'}")
-            print(f"  • 窗口策略 (Window Policy): {status.get('window_policy') or '跟随当前'}")
+            print(f"  • 持久化模式: {status.get('profile') or '跟随当前'}")
+            print(f"  • 窗口策略: {status.get('window_policy') or '跟随当前'}")
             print(f"  • 最近更新: {status.get('updated_at') or '未知'}")
         else:
             print("💾 OmniPal 配置持久化: ⏸ 已禁用（重启不恢复上次配置；本地统计仍独立记录）")
@@ -507,7 +529,7 @@ def cmd_stats(engine: OmniPalEngine, args):
     print(f"  • 最近更新: {stats.get('last_updated') or '无'}")
     print(f"  • 上次重置: {stats.get('last_reset') or '从未'}")
     _print_stat_rank("🔁 模式切换频次排行:", stats["switches"])
-    _print_stat_rank("🧲 吸附区域使用 Top 榜:", stats["snaps"])
+    _print_stat_rank("🧲 贴靠区域使用 Top 榜:", stats["snaps"])
     _print_stat_rank("⚡ 动作触发统计排行:", stats["actions"])
 
 def main():
@@ -569,14 +591,14 @@ def main():
     p_send.add_argument("--class", dest="window_class", default=None, help="指定窗口类名（默认读取当前焦点窗口）")
     p_send.set_defaults(func=cmd_send)
 
-    p_snap = subparsers.add_parser("snap", help="触发窗口吸附分屏或呼出吸附布局菜单")
-    p_snap.add_argument("zone", help="目标吸附区域 (如 left, right, top-left, center, third-center) 或 layouts (呼出选择器)")
+    p_snap = subparsers.add_parser("snap", help="触发窗口贴靠分屏或呼出贴靠布局菜单")
+    p_snap.add_argument("zone", help="目标贴靠区域 (如 left, right, top-left, center, third-center) 或 layouts (呼出选择器)")
     p_snap.add_argument("address", nargs="?", default=None, help="目标窗口十六进制地址 (如 0x56c7c335e060，默认探测鼠标悬停窗口或活动窗口)")
-    p_snap.add_argument("--no-hud", action="store_true", help="静默吸附，不弹出视觉 HUD 反馈")
+    p_snap.add_argument("--no-hud", action="store_true", help="静默贴靠，不弹出视觉 HUD 反馈")
     p_snap.set_defaults(func=cmd_snap)
 
     # snap-layouts
-    p_snap_layouts = subparsers.add_parser("snap-layouts", help="获取规范窗口吸附布局与区域配置")
+    p_snap_layouts = subparsers.add_parser("snap-layouts", help="获取规范窗口贴靠布局与区域配置")
     p_snap_layouts.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_snap_layouts.set_defaults(func=cmd_snap_layouts)
 
@@ -638,14 +660,14 @@ def main():
     r_test.add_argument("--delay", type=int, default=3, help="--current 的倒计时秒数")
     p_rules.set_defaults(func=cmd_rules)
 
-    p_stats = subparsers.add_parser("stats", help="查看本地使用统计（切换/吸附/动作排行，完全本地零上传；--reset 清空）")
+    p_stats = subparsers.add_parser("stats", help="查看本地使用统计（切换/贴靠/动作排行，完全本地零上传；--reset 清空）")
     p_stats.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_stats.add_argument("--reset", action="store_true", help="清空并重置全部本地统计")
     p_stats.set_defaults(func=cmd_stats)
 
     # window-policy / window-mode
     for cmd_name in ["window-policy", "window-mode"]:
-        p_wp = subparsers.add_parser(cmd_name, help="查看或设置窗口策略 (tiled / floating / follow-profile)")
+        p_wp = subparsers.add_parser(cmd_name, help="查看或设置窗口策略：tiled 平铺 / floating 浮动 / follow-profile 跟随模式")
         p_wp.add_argument("--json", action="store_true", help="以 JSON 格式输出状态")
         p_wp.set_defaults(func=cmd_window_policy, policy_action="status")
         wp_sub = p_wp.add_subparsers(dest="policy_action", help="策略操作")
@@ -655,7 +677,7 @@ def main():
         wp_status.set_defaults(func=cmd_window_policy)
 
         wp_set = wp_sub.add_parser("set", help="设置窗口策略")
-        wp_set.add_argument("policy", help="目标策略 (tiled, floating, follow-profile 或别名)")
+        wp_set.add_argument("policy", help="目标策略：tiled 平铺 / floating 浮动 / follow-profile 跟随模式（或别名 tile / float / follow）")
         wp_set.add_argument("--json", action="store_true", help="以 JSON 格式输出结果")
         wp_set.set_defaults(func=cmd_window_policy)
 

@@ -28,6 +28,18 @@ omni-profile cheatsheet       # 当前模式的快捷键
 omni-profile doctor           # 出问题时先跑这个
 ```
 
+## 固定入口（所有模式通用）
+
+无论当前是哪个模式（包括 Omarchy 原生模式），下面三个组合键都由引擎注入，模式文件不能改它们：
+
+| 组合键 | 打开 |
+|---|---|
+| `Super+Ctrl+/` | 快捷键速查表 |
+| `Super+Alt+I` | OmniPal 控制中心 |
+| `Super+Alt+O` | 概览 |
+
+它们都不占用 Omarchy 4.0 的默认快捷键。各模式自己的别名（如 Windows 模式的 `Super+Tab` 概览、`Super+I` 控制中心，macOS 模式的 `Super+,`）照常可用。定义在 `schema/fixed_bindings.json`，`scripts/check_consistency.py` 会拒绝把这些组合键绑到其他动作的模式文件。
+
 ## 包含什么
 
 - **三套习惯模式**：Windows（Alt+F4、Win+方向键吸附、Win+E）、macOS（Super+Q、Super+Space、Super+Shift+3/4）、KDE Plasma（Meta+方向键贴边、Alt+Space 搜索、Meta+W 概览）。

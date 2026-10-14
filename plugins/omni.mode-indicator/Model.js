@@ -81,21 +81,21 @@ function fallbackProfiles() {
     {
       "id": "windows",
       "name": "Windows 11 习惯模式",
-      "description": "还原 Windows 常用快捷键习惯（Alt+F4 关闭、Super+方向键吸附、Super+E 文件管理器等）",
+      "description": "还原 Windows 11 常用快捷键（Alt+F4 关闭窗口、Super+方向键贴靠、Super+E 文件管理器、Super+L 锁屏等）",
       "bindings_count": 14,
       "display": { "icon": "⊞", "brief": "WIN", "color": "#3892d6" }
     },
     {
       "id": "mac",
       "name": "macOS 习惯模式",
-      "description": "还原 macOS 常用操作快捷键（Super+Q 关闭、Super+空格启动器、Super+Shift+4 区域截图等）",
+      "description": "还原 macOS 常用快捷键（Super+Q 关闭窗口、Super+Space 启动器、Super+Shift+4 区域截图、Super+Ctrl+Q 锁屏等）",
       "bindings_count": 19,
       "display": { "icon": "◆", "brief": "MAC", "color": "#d8dee9" }
     },
     {
       "id": "omarchy",
       "name": "Omarchy 原生模式",
-      "description": "系统默认原生快捷键，无任何覆盖修改，适合学习与原生对比",
+      "description": "Omarchy 原生快捷键，不做任何覆盖，适合学习与对照",
       "bindings_count": 0,
       "display": { "icon": "⊡", "brief": "OMA", "color": "#a3be8c" }
     }

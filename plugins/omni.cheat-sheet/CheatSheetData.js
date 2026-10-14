@@ -17,12 +17,13 @@
 
 var CATEGORY_LABELS = {
   window: "窗口管理",
-  snap: "窗口吸附",
+  snap: "窗口贴靠",
   navigation: "工作区 / 导航",
   launcher: "启动器",
   apps: "系统应用",
   tools: "效率工具",
   system: "会话与安全",
+  omnipal: "OmniPal 固定入口（所有模式通用）",
   other: "其他"
 };
 

@@ -205,6 +205,44 @@ def _validate_snap_layouts(project_root: Path) -> bool:
         print(f"  💥 Snap layouts validation failed for {snap_file.name}", file=sys.stderr)
     return file_passed
 
+def _combo_key(mod: str, key: str) -> str:
+    mods = [m.upper() for m in str(mod or "").replace("+", " ").split()]
+    return "+".join(sorted(mods) + [str(key or "").upper()])
+
+
+def _validate_fixed_bindings(project_root: Path, valid_action_ids: dict, profile_files) -> bool:
+    fixed_file = project_root / "schema" / "fixed_bindings.json"
+    if not fixed_file.exists():
+        print("❌ Missing schema/fixed_bindings.json (fixed OmniPal entry points)", file=sys.stderr)
+        return False
+    try:
+        fixed = json.loads(fixed_file.read_text(encoding="utf-8")).get("bindings", [])
+    except Exception as e:
+        print(f"❌ Invalid fixed_bindings.json: {e}", file=sys.stderr)
+        return False
+    ok = True
+    combos = {}
+    for b in fixed:
+        if b.get("action") not in valid_action_ids:
+            print(f"❌ fixed binding uses unknown action {b.get('action')!r}", file=sys.stderr)
+            ok = False
+        combos[_combo_key(b.get("mod", ""), b.get("key", ""))] = b.get("action")
+    for p_file in profile_files:
+        try:
+            prof = json.loads(Path(p_file).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for b in prof.get("bindings", []):
+            ck = _combo_key(b.get("mod", ""), b.get("key", ""))
+            if ck in combos and b.get("action") != combos[ck]:
+                print(f"❌ [{Path(p_file).name}] {b.get('mod')} {b.get('key')} is a fixed OmniPal entry "
+                      f"({combos[ck]}); profiles may not rebind it to {b.get('action')!r}", file=sys.stderr)
+                ok = False
+    if ok:
+        print(f"✅ Fixed entry points ({len(fixed)}) not overridden by any profile")
+    return ok
+
+
 def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = None) -> bool:
     schema_file = project_root / "schema" / "actions.json"
     profiles_dir = project_root / "profiles"
@@ -237,6 +275,10 @@ def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = No
         if not _validate_profile_file(p_file, valid_action_ids):
             all_passed = False
 
+    # Fixed OmniPal entry points: no profile may bind these combos to another action.
+    if not _validate_fixed_bindings(project_root, valid_action_ids, profile_files):
+        all_passed = False
+
     target_user_dir = user_profiles_dir
     if target_user_dir is None and "OMNIPAL_USER_PROFILES_DIR" in os.environ:
         target_user_dir = Path(os.environ["OMNIPAL_USER_PROFILES_DIR"])
@@ -248,6 +290,8 @@ def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = No
             for u_file in user_profile_files:
                 if not _validate_profile_file(u_file, valid_action_ids):
                     all_passed = False
+            if not _validate_fixed_bindings(project_root, valid_action_ids, user_profile_files):
+                all_passed = False
 
     # Validate snap layouts catalog (single source of truth for zones/templates)
     if not _validate_snap_layouts(project_root):

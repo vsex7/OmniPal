@@ -13,9 +13,9 @@ import "Safety.js" as Safety
 // OmniPal 设置与控制中心面板（omni.settings）
 //
 // 三分类 Tab 导航的现代控制中心：
-// 1. 🎯 模式方案：动态枚举 profiles，卡片网格一键热切换（活动模式高亮边框 + 悬停升起动效）
+// 1. 🎯 模式：动态枚举 profiles，卡片网格一键热切换（活动模式高亮边框 + 悬停升起动效）
 // 2. ⚙️ 高级选项：可选配置持久化（显式开关）、Snap 布局菜单呼出、系统原生还原、速查表
-// 3. 📊 使用洞察：本地使用统计（概览摘要 / 模式切换排行 / 吸附区域 Top 榜 + 一键重置）
+// 3. 📊 使用洞察：本地使用统计（概览摘要 / 模式切换排行 / 贴靠区域 Top 榜 + 一键重置）
 //
 // 架构铁律：本插件只做展示与触发，全部绑定/持久化/统计操作均通过 omni-profile CLI
 // 交由 Engine 唯一执行，插件自身从不写任何 Hyprland 配置（AGENTS.md §2 / H-1）。
@@ -36,7 +36,7 @@ Item {
   readonly property string pluginId: (root.manifest && root.manifest.id) || "omni.settings"
 
   // ---------- 分类导航状态 ----------
-  // 0 = 模式方案 · 1 = 高级选项 · 2 = 使用洞察
+  // 0 = 模式 · 1 = 高级选项 · 2 = 使用洞察
   property int activeTab: 0
 
   // ---------- 应用规则（omni-profile rules ...，按应用自动切换模式） ----------
@@ -96,45 +96,17 @@ Item {
   property bool statsLoaded: false
   property bool statsBusy: false
 
-  // 模式元数据（默认预置，开窗自动从 omni-profile list --json 动态刷新）
-  property var modeItems: [
-    {
-      id: "windows",
-      icon: Icons.mode("windows"),
-      name: "Windows 11 习惯模式",
-      desc: "Alt+F4 关闭窗口 · Win+方向键智能吸附 · Win+E 文件管理器 · Win+Tab 任务视图",
-      count: 19,
-      source: "project",
-      override: false
-    },
-    {
-      id: "mac",
-      icon: Icons.mode("mac"),
-      name: "macOS 习惯模式",
-      desc: "Super+Q 退出程序 · Super+Space 聚焦搜索 · Super+Shift+3/4 截图 · Super+H 最小化",
-      count: 42,
-      source: "project",
-      override: false
-    },
-    {
-      id: "kde",
-      icon: Icons.mode("kde"),
-      name: "KDE Plasma 习惯模式",
-      desc: "Meta+方向键贴边 · Alt+Space 搜索 · Ctrl+Alt+L 锁屏 · Meta+W 概览",
-      count: 19,
-      source: "project",
-      override: false
-    },
-    {
-      id: "omarchy",
-      icon: Icons.mode("omarchy"),
-      name: "Omarchy 原生模式",
-      desc: "",
-      count: 0,
-      source: "project",
-      override: false
-    }
-  ]
+  // 模式元数据：唯一来源为 profiles/*.json（开窗时经 omni-profile list --json 加载），此处不再硬编码。
+  property var modeItems: []
+  // 窗口策略：follow-profile（跟随模式）以外的取值即全局覆盖各模式自带的 window_mode
+  property string windowPolicy: "follow-profile"
+  readonly property bool policyOverridden: root.windowPolicy !== "follow-profile" && root.windowPolicy !== ""
+  // 应用规则自动切换标记（state.json auto）
+  property var autoInfo: null
+  // 固定入口（schema/fixed_bindings.json），所有模式通用
+  readonly property string fixedKeysText: "固定入口（所有模式通用）：Super+Ctrl+/ 速查表 · Super+Alt+I 控制中心 · Super+Alt+O 概览"
+
+  function windowModeLabel(m) { return m === "floating" ? "浮动" : "平铺" }
 
   // 主题样式令牌：直接取 Omarchy Shell 的 qs.Commons（[menu] 表面，与 omarchy.menu /
   // omarchy.emojis 一致）。卡片/芯片用 Style 的 normal 控件 fill/border 令牌（见 Card 组件）。
@@ -329,6 +301,9 @@ Item {
       root.enginePid = d.pid || 0
       root.engineUpdatedAt = d.updated_at || ""
       root.engineStatus = d.status || "native"
+      var wp = String(d.window_policy || "follow-profile").toLowerCase()
+      root.windowPolicy = (wp === "follow" || wp === "follow_profile") ? "follow-profile" : (wp === "float" ? "floating" : (wp === "tile" ? "tiled" : wp))
+      root.autoInfo = (d.auto && typeof d.auto === "object") ? d.auto : null
       root.engineRunning = true
     } catch (e) {
       root.engineRunning = false
@@ -483,6 +458,7 @@ Item {
                 name: p.name || p.id,
                 desc: desc,
                 count: p.bindings_count || 0,
+                windowMode: p.window_mode || "tiled",
                 source: p.source || "project",
                 override: p.override || false
               })
@@ -581,7 +557,7 @@ Item {
       anchors { right: parent.right; rightMargin: Style.space(10); verticalCenter: parent.verticalCenter }
       text: rankRow.entry.count + " 次"
       font.family: Style.font.family
-      font.pixelSize: Style.font.bodySmall
+      font.pixelSize: Style.font.body
       color: rankRow.barColor
     }
 
@@ -593,7 +569,7 @@ Item {
       }
       text: (rankRow.rank > 0 ? rankRow.rank + ". " : "") + (rankRow.displayName || rankRow.entry.name)
       font.family: Style.font.family
-      font.pixelSize: Style.font.bodySmall
+      font.pixelSize: Style.font.body
       color: Util.alpha(root.foreground, 0.9)
       elide: Text.ElideRight
     }
@@ -613,7 +589,7 @@ Item {
     bordered: true
     foreground: root.foreground
     accent: root.accent
-    fontSize: Style.font.bodySmall
+    fontSize: Style.font.body
     verticalPadding: Style.spacing.xs
   }
 
@@ -696,7 +672,7 @@ Item {
           opacity: root.toastText !== "" ? 1.0 : 0.0
           Behavior on opacity { NumberAnimation { duration: root.theme.duration(140) } }
           font.family: Style.font.family
-          font.pixelSize: Style.font.caption
+          font.pixelSize: Style.font.body
           color: root.accent
           textFormat: Text.PlainText
           MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.undoSwitch() }
@@ -739,7 +715,7 @@ Item {
             Text {
               text: root.engineRunning ? "运行时内存热切换引擎在线" : "引擎未运行"
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.body
               color: Util.alpha(root.foreground, 0.55)
               anchors.right: parent.right
               anchors.rightMargin: Style.space(12)
@@ -780,7 +756,7 @@ Item {
                   ? ("Engine PID " + root.enginePid + " · 当前覆盖 " + root.activeBindingsCount + " 组快捷键 · " + root.currentName)
                   : "Engine 未检测到运行 · 执行 omni-profile daemon 启动常驻"
                 font.family: Style.font.family
-                font.pixelSize: Style.font.caption
+                font.pixelSize: Style.font.body
                 color: root.engineRunning ? Qt.darker(root.foreground, 1.4) : root.dangerColor
                 elide: Text.ElideRight
               }
@@ -799,7 +775,7 @@ Item {
           width: parent.width
           height: parent.height
 
-          // ===== Tab 0：模式方案 =====
+          // ===== Tab 0：模式 =====
           Item {
             id: profilesTab
             anchors.fill: parent
@@ -822,7 +798,7 @@ Item {
                 Text {
                   text: "选择习惯按键模式 · 点击卡片或按数字键 1 ~ " + root.modeItems.length + " 一键热切换"
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: Style.font.body
                   color: Util.alpha(root.foreground, 0.7)
                 }
 
@@ -892,9 +868,11 @@ Item {
                             + (modeCard.modelData.source === "user"
                                 ? (modeCard.modelData.override ? "用户自定义（覆盖内置）" : "用户自定义")
                                 : "内置")
+                            + " · " + root.windowModeLabel(modeCard.modelData.windowMode)
+                            + (root.policyOverridden ? "（已覆盖：全局" + root.windowModeLabel(root.windowPolicy) + "）" : "")
                             + (modeCard.modelData.desc ? " · " + modeCard.modelData.desc : "")
                           font.family: Style.font.family
-                          font.pixelSize: Style.font.caption
+                          font.pixelSize: Style.font.body
                           color: Qt.darker(root.foreground, 1.4)
                           elide: Text.ElideRight
                         }
@@ -904,9 +882,9 @@ Item {
                       Text {
                         id: modeKeycap
                         anchors { right: parent.right; rightMargin: Style.spacing.rowPaddingX; verticalCenter: parent.verticalCenter }
-                        text: modeCard.isActive ? "active" : String(modeCard.index + 1)
+                        text: modeCard.isActive ? (root.autoInfo ? "自动" : "active") : String(modeCard.index + 1)
                         font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
+                        font.pixelSize: Style.font.body
                         color: modeCard.isActive ? root.accent : Qt.darker(root.foreground, 1.4)
                       }
                     }
@@ -992,7 +970,7 @@ Item {
                       width: parent.width
                       text: "默认开启，关机或重启后自动恢复上次使用的模式与窗口策略；关闭时重启恢复默认。"
                       font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
+                      font.pixelSize: Style.font.body
                       color: Util.alpha(root.foreground, 0.7)
                       wrapMode: Text.Wrap
                     }
@@ -1011,7 +989,7 @@ Item {
                               ? ("已启用 · 自动记忆关机前配置：" + root.modeNameOf(root.persistProfile) + "（" + root.persistProfile + "）" + (root.persistPolicy ? " · " + (root.persistPolicy === "floating" ? "浮动" : "平铺") : "") + (root.persistUpdatedAt ? " · 更新于 " + root.fmtTs(root.persistUpdatedAt) : ""))
                               : "已禁用 · 关机/重启恢复默认，磁盘零残留")
                         font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
+                        font.pixelSize: Style.font.body
                         color: root.persistEnabled ? root.okColor : Util.alpha(root.foreground, 0.65)
                         wrapMode: Text.Wrap
                         elide: Text.ElideRight
@@ -1021,7 +999,7 @@ Item {
                   }
                 }
 
-                // --- 窗口吸附快捷操作卡片 ---
+                // --- 窗口贴靠快捷操作卡片 ---
                 Card {
                   width: parent.width
                   height: snapCardBody.implicitHeight + Style.space(28)
@@ -1045,7 +1023,7 @@ Item {
                       }
                       Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "窗口吸附快捷操作"
+                        text: "窗口贴靠快捷操作"
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
                         color: root.foreground
@@ -1054,9 +1032,9 @@ Item {
 
                     Text {
                       width: parent.width
-                      text: "无需记忆键位，随时呼出可视化 Snap 布局选择器，纯键盘完成分屏吸附。"
+                      text: "无需记忆键位，随时呼出可视化贴靠布局菜单，纯键盘完成分屏贴靠。"
                       font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
+                      font.pixelSize: Style.font.body
                       color: Util.alpha(root.foreground, 0.7)
                       wrapMode: Text.Wrap
                     }
@@ -1064,7 +1042,7 @@ Item {
                     Button {
                       width: parent.width
                       iconText: Icons.glyph.snap
-                      text: "呼出 Snap 布局菜单"
+                      text: "呼出贴靠布局菜单"
                       bordered: true
                       active: true
                       foreground: root.foreground
@@ -1116,7 +1094,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "R"
                         font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
+                        font.pixelSize: Style.font.body
                         color: Util.alpha(root.foreground, 0.55)
                         padding: 3
                         Card {
@@ -1129,7 +1107,7 @@ Item {
                       width: parent.width
                       text: "撤销全部内存绑定覆盖，把快捷键完整恢复到启动前状态，退出零残留。"
                       font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
+                      font.pixelSize: Style.font.body
                       color: Util.alpha(root.foreground, 0.7)
                       wrapMode: Text.Wrap
                     }
@@ -1138,7 +1116,7 @@ Item {
                     // (same pattern as network's captive-portal button).
                     Button {
                       width: parent.width
-                      text: "执行系统原生还原 (Shift+R)"
+                      text: "切换到 Omarchy 原生模式 (Shift+R)"
                       bordered: true
                       foreground: root.dangerColor
                       accent: root.dangerColor
@@ -1158,6 +1136,16 @@ Item {
                   accent: root.accent
                   verticalPadding: Style.space(10)
                   onClicked: root.openCheatSheet()
+                }
+
+                Text {
+                  width: parent.width
+                  textFormat: Text.PlainText
+                  text: root.fixedKeysText
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                  color: Qt.darker(root.foreground, 1.4)
+                  wrapMode: Text.Wrap
                 }
               }
             }
@@ -1254,14 +1242,14 @@ Item {
                               anchors.horizontalCenter: parent.horizontalCenter
                               text: statCard.modelData.value
                               font.family: Style.font.family
-                              font.pixelSize: statCard.modelData.label === "累计总操作数" ? Style.font.heading : Style.font.bodySmall
+                              font.pixelSize: statCard.modelData.label === "累计总操作数" ? Style.font.heading : Style.font.body
                               color: statCard.modelData.tint
                             }
                             Text {
                               anchors.horizontalCenter: parent.horizontalCenter
                               text: statCard.modelData.label
                               font.family: Style.font.family
-                              font.pixelSize: Style.font.caption
+                              font.pixelSize: Style.font.body
                               color: Util.alpha(root.foreground, 0.6)
                             }
                           }
@@ -1296,13 +1284,13 @@ Item {
                           font.family: Style.font.family
                           anchors.verticalCenter: parent.verticalCenter
                           text: Icons.glyph.cycle
-                          font.pixelSize: Style.font.bodySmall
+                          font.pixelSize: Style.font.body
                         }
                         Text {
                           anchors.verticalCenter: parent.verticalCenter
                           text: "模式切换排行"
                           font.family: Style.font.family
-                          font.pixelSize: Style.font.bodySmall
+                          font.pixelSize: Style.font.body
                           color: root.foreground
                         }
                       }
@@ -1311,7 +1299,7 @@ Item {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                         text: root.statsLoaded ? ("共 " + root.statsSwitchTotal + " 次") : ""
                         font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
+                        font.pixelSize: Style.font.body
                         color: Util.alpha(root.foreground, 0.55)
                       }
                     }
@@ -1334,7 +1322,7 @@ Item {
                       width: parent.width
                       text: "暂无切换记录 · 切换习惯模式后自动累积"
                       font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
+                      font.pixelSize: Style.font.body
                       color: Util.alpha(root.foreground, 0.5)
                     }
 
@@ -1343,13 +1331,13 @@ Item {
                       width: parent.width
                       text: "正在读取本地统计…"
                       font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
+                      font.pixelSize: Style.font.body
                       color: Util.alpha(root.foreground, 0.5)
                     }
                   }
                 }
 
-                // --- 常用吸附区域 Top 榜卡片 ---
+                // --- 常用贴靠区域 Top 榜卡片 ---
                 Card {
                   width: parent.width
                   height: snapRankBody.implicitHeight + Style.space(28)
@@ -1374,13 +1362,13 @@ Item {
                           font.family: Style.font.family
                           anchors.verticalCenter: parent.verticalCenter
                           text: Icons.glyph.compass
-                          font.pixelSize: Style.font.bodySmall
+                          font.pixelSize: Style.font.body
                         }
                         Text {
                           anchors.verticalCenter: parent.verticalCenter
-                          text: "常用吸附区域 Top 榜"
+                          text: "常用贴靠区域 Top 榜"
                           font.family: Style.font.family
-                          font.pixelSize: Style.font.bodySmall
+                          font.pixelSize: Style.font.body
                           color: root.foreground
                         }
                       }
@@ -1389,7 +1377,7 @@ Item {
                         anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                         text: root.statsLoaded ? ("共 " + root.statsSnapTotal + " 次") : ""
                         font.family: Style.font.family
-                        font.pixelSize: Style.font.caption
+                        font.pixelSize: Style.font.body
                         color: Util.alpha(root.foreground, 0.55)
                       }
                     }
@@ -1409,9 +1397,9 @@ Item {
                     Text {
                       visible: root.statsLoaded && root.statsSnapList.length === 0
                       width: parent.width
-                      text: "暂无吸附记录 · 通过吸附布局菜单或吸附快捷键自动累积"
+                      text: "暂无贴靠记录 · 通过贴靠布局菜单或贴靠快捷键自动累积"
                       font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
+                      font.pixelSize: Style.font.body
                       color: Util.alpha(root.foreground, 0.5)
                     }
 
@@ -1420,7 +1408,7 @@ Item {
                       width: parent.width
                       text: "正在读取本地统计…"
                       font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
+                      font.pixelSize: Style.font.body
                       color: Util.alpha(root.foreground, 0.5)
                     }
                   }
@@ -1442,7 +1430,7 @@ Item {
                   width: parent.width
                   text: "统计仅为本机聚合计数（~/.config/omnipal/stats.json）· 零按键内容记录 · 零网络上传"
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: Style.font.body
                   color: Util.alpha(root.foreground, 0.45)
                   wrapMode: Text.Wrap
                   horizontalAlignment: Text.AlignHCenter
@@ -1500,7 +1488,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: root.appRulesEnabled ? "已启用" : "已停用"
                         font.family: Style.font.family
-                        font.pixelSize: Style.font.bodySmall
+                        font.pixelSize: Style.font.body
                         color: Qt.darker(root.foreground, 1.4)
                       }
                     }
@@ -1511,7 +1499,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: "没有匹配时："
                         font.family: Style.font.family
-                        font.pixelSize: Style.font.bodySmall
+                        font.pixelSize: Style.font.body
                         color: Util.alpha(root.foreground, 0.7)
                       }
                       Repeater {
@@ -1550,7 +1538,7 @@ Item {
                       Text {
                         text: (ruleRow.index + 1) + "."
                         font.family: Style.font.family
-                        font.pixelSize: Style.font.bodySmall
+                        font.pixelSize: Style.font.body
                         color: Util.alpha(root.foreground, 0.5)
                       }
                       Text {
@@ -1562,7 +1550,7 @@ Item {
                       Text {
                         text: ({ exact: "精确", prefix: "前缀", regex: "正则" })[ruleRow.modelData.match || "exact"]
                         font.family: Style.font.family
-                        font.pixelSize: Style.font.bodySmall
+                        font.pixelSize: Style.font.body
                         color: Util.alpha(root.foreground, 0.55)
                       }
                       Text {
@@ -1600,7 +1588,7 @@ Item {
                   horizontalAlignment: Text.AlignHCenter
                   text: "还没有规则。下面填好窗口类名和模式就能添加，比如 code 对应 mac。"
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.bodySmall
+                  font.pixelSize: Style.font.body
                   color: Util.alpha(root.foreground, 0.55)
                 }
 
@@ -1637,7 +1625,7 @@ Item {
                         foreground: root.foreground
                         background: "transparent"
                         accent: root.accent
-                        fontSize: Style.font.bodySmall
+                        fontSize: Style.font.body
                         onChanged: function(v) { root.newRuleMatch = v }
                       }
                     }
@@ -1682,7 +1670,7 @@ Item {
                       : "守护进程运行后，这里会显示当前应用匹配到的规则")
                   wrapMode: Text.WordWrap
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.bodySmall
+                  font.pixelSize: Style.font.body
                   color: root.rulesError !== "" ? root.dangerColor : Util.alpha(root.foreground, 0.65)
                 }
               }

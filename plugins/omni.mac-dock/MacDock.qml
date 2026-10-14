@@ -473,7 +473,7 @@ Item {
                     anchors.centerIn: parent
                     text: dockItemWrapper.modelData.windowCount
                     font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.body
                     color: Commons.Color.background
                   }
                 }
@@ -510,7 +510,7 @@ Item {
                 textFormat: Text.PlainText
                 text: dockItemWrapper.modelData.name
                 font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: Style.font.body
                 color: Commons.Color.tooltip.text
                 anchors.centerIn: parent
               }
@@ -628,8 +628,8 @@ Item {
             leftAlign: true
             iconText: modelData.icon
             text: modelData.label
-            fontSize: Style.font.bodySmall
-            iconSize: Style.font.caption
+            fontSize: Style.font.body
+            iconSize: Style.font.body
             foreground: modelData.danger ? root.dangerColor : Commons.Color.popups.text
             accent: modelData.danger ? root.dangerColor : Commons.Color.accent
             onClicked: root.runContextAction(actionRow.modelData.key)

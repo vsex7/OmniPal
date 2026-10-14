@@ -4,6 +4,8 @@ OmniPal Automated Unit Tests
 Tests schema consistency, state management, profile parsing, and plugin compliance.
 """
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -391,13 +393,14 @@ class TestOmniPal(BaseOmniTestCase):
 
         overlay = [{"action": "window_close", "combo": "ALT + F4", "name": "Close Window"}]
         self.engine._write_active_overlay(overlay)
-        self.engine._write_state("windows", len(overlay), policy="floating")
+        self.engine._write_state("windows", len(overlay), policy="follow-profile")
         self.engine._set_applied_window_mode("floating")
 
         original_eval = self.engine._eval_lua
         original_reload = self.engine._reload_config_only
         try:
             self.engine._eval_lua = lambda code: True
+            self.engine._eval_lua_strict = lambda code: False
             self.engine._reload_config_only = lambda: False
             self.assertFalse(self.engine.restore())
             self.assertTrue(OVERLAY_FILE.exists())
@@ -838,6 +841,32 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         # Rejection of empty / null
         self.assertFalse(self.engine.set_window_policy(""))
 
+    def test_tiled_disables_float_rules_without_reload(self):
+        from engine.engine import APPLIED_WINDOW_MODE_FILE
+        import engine.engine as E
+        self.engine._write_state("windows", 1, policy="floating")
+        APPLIED_WINDOW_MODE_FILE.write_text("floating", encoding="utf-8")
+        calls, orig = [], (self.engine._reload_config_only, E.find_socket2_path)
+        try:
+            self.engine._reload_config_only = lambda timeout=3.0: calls.append("reload") or True
+            self.engine._eval_lua_strict = lambda code: calls.append(code) or True
+            self.engine._unfloat_existing_windows = lambda: None
+            E.find_socket2_path = lambda: Path("/")
+            self.assertTrue(self.engine.set_window_policy("tiled"))
+            self.assertNotIn("reload", calls)
+            self.assertTrue(any("set_enabled(false)" in c for c in calls))
+        finally:
+            self.engine._reload_config_only, E.find_socket2_path = orig
+            self.engine._write_state("omarchy", 0, policy="tiled")
+            APPLIED_WINDOW_MODE_FILE.write_text("tiled", encoding="utf-8")
+
+    def test_follow_profile_reads_profile_window_mode(self):
+        self.assertEqual(self.engine.get_effective_window_mode("mac", "follow-profile"), "floating")
+        self.assertEqual(self.engine.get_effective_window_mode("windows", "follow-profile"), "tiled")
+        self.engine.profiles["windows"]["window_mode"] = "floating"
+        self.assertEqual(self.engine.get_effective_window_mode("windows", "follow-profile"), "floating")
+        self.assertEqual(self.engine.get_effective_window_mode("windows", "tiled"), "tiled")
+
     def test_window_policy_reload_failure_rolls_back(self):
         """A requested policy must not be reported successful when reload fails."""
         from engine.engine import APPLIED_WINDOW_MODE_FILE
@@ -846,6 +875,7 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         original_reload = self.engine._reload_config_only
         try:
             self.engine._reload_config_only = lambda timeout=3.0: False
+            self.engine._eval_lua_strict = lambda code: False
             self.assertFalse(self.engine.set_window_policy("tiled"))
             self.assertEqual(self.engine.get_window_policy(), "floating")
             self.assertEqual(APPLIED_WINDOW_MODE_FILE.read_text(encoding="utf-8"), "floating")
@@ -922,7 +952,7 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         # 1. Status string output
         p1 = subprocess.run([bin_path, "window-policy"], capture_output=True, text=True)
         self.assertEqual(p1.returncode, 0)
-        self.assertIn("OmniPal 窗口布局策略", p1.stdout)
+        self.assertIn("OmniPal 窗口策略", p1.stdout)
 
         # 2. JSON status
         p2 = subprocess.run([bin_path, "window-policy", "--json"], capture_output=True, text=True)
@@ -1235,7 +1265,7 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
 
         e.get_windows = lambda: fake_clients
         captured_lua = []
-        e._eval_lua = lambda code: captured_lua.append(code) or True
+        e._eval_lua_strict = lambda code: captured_lua.append(code) or True
 
         e._unfloat_existing_windows()
 
@@ -1501,15 +1531,22 @@ class TestDoctorInstallCheck(unittest.TestCase):
 
 
 class TestSettingsCounts(unittest.TestCase):
-    def test_settings_panel_counts_match_profiles(self):
+    def test_settings_panel_has_no_hardcoded_mode_metadata(self):
+        """Mode name/description/count come only from profiles via `omni-profile list --json`."""
         import re
         qml = (PROJECT_ROOT / "plugins" / "omni.settings" / "SettingsPanel.qml").read_text(encoding="utf-8")
+        self.assertRegex(qml, r"property var modeItems:\s*\[\s*\]")
+        self.assertIn('"omni-profile", "list", "--json"', qml)
         for mid in ("windows", "mac", "kde"):
-            m = re.search(r'id:\s*"%s".*?count:\s*(\d+)' % mid, qml, re.S)
-            self.assertIsNotNone(m, mid)
             prof = json.loads((PROJECT_ROOT / "profiles" / f"{mid}.json").read_text(encoding="utf-8"))
-            self.assertEqual(int(m.group(1)), len(prof["bindings"]), mid)
+            self.assertNotIn(prof["name"], qml, mid)
 
+    def test_profile_descriptions_follow_glossary(self):
+        """docs/GLOSSARY.md: Super/Space spelled in English, 贴靠 not 吸附."""
+        for f in (PROJECT_ROOT / "profiles").glob("*.json"):
+            desc = json.loads(f.read_text(encoding="utf-8")).get("description", "")
+            for bad in ("空格", "Meta+", "Win+", "吸附", "Snap"):
+                self.assertNotIn(bad, desc, f.name)
 
 
 class TestAppRules(unittest.TestCase):
@@ -2082,6 +2119,10 @@ class TestNativeConflicts(unittest.TestCase):
         e.record_switch = lambda *a, **k: None
         e.get_persistence_status = lambda: {"enabled": False}
         e._live_bind_counts = lambda: dict(self.live)
+        self.details = {}
+        e._live_bind_details = lambda: {k: [dict(x) for x in v] for k, v in self.details.items()}
+        self.strict_ok = True
+        e._eval_lua_strict = lambda code: self.evals.append(code) or self.strict_ok
         e._apply_window_policy = lambda *a, **k: True
 
     def test_combo_signature_matches_hyprctl_modmask(self):
@@ -2096,6 +2137,42 @@ class TestNativeConflicts(unittest.TestCase):
         rec = {b["combo"]: b for b in self.overlay}
         self.assertTrue(rec["SUPER + TAB"].get("native_unbound"))
         self.assertIn('hl.unbind("SUPER + TAB")', self.evals[-1])
+        self.assertTrue(self.engine.restore())
+        self.assertIn("reload", self.calls)
+
+    def test_lua_native_is_stashed_and_restored_without_reload(self):
+        self.live = {(64, "TAB"): 1}
+        self.details = {(64, "TAB"): [{"modmask": 64, "key": "Tab", "dispatcher": "__lua", "arg": "42",
+                                       "description": "Next workspace", "repeat": True}]}
+        self.assertTrue(self.engine.switch_mode("windows"))
+        code = self.evals[-1]
+        stash = code.index("omnipal_stash")
+        self.assertLess(stash, code.index('hl.unbind("SUPER + TAB")'))
+        self.assertIn("h = R[42]", code)
+        self.assertIn("repeating = true", code)
+        rec = {b["combo"]: b for b in self.overlay}
+        self.assertTrue(rec["SUPER + TAB"]["native_restorable"])
+        self.calls.clear()
+        self.assertTrue(self.engine.restore())
+        self.assertNotIn("reload", self.calls)
+        self.assertIn('hl.bind("SUPER + TAB", e.h, e.o)', self.evals[-1])
+
+    def test_unstash_failure_falls_back_to_reload(self):
+        self.live = {(64, "TAB"): 1}
+        self.details = {(64, "TAB"): [{"dispatcher": "__lua", "arg": "7", "description": "n"}]}
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.strict_ok = False
+        self.calls.clear()
+        self.assertTrue(self.engine.restore())
+        self.assertIn("reload", self.calls)
+
+    def test_non_lua_native_falls_back_to_reload(self):
+        self.live = {(64, "TAB"): 1}
+        self.details = {(64, "TAB"): [{"dispatcher": "workspace", "arg": "e+1", "description": "n"}]}
+        self.assertTrue(self.engine.switch_mode("windows"))
+        rec = {b["combo"]: b for b in self.overlay}
+        self.assertFalse(rec["SUPER + TAB"]["native_restorable"])
+        self.calls.clear()
         self.assertTrue(self.engine.restore())
         self.assertIn("reload", self.calls)
 
@@ -2139,3 +2216,149 @@ class TestNativeConflicts(unittest.TestCase):
         self.assertTrue(self.engine.switch_mode("windows"))
         unbound = {combo_signature(b["combo"]) for b in self.overlay if b.get("native_unbound")}
         self.assertEqual(unbound, colliding)
+
+
+class TestFixedEntryPoints(unittest.TestCase):
+    """Cheat sheet / settings / overview have the same keys in every mode."""
+
+    def setUp(self):
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.evals = []
+        self.overlay = []
+        e = self.engine
+        e._eval_lua = lambda code: self.evals.append(code) or True
+        e._eval_lua_strict = lambda code: self.evals.append(code) or True
+        e._reload_hyprland = lambda: True
+        e._write_active_overlay = lambda recs: setattr(self, "overlay", recs)
+        e._get_active_overlay = lambda: self.overlay
+        e._write_state = lambda *a, **k: None
+        e.record_switch = lambda *a, **k: None
+        e.get_persistence_status = lambda: {"enabled": False}
+        e._live_bind_counts = lambda: {}
+        e._apply_window_policy = lambda *a, **k: True
+
+    def test_fixed_combos(self):
+        self.assertEqual(self.engine.fixed_combos(), {
+            "SUPER + CTRL + SLASH": "cheat_sheet",
+            "SUPER + ALT + I": "omni_settings",
+            "SUPER + ALT + O": "task_view",
+        })
+
+    def test_fixed_combos_free_in_omarchy_defaults(self):
+        import re, glob
+        from engine.engine import combo_signature
+        ref = Path("/workspace/ref/omarchy/default/hypr")
+        if not ref.is_dir():
+            self.skipTest("Omarchy reference not available")
+        native = set()
+        for f in glob.glob(str(ref / "**" / "*.lua"), recursive=True):
+            for m in re.finditer(r'o\.bind\w*\(\s*"([^"]+)"', Path(f).read_text(encoding="utf-8")):
+                native.add(combo_signature(m.group(1)))
+        for combo in self.engine.fixed_combos():
+            self.assertNotIn(combo_signature(combo), native, combo)
+
+    def test_injected_in_every_mode(self):
+        for mode in ("windows", "mac", "kde", "omarchy"):
+            self.evals.clear()
+            self.assertTrue(self.engine.switch_mode(mode), mode)
+            code = "; ".join(self.evals)
+            for combo in self.engine.fixed_combos():
+                self.assertIn(f'o.bind("{combo}"', code, (mode, combo))
+
+    def test_profile_cannot_override(self):
+        self.engine.profiles["windows"]["bindings"] = self.engine.profiles["windows"]["bindings"] + [
+            {"action": "lock_screen", "mod": "SUPER ALT", "key": "I"}]
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertNotIn("SUPER + ALT + I", {b["combo"] for b in self.overlay})
+        code = self.evals[-1]
+        self.assertIn('o.bind("SUPER + ALT + I", "OmniPal 控制中心"', code)
+
+    def test_cheatsheet_lists_fixed_in_omarchy(self):
+        sheet = self.engine.cheatsheet("omarchy")
+        self.assertEqual({e["key"] for e in sheet if e.get("fixed")}, set(self.engine.fixed_combos()))
+
+    def test_check_consistency_rejects_override(self):
+        sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+        import check_consistency as cc
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.json"
+            bad.write_text(json.dumps({"bindings": [{"action": "lock_screen", "mod": "SUPER CTRL", "key": "slash"}]}))
+            ok_alias = Path(tmp) / "ok.json"
+            ok_alias.write_text(json.dumps({"bindings": [{"action": "cheat_sheet", "mod": "SUPER CTRL", "key": "slash"}]}))
+            actions = {a["id"]: a for a in json.loads((PROJECT_ROOT / "schema" / "actions.json").read_text())["actions"]}
+            with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+                self.assertFalse(cc._validate_fixed_bindings(PROJECT_ROOT, actions, [bad]))
+                self.assertTrue(cc._validate_fixed_bindings(PROJECT_ROOT, actions, [ok_alias]))
+
+
+class TestAutoSwitchState(unittest.TestCase):
+    """Auto switches mark state['auto'], notify, and manual switches cancel the auto-return."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._old = os.environ.get("OMNIPAL_CONFIG_DIR")
+        os.environ["OMNIPAL_CONFIG_DIR"] = self._tmp.name
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.engine.restore()
+        self.notes = []
+        self._orig_notify = engine_module.notify_user
+        engine_module.notify_user = lambda t, b="": self.notes.append((t, b))
+        self.engine.save_app_rules({"enabled": True, "rules": [{"class": "code", "mode": "mac"}]})
+
+    def tearDown(self):
+        engine_module.notify_user = self._orig_notify
+        self.engine.restore(auto=None)
+        if self._old is None:
+            os.environ.pop("OMNIPAL_CONFIG_DIR", None)
+        else:
+            os.environ["OMNIPAL_CONFIG_DIR"] = self._old
+        self._tmp.cleanup()
+
+    def test_auto_marks_state_and_notifies(self):
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertEqual(self.engine.apply_app_rule("code"), "mac")
+        auto = self.engine.get_state().get("auto")
+        self.assertEqual((auto["app"], auto["mode"], auto["return_to"]), ("code", "mac", "windows"))
+        self.assertIn("因为聚焦了 code", self.notes[-1][0])
+        self.assertIn("离开后回到", self.notes[-1][1])
+        self.assertEqual(self.engine.apply_app_rule("kitty"), "windows")
+        self.assertIsNone(self.engine.get_state().get("auto"))
+        self.assertIn("回到", self.notes[-1][0])
+
+    def test_manual_switch_cancels_auto_return(self):
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.engine.apply_app_rule("code")
+        prev = self.engine.cancel_auto()           # what the CLI does before a manual switch
+        self.assertEqual(prev["return_to"], "windows")
+        self.assertTrue(self.engine.switch_mode("kde"))
+        self.engine.notify_manual_override(prev, "kde")
+        self.assertIn("已取消自动返回", self.notes[-1][1])
+        self.assertIsNone(self.engine.get_state().get("auto"))
+        self.assertIsNone(self.engine.apply_app_rule("kitty"))   # stays on kde (new base)
+        self.assertEqual(self.engine.get_state().get("mode"), "kde")
+        self.assertEqual(self.engine.apply_app_rule("code"), "mac")
+        self.assertEqual(self.engine.get_state()["auto"]["return_to"], "kde")
+
+    def test_manual_switch_to_same_mode_still_cancels(self):
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.engine.apply_app_rule("code")
+        self.engine.cancel_auto()
+        self.assertTrue(self.engine.switch_mode("mac"))
+        self.assertIsNone(self.engine.get_state().get("auto"))
+        self.assertIsNone(self.engine.apply_app_rule("kitty"))
+        self.assertEqual(self.engine.get_state().get("mode"), "mac")
+
+
+class TestUiAutoOverrideText(unittest.TestCase):
+    def test_bar_and_settings_show_auto_and_override(self):
+        bar = (PROJECT_ROOT / "plugins/omni.mode-indicator/BarWidget.qml").read_text(encoding="utf-8")
+        self.assertIn("active: root.engineRunning && root.autoActive", bar)
+        self.assertIn("离开后回到", bar)
+        self.assertIn("已覆盖", bar)
+        st = (PROJECT_ROOT / "plugins/omni.settings/SettingsPanel.qml").read_text(encoding="utf-8")
+        self.assertIn("root.windowModeLabel(modeCard.modelData.windowMode)", st)
+        self.assertIn("已覆盖：全局", st)
+        self.assertIn("Super+Ctrl+/", st)
+        for qml in (bar, st):
+            self.assertNotIn("Style.font.caption", qml)
+            self.assertNotIn("Style.font.bodySmall", qml)
