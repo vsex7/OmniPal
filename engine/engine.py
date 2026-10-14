@@ -495,7 +495,7 @@ class OmniPalEngine:
         sock = find_socket2_path()
         compositor_connected = sock is not None and sock.exists()
         default_state = {
-            "version": "1.2.0",
+            "version": __version__,
             "mode": "omarchy",
             "name": "Omarchy 原生模式",
             "display": self.profiles.get("omarchy", {}).get("display", {"icon": "⊡", "brief": "OMA", "color": "#a3be8c"}),
@@ -558,7 +558,7 @@ class OmniPalEngine:
         compositor_connected = sock is not None and sock.exists()
 
         state_data = {
-            "version": "1.2.0",
+            "version": __version__,
             "mode": mode,
             "name": profile_name,
             "display": display_meta,
