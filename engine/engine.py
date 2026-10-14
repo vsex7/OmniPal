@@ -1297,7 +1297,7 @@ end
             pass
 
     def _unfloat_existing_windows(self):
-        """Unfloats existing floating client windows in the active workspace when returning to tiled mode."""
+        """Unfloats floating client windows on every regular workspace when returning to tiled mode."""
         try:
             clients = self.get_windows()
             if not clients:
@@ -1338,7 +1338,8 @@ end
                 ws_id = ws.get("id")
                 ws_name = str(ws.get("name", ""))
 
-                if active_ws_ids and ws_id not in active_ws_ids:
+                # All workspaces: the float rule also caught windows opened on inactive ones.
+                if ws_name.startswith("special") or (isinstance(ws_id, int) and ws_id < 0):
                     continue
 
                 cls_name = str(c.get("class", ""))
