@@ -1953,3 +1953,23 @@ class TestForwardShortcut(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSettingsPanelKeys(unittest.TestCase):
+    """Settings panel destructive keys need confirm; mode switch is undoable; Shift+Tab goes back."""
+    def setUp(self):
+        self.qml = (PROJECT_ROOT / "plugins" / "omni.settings" / "SettingsPanel.qml").read_text(encoding="utf-8")
+
+    def test_restore_requires_shift_and_confirm(self):
+        self.assertRegex(self.qml, r"Qt\.Key_R && \(event\.modifiers & Qt\.ShiftModifier\)\)\s*\{\s*root\.askRestore\(\)")
+        self.assertIn("ConfirmDialog {", self.qml)
+        self.assertNotRegex(self.qml, r"onClicked:\s*root\.(restoreNative|resetStats)\(\)")
+
+    def test_mode_switch_undo_and_backtab(self):
+        self.assertIn("root.switchModeWithUndo(root.modeItems[num].id)", self.qml)
+        self.assertIn("Qt.Key_U", self.qml)
+        self.assertIn("Qt.Key_Backtab", self.qml)
+
+    def test_manifests_declare_min_omarchy(self):
+        for mf in (PROJECT_ROOT / "plugins").glob("omni.*/manifest.json"):
+            self.assertEqual(json.loads(mf.read_text(encoding="utf-8")).get("minOmarchy"), "4.0.4", mf)

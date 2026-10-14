@@ -277,7 +277,7 @@ def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = No
                 print(f"  ❌ [{p_dir.name}] schemaVersion must be 1, got {m.get('schemaVersion')}", file=sys.stderr)
                 all_passed = False
 
-            required_fields = ["id", "name", "version", "kinds", "entryPoints"]
+            required_fields = ["id", "name", "version", "kinds", "entryPoints", "minOmarchy"]
             for rf in required_fields:
                 if rf not in m:
                     print(f"  ❌ [{p_dir.name}] Missing required manifest field: '{rf}'", file=sys.stderr)

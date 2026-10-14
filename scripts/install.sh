@@ -17,6 +17,37 @@ echo "项目路径: ${PROJECT_ROOT}"
 command -v python3 >/dev/null 2>&1 || { echo "❌ 缺少依赖: python3"; exit 1; }
 command -v hyprctl >/dev/null 2>&1 || { echo "❌ 缺少依赖: hyprctl。OmniPal 只支持运行在 Hyprland 上的 Omarchy，请在 Omarchy 桌面里安装。"; exit 1; }
 
+# 1.5 Omarchy 版本检查：插件依赖 Omarchy 4.0.4+ 的 shell（qs.Ui ConfirmDialog 等），旧版本会加载失败
+MIN_OMARCHY="$(python3 -c 'import json,glob,sys
+vs=[json.load(open(f)).get("minOmarchy","0") for f in glob.glob(sys.argv[1]+"/plugins/omni.*/manifest.json")]
+print(max(vs,key=lambda v:tuple(int(x) for x in v.split("."))) if vs else "0")' "${PROJECT_ROOT}")"
+detect_omarchy_version() {
+    local v=""
+    if command -v pacman >/dev/null 2>&1; then
+        v="$(pacman -Q omarchy 2>/dev/null | awk '{print $2}')"
+    fi
+    if [ -z "${v}" ]; then
+        local vf="${OMARCHY_PATH:-${HOME}/.local/share/omarchy}/version"
+        [ -f "${vf}" ] && v="$(head -n1 "${vf}")"
+    fi
+    # 去掉 pkgrel / 前缀 v，只保留 x.y.z
+    v="${v#v}"; v="${v%%-*}"
+    echo "${v}"
+}
+OMARCHY_VERSION="${OMNIPAL_OMARCHY_VERSION:-$(detect_omarchy_version)}"
+if [ -z "${OMARCHY_VERSION}" ]; then
+    if [ "${OMNIPAL_SKIP_VERSION_CHECK:-0}" != "1" ]; then
+        echo "❌ 无法检测 Omarchy 版本（pacman -Q omarchy / \$OMARCHY_PATH/version 均不可用）。OmniPal 需要 Omarchy >= ${MIN_OMARCHY}。"
+        echo "   确认版本无误后可用 OMNIPAL_SKIP_VERSION_CHECK=1 跳过此检查。"
+        exit 1
+    fi
+elif [ "$(printf '%s\n%s\n' "${MIN_OMARCHY}" "${OMARCHY_VERSION}" | sort -V | head -n1)" != "${MIN_OMARCHY}" ]; then
+    echo "❌ 当前 Omarchy 版本 ${OMARCHY_VERSION} 过旧，OmniPal 插件需要 Omarchy >= ${MIN_OMARCHY}（插件将无法加载）。请先运行 omarchy-update 升级后再安装。"
+    exit 1
+else
+    echo "✅ Omarchy ${OMARCHY_VERSION}（要求 >= ${MIN_OMARCHY}）"
+fi
+
 # 2. 预先校验一致性
 echo "🔍 运行 Profile 与 Schema 一致性校验..."
 python3 "${PROJECT_ROOT}/scripts/check_consistency.py"

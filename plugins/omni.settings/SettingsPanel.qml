@@ -180,6 +180,47 @@ Item {
     else root.open("{}")
   }
 
+  // ---------- 确认 / 撤销状态 ----------
+  // confirmAction: "" | "restore" | "reset" — 破坏性操作先经 Ui.ConfirmDialog 确认
+  property string confirmAction: ""
+  // 模式切换后 ~5s 内可按 U 撤销（回到 undoMode；omarchy 由 engine 走 restore 路径）
+  property string undoMode: ""
+  property string toastText: ""
+
+  function askRestore() { root.confirmAction = "restore" }
+  function askResetStats() { if (!root.statsBusy) root.confirmAction = "reset" }
+  function cancelConfirm() { root.confirmAction = ""; Qt.callLater(function() { keyCatcher.forceActiveFocus() }) }
+  function acceptConfirm() {
+    var a = root.confirmAction
+    root.confirmAction = ""
+    if (a === "restore") root.restoreNative()
+    else if (a === "reset") root.resetStats()
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function switchModeWithUndo(targetMode) {
+    if (!targetMode || targetMode === root.currentMode) return
+    root.undoMode = root.currentMode
+    root.toastText = "已切换至 " + root.modeNameOf(targetMode) + " · U 撤销"
+    toastTimer.restart()
+    root.switchMode(targetMode)
+  }
+
+  function undoSwitch() {
+    if (!root.undoMode) return
+    var m = root.undoMode
+    root.undoMode = ""
+    root.toastText = "已撤销 · 回到 " + root.modeNameOf(m)
+    toastTimer.restart()
+    root.switchMode(m)
+  }
+
+  Timer {
+    id: toastTimer
+    interval: 5000
+    onTriggered: { root.undoMode = ""; root.toastText = "" }
+  }
+
   function switchMode(targetMode) {
     if (!targetMode) return
     switchProc.command = ["omni-profile", "switch", targetMode]
@@ -617,17 +658,61 @@ Item {
 
         Keys.onEscapePressed: root.dismiss()
         Keys.onPressed: function(event) {
+          if (confirmDialog.opened) {
+            if (confirmDialog.handleKey(event)) event.accepted = true
+            return
+          }
           var num = event.key - Qt.Key_1
-          if (num >= 0 && num < root.modeItems.length) {
+          if (num >= 0 && num < 9 && num < root.modeItems.length) {
             root.activeTab = 0
-            root.switchMode(root.modeItems[num].id)
-          } else if (event.key === Qt.Key_R) {
-            root.restoreNative()
+            root.switchModeWithUndo(root.modeItems[num].id)
+            event.accepted = true
+          } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ShiftModifier)) {
+            root.askRestore()
+            event.accepted = true
+          } else if (event.key === Qt.Key_U && root.undoMode !== "") {
+            root.undoSwitch()
+            event.accepted = true
           } else if (event.key === Qt.Key_S) {
             root.openCheatSheet()
+            event.accepted = true
+          } else if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier))) {
+            root.activeTab = (root.activeTab + 3) % 4
+            event.accepted = true
           } else if (event.key === Qt.Key_Tab) {
             root.activeTab = (root.activeTab + 1) % 4
+            event.accepted = true
           }
+        }
+
+        // 模式切换提示条（可撤销 ~5s）
+        Text {
+          id: modeToast
+          z: 5
+          anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
+          text: root.toastText
+          visible: opacity > 0.0
+          opacity: root.toastText !== "" ? 1.0 : 0.0
+          Behavior on opacity { NumberAnimation { duration: root.theme.duration(140) } }
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          color: root.accent
+          textFormat: Text.PlainText
+          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.undoSwitch() }
+        }
+
+        ConfirmDialog {
+          id: confirmDialog
+          anchors.fill: parent
+          z: 10
+          opened: root.confirmAction !== ""
+          message: root.confirmAction === "restore"
+            ? "撤销全部绑定覆盖并恢复 Omarchy 原生快捷键？"
+            : "清空全部本地使用统计？此操作不可撤销。"
+          cancelText: "取消"
+          confirmText: root.confirmAction === "restore" ? "还原" : "重置"
+          onCanceled: root.cancelConfirm()
+          onConfirmed: root.acceptConfirm()
         }
 
         // ---------- 顶部固定区：标题 + Tab 栏 + 引擎状态 ----------
@@ -1052,12 +1137,12 @@ Item {
                     // (same pattern as network's captive-portal button).
                     Button {
                       width: parent.width
-                      text: "执行系统原生还原 (omni-profile restore)"
+                      text: "执行系统原生还原 (Shift+R)"
                       bordered: true
                       foreground: root.dangerColor
                       accent: root.dangerColor
                       verticalPadding: Style.space(10)
-                      onClicked: root.restoreNative()
+                      onClicked: root.askRestore()
                     }
                   }
                 }
@@ -1349,7 +1434,7 @@ Item {
                   foreground: root.dangerColor
                   accent: root.dangerColor
                   verticalPadding: Style.space(10)
-                  onClicked: root.resetStats()
+                  onClicked: root.askResetStats()
                 }
 
                 Text {
