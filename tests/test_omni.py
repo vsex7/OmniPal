@@ -931,7 +931,32 @@ class TestWindowPolicyAndModeIndicator(unittest.TestCase):
             self.assertIsInstance(res, dict)
             self.assertIn("address", res)
 
+
+
+
+
+class TestLuaEscaping(unittest.TestCase):
+    def test_lua_str_escapes_quotes_backslashes_and_newlines(self):
+        from engine.engine import lua_str
+        self.assertEqual(lua_str('notify-send "hi"'), '"notify-send \\"hi\\""')
+        self.assertEqual(lua_str("a\\b"), '"a\\\\b"')
+        self.assertEqual(lua_str("x\ny"), '"x\\ny"')
+        self.assertEqual(lua_str("\x01"), '"\\001"')
+        self.assertEqual(lua_str("中文"), '"中文"')
+
+    def test_switch_mode_escapes_user_command(self):
+        from engine.engine import OmniPalEngine
+        engine = OmniPalEngine()
+        captured = []
+        engine._eval_lua = lambda code: captured.append(code) or True
+        payload = 'notify-send "hi"\nend os.execute("rm -rf ~") --'
+        engine.profiles["evil"] = {"bindings": [{"action": "custom_cmd_x", "mod": "SUPER", "key": "Q", "arg": payload}]}
+        self.assertTrue(engine.switch_mode("evil"))
+        code = captured[-1]
+        self.assertIn('notify-send \\"hi\\"\\nend os.execute(\\"rm -rf ~\\") --', code)
+        self.assertNotIn('"hi"\n', code)
+        engine.restore()
+
+
 if __name__ == "__main__":
     unittest.main()
-
-

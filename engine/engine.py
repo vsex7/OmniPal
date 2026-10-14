@@ -34,6 +34,29 @@ SNAP_FILE = RUN_DIR / "snap.json"
 SNAP_LAYOUTS_FILE = RUN_DIR / "snap_layouts.json"
 PID_FILE = RUN_DIR / "daemon.pid"
 
+def lua_str(value: Any) -> str:
+    """Returns a safely quoted Lua string literal (prevents broken batches and Lua injection)."""
+    text = "" if value is None else str(value)
+    out = []
+    for ch in text:
+        o = ord(ch)
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == '"':
+            out.append('\\"')
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif o < 32 or o == 127:
+            out.append("\\%03d" % o)
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
+
 LUA_DISPATCHERS = {
     "close_window": "hl.dsp.window.close()",
     "toggle_floating": "hl.dsp.window.float({ action = 'toggle' })",
@@ -576,7 +599,7 @@ class OmniPalEngine:
         for b in active_overlay:
             combo = b.get("combo")
             if combo:
-                lua_lines.append(f'hl.unbind("{combo}")')
+                lua_lines.append(f'hl.unbind({lua_str(combo)})')
 
         success = True
         if lua_lines:
@@ -607,7 +630,7 @@ class OmniPalEngine:
         for b in current_overlay:
             combo = b.get("combo")
             if combo:
-                lua_ops.append(f'hl.unbind("{combo}")')
+                lua_ops.append(f'hl.unbind({lua_str(combo)})')
 
         # 2. Add bind commands for new profile
         new_overlay_records = []
@@ -623,10 +646,10 @@ class OmniPalEngine:
             combo = format_combo(mod, key)
             if action_id in LUA_DISPATCHERS:
                 dispatcher_expr = LUA_DISPATCHERS[action_id]
-                lua_ops.append(f'o.bind("{combo}", "{name}", {dispatcher_expr})')
+                lua_ops.append(f'o.bind({lua_str(combo)}, {lua_str(name)}, {dispatcher_expr})')
             else:
                 cmd = b.get("arg") or action_meta.get("default_arg", "")
-                lua_ops.append(f'o.bind("{combo}", "{name}", "{cmd}")')
+                lua_ops.append(f'o.bind({lua_str(combo)}, {lua_str(name)}, {lua_str(cmd)})')
 
             new_overlay_records.append({
                 "action": action_id,
@@ -751,7 +774,7 @@ class OmniPalEngine:
                 cursor_win = self.get_window_under_cursor()
                 if cursor_win and cursor_win.get("address"):
                     target_addr = cursor_win["address"]
-                    self._eval_lua(f'hl.dispatch(hl.dsp.focus({{ window = "address:{target_addr}" }}))')
+                    self._eval_lua(f'hl.dispatch(hl.dsp.focus({{ window = {lua_str("address:" + str(target_addr))} }}))')
 
             target_title = ""
             target_class = ""
@@ -840,7 +863,7 @@ class OmniPalEngine:
         focus_lua = ""
         if target_address:
             clean_addr = target_address.strip()
-            focus_lua = f'hl.dispatch(hl.dsp.focus({{ window = "address:{clean_addr}" }}))\n'
+            focus_lua = f'hl.dispatch(hl.dsp.focus({{ window = {lua_str("address:" + str(clean_addr))} }}))\n'
 
         # 4. Fullscreen / maximize dispatch
         if zone in ("maximize", "max"):
