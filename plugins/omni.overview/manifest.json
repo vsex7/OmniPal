@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "omni.overview",
-  "name": "OmniPal Overview",
+  "name": "OmniPal Multi-Tasking Overview",
   "version": "0.4.0",
   "author": "OmniPal",
   "license": "MIT",
-  "description": "多任务视图与窗口概览。纯元数据驱动（基于 hyprctl clients），零截图开销，支持窗口快速切换与搜索过滤。",
+  "description": "现代多任务全景概览与窗口空间切换器（Exposé / Windows 11 Task View 风格），支持矢量线框骨架图与全键盘流盲操。",
   "kinds": [
     "overlay"
   ],

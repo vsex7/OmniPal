@@ -27,7 +27,7 @@ OmniPal 状态栏托盘模式指示器与右键快捷控制面板。
      - ↺ 还原原生快捷键（零残留热恢复）
      - 🩺 运行系统健康诊断 (Doctor)
 - **优雅降级**：
-  - Engine 未运行时显示 `⊘ OFF`，颜色置灰
+  - Engine 未运行时显示 `⊘`，颜色置灰
   - 右键面板支持点击外部区域通过 `HyprlandFocusGrab` 自动平滑关闭
   - 与 Omarchy 状态栏弹窗管理机制（`bar.requestPopout`）深度集成，互斥协调
 

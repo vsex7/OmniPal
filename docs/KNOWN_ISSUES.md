@@ -1,6 +1,6 @@
 # OmniPal 已知限制与运行环境说明 (Known Issues & Limitations)
 
-本文档列出 OmniPal v1.0.0 的设计边界、软硬件依赖要求及已知限制。
+本文档列出 OmniPal v1.8.0 的设计边界、软硬件依赖要求及已知限制。
 
 ---
 
@@ -18,8 +18,9 @@
 
 ## 二、架构设计与行为边界
 
-### 1. 零持久化与配置零写入（Zero Config Pollution）
+### 1. Hyprland 配置零写入（Zero Hyprland Config Pollution）
 - **设计原则**：严格遵守 Hard Stop H-1，OmniPal **永远不写入** `~/.config/hypr/` 中的任何文件。
+- **独立状态文件**：tmpfs 状态、默认持久化与本地统计分别位于 `/run/user/$UID/omnipal/` 与 `~/.config/omnipal/`，卸载时清理 OmniPal 自有文件。
 - **冷启动与重启行为**：当 Hyprland 完全关闭或系统重启后，内存中的按键覆盖自然消失。
 - **自愈与保持**：建议启用 systemd 用户服务 `systemctl --user enable --now omnipal.service` 或运行 `omni-profile daemon`，通过 UNIX Socket 监听 Hyprland 重载事件并自动恢复生效模式。
 

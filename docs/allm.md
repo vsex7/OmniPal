@@ -20,7 +20,7 @@ OmniPal 是专为从 Windows 或 macOS 迁移到 Omarchy 的用户设计的肌�
 ### 核心特点
 
 - **极速切换**：模式切换在 5 毫秒内完成，几乎无感知，不会出现屏幕闪烁。
-- **零污染**：默认不修改任何系统或用户配置文件，用完可完全恢复。
+- **零 Hyprland 配置污染**：不修改 `~/.config/hypr/`；独立状态与可选配置可在卸载时清理。
 - **完整界面**：保留状态栏模式指示、快捷键 HUD、设置面板等实用界面。
 - **安全可靠**：退出或崩溃时自动恢复原始快捷键，支持一键干净卸载。
 - **自定义与丰富布局**：支持自定义 Profile 目录与多样化窗口吸附布局。
@@ -67,9 +67,6 @@ OmniPal 是专为从 Windows 或 macOS 迁移到 Omarchy 的用户设计的肌�
 
 5. **完全卸载**
    ```bash
-   omni-profile restore
-   omni-profile uninstall
-   # 或运行
    ./scripts/uninstall.sh
    ```
 
@@ -113,9 +110,6 @@ omni-profile status
 ### 3.2 卸载
 
 ```bash
-omni-profile restore          # 先恢复原始绑定
-omni-profile uninstall        # 清理自身文件与服务
-# 或直接运行
 ./scripts/uninstall.sh
 ```
 
@@ -171,8 +165,8 @@ omni-profile uninstall        # 清理自身文件与服务
 | 对比项 | OmniPal | Omapala | AetherShift |
 |--------|---------|---------|-------------|
 | 切换方式 | 纯内存热切换 | 写配置 + 事务应用 | 纯内存热切换 |
-| 切换速度 | < 5ms | 较慢，可能闪烁 | < 3–5ms |
-| 配置污染 | 默认零污染 | 有文件写入 | 零污染 |
+| 切换速度 | 热态典型 < 5ms；单次发布预算 <= 10ms | 较慢，可能闪烁 | 热态典型 < 3–5ms |
+| Hyprland 配置污染 | 无 | 有文件写入 | 无 |
 | 界面完整度 | 高（指示器 + HUD + 设置 + 后期 Dock 等） | 高 | 较低（偏 CLI） |
 | 架构复杂度 | 低 | 高 | 低 |
 | 主要定位 | 完整界面 + 干净热切换 | 完整 Omarchy 插件生态 | 极致性能热切换 |
@@ -261,4 +255,3 @@ omni-profile uninstall        # 清理自身文件与服务
 - 恢复原始绑定：`omni-profile restore`
 - 项目问题反馈：请到代码仓库提交 Issue
 - 开发相关文档：请参阅 `docs/` 目录下的其他文件
-

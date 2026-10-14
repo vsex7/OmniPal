@@ -1,22 +1,22 @@
-# omni.overview
+# OmniPal Overview (`omni.overview`)
 
-OmniPal 任务视图与多窗口概览插件（Quickshell 插件）。
+现代化多任务全景空间概览与任务切换器（Exposé / Windows 11 Task View 风格）。
 
-## 架构与铁律遵守
+## 功能特性
 
-- **Hard Stop H-2 绝对遵守**：**零像素截图（Zero Pixel Screenshots）**。不调用 `grim`、`slurp`、`screencopy`，不占用 GPU 纹理缓存。
-- **纯元数据驱动**：基于 `hyprctl clients -j` 实时获取窗口地址、标题、所属应用、工作区、尺寸与平铺状态。
-- **极速响应**：毫秒级呼出，即时展示全部窗口卡片。
-- **交互功能**：
-  - 支持键盘上下左右箭头导航与 Enter 聚焦。
-  - 支持按 Esc 退出。
-  - 顶部集成实时搜索输入栏，快速按窗口标题/类名模糊过滤。
-  - 鼠标左键点击卡片立即执行 `hyprctl dispatch focuswindow address:...` 并收起。
-  - 卡片右上角 [✕] 按钮可快速关闭指定窗口。
+- **高保真视觉设计**：参考现代任务切换舱设计，具有半透明磨砂遮罩、macOS 标题栏、应用矢量骨架图与纯白发光选中框。
+- **零像素抓取 (Zero Pixel Screenshots)**：严格遵循 AGENTS.md H-5 铁律，纯基于 Compositor 矢量元数据渲染，零开销、零延迟。
+- **全键盘流操作**：
+  - `Tab` / `Shift+Tab` / 方向键：在窗口间平滑穿梭
+  - `Enter` / `Space`：聚焦选定窗口并退出概览
+  - `Esc`：关闭概览
+  - `Backspace` / `Delete` / `Q`：立即关闭当前选中的窗口
+  - 数字键 `1-9`：直达第 N 个窗口
+  - 鼠标左键：直接点击窗口聚焦激活；悬停卡片右上角快捷关闭
+- **多显示器支持**：自动适配所有连接的输出屏幕。
 
-## 呼出方式
+## 快捷键
 
-```bash
-omarchy-shell shell toggle omni.overview
-```
-也可以通过 Windows 模式下的 `Super+Tab` 呼出。
+- Windows 模式：`Super + Tab`
+- macOS 模式：`Super + Tab`
+- 命令行唤出：`omarchy-shell shell toggle omni.overview`

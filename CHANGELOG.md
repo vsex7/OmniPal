@@ -17,6 +17,22 @@
 - mac 模式开启时会暂时停用 Omarchy 原生的 Super+W、Super+数字绑定；还原或切到别的模式时会执行 `hyprctl reload` 把它们找回来。
 - mac 模式不再用 Super+数字切换工作区，改用 Super+Ctrl+←/→。
 
+### 🪟 窗口策略与稳定性（合并自 backup/local-main-0914）
+- 动态窗口策略（tiled / floating / follow-profile，PiP、对话框、scratchpad 等特殊窗口单独处理），随持久化记忆。
+- 引擎进程间锁、原子写 JSON、绑定前先解绑，消除重复的合成器处理器；基线快捷键快照与精确还原。
+- Windows 模式注册 `app_launcher`（Super+Space / Win+S），Win+Tab 呼出任务视图。
+
+### 🛡️ 恢复、测试与发布门禁加固
+- Restore 在 Hyprland Lua 执行或 Window Policy reload 失败时保留 `active_overlay.json`、当前模式与 floating 标记，允许 daemon 或 CLI 安全重试。
+- Window Policy reload 失败时回滚请求并返回非零状态，不再把未生效策略报告为成功。
+- 自动测试启用 `OMNIPAL_DRY_RUN`，隔离真实 Hyprland 绑定、吸附 HUD 和 Shell 刷新；benchmark 通过 `try/finally` 恢复原始模式与策略。
+- 发布门禁统一读取代码版本，检查 `git diff --check` 和干净工作树，并将含冷启动的单次切换/恢复预算收紧到 10ms。
+- 保证 `Super + Space` 在 Windows 模式下正确分发并彻底杜绝底层重复快捷键叠加。
+
+### 📚 文档对齐
+- README、功能文档、AGENTS 与代码统一为 v1.8.0、6 个插件、37 个吸附分区。
+- 明确“零污染”边界为不写 Hyprland 配置；当前持久化默认开启，可执行 `omni-profile persist disable` 关闭。
+
 ### 🚧 发版前待办
 - 在真机 Hyprland 上验证 v1.8.0 / v1.9.0 的界面和转发。
 
