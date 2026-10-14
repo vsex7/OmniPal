@@ -95,7 +95,6 @@ After=graphical-session.target
 [Service]
 Type=simple
 ExecStart="${PROJECT_ROOT}/bin/omni-profile" daemon
-ExecStop="${PROJECT_ROOT}/bin/omni-profile" restore
 Restart=on-failure
 RestartSec=3
 

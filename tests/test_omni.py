@@ -1752,11 +1752,15 @@ class TestForwardShortcut(unittest.TestCase):
             }
         }
 
-        with patch.object(self.engine, "_eval_lua", side_effect=fake_eval):
+        # Only natives the overlay displaced are replayed (untouched natives are still bound).
+        displaced = [{"combo": c, "native_unbound": True, "native_restorable": False, "native_count": 0, "name": "x"} for c in ("SUPER + SPACE", "ALT + F4")]
+        with patch.object(self.engine, "_eval_lua", side_effect=fake_eval), \
+             patch.object(self.engine, "_get_active_overlay", return_value=displaced), \
+             patch.object(self.engine, "_reload_hyprland", return_value=True):
             ok = self.engine.restore()
             self.assertTrue(ok)
             self.assertTrue(len(eval_history) > 0)
-            executed_lua = eval_history[-1]
+            executed_lua = next(l for l in eval_history if "local reg" in l)
             self.assertIn("local reg = debug.getregistry()", executed_lua)
             self.assertIn('hl.bind("SUPER + SPACE", fn_9999', executed_lua)
             self.assertIn('o.bind("ALT + F4", "Custom Kill", "custom-kill")', executed_lua)
@@ -1770,11 +1774,13 @@ class TestForwardShortcut(unittest.TestCase):
             BASELINE_FILE.unlink()
 
         with patch.object(self.engine, "_eval_lua", side_effect=fake_eval), \
+             patch.object(self.engine, "_get_active_overlay", return_value=displaced), \
+             patch.object(self.engine, "_reload_hyprland", return_value=True), \
              patch.object(self.engine, "_snapshot_baseline_bindings", return_value={}):
             ok = self.engine.restore()
             self.assertTrue(ok)
             self.assertTrue(len(eval_history) > 0)
-            executed_lua = eval_history[-1]
+            executed_lua = next(l for l in eval_history if LUA_RESTORE_BASELINE in l)
             self.assertIn(LUA_RESTORE_BASELINE, executed_lua)
 
     def test_switch_mode_omarchy_uses_snapshot(self):
@@ -1789,7 +1795,10 @@ class TestForwardShortcut(unittest.TestCase):
             }
         }
         eval_history = []
-        with patch.object(self.engine, "_eval_lua", side_effect=lambda lua: eval_history.append(lua) or True):
+        displaced = [{"combo": "SUPER + SPACE", "native_unbound": True, "native_restorable": False, "native_count": 0}]
+        with patch.object(self.engine, "_eval_lua", side_effect=lambda lua: eval_history.append(lua) or True), \
+             patch.object(self.engine, "_get_active_overlay", return_value=displaced), \
+             patch.object(self.engine, "_reload_hyprland", return_value=True):
             ok = self.engine.switch_mode("omarchy")
             self.assertTrue(ok)
             self.assertTrue(any("fn_7777" in lua for lua in eval_history))
@@ -2322,14 +2331,30 @@ class _FakeCompositor:
                 self.add(g[6], g[7])
         return True
 
-    def details(self):
-        out = {}
+    def hyprctl(self):
+        """What `hyprctl binds -j` shows: Omarchy's code:NN binds come back as key "" / keycode 0."""
+        out = []
         for b in self.binds:
-            out.setdefault((b["modmask"], b["key"]), []).append(dict(b))
+            d = dict(b)
+            if d["key"].startswith("CODE:"):
+                d["key"], d["keycode"] = "", 0
+            out.append(d)
+        return out
+
+    def details(self):
+        from engine.engine import bind_signature
+        out = {}
+        for b in self.hyprctl():
+            sig = bind_signature(b)
+            if sig is not None:
+                out.setdefault(sig, []).append(b)
         return out
 
     def counts(self):
         return {k: len(v) for k, v in self.details().items()}
+
+    def by_desc(self, desc):
+        return sum(1 for b in self.binds if b["description"] == desc)
 
 
 class TestNoDuplicateNativeBinds(unittest.TestCase):
@@ -2440,3 +2465,78 @@ class TestNoDuplicateNativeBinds(unittest.TestCase):
     def test_distinct_binds_on_same_key_are_not_duplicates(self):
         from engine.engine import find_duplicate_binds
         self.assertEqual(find_duplicate_binds(self.fc.binds), {})
+
+
+class TestKeycodeBindsSurviveRestarts(TestNoDuplicateNativeBinds):
+    """code:NN binds (hyprctl: key "" keycode 0) must never be deduped/replayed into copies."""
+    NATIVES = TestNoDuplicateNativeBinds.NATIVES + [
+        (f"SUPER + code:{9 + n}", f"Switch to workspace {n}") for n in range(1, 11)] + [
+        (f"SUPER + SHIFT + code:{9 + n}", f"Move window to workspace {n}") for n in range(1, 11)] + [
+        ("SUPER + code:20", "Expand window left"), ("SUPER + code:21", "Shrink window left")]
+
+    def _stop(self):
+        # legacy unit: ExecStop `omni-profile restore` + the daemon's SIGTERM restore
+        self.assertTrue(self.engine.restore())
+        self.assertTrue(self.engine.restore(sync_persistence=False))
+
+    def _assert_keycode_binds_exact(self, where):
+        for combo, desc in self.NATIVES:
+            if "code:" in combo:
+                self.assertEqual(self.fc.by_desc(desc), 1, f"{where}: {desc}")
+        self.assertEqual(sum(1 for b in self.fc.binds if b["key"] == ""), 0, where)
+
+    def test_restart_cycles_keep_keycode_binds_single(self):
+        e = self.engine
+        for i in range(3):
+            self._stop()
+            self.assertTrue(e.apply_fixed_bindings())  # start in omarchy mode
+            self._assert_keycode_binds_exact(f"restart omarchy #{i}")
+            self.assert_natives_exact(f"restart omarchy #{i}")
+            self.assertTrue(e.switch_mode("windows"))
+            self._stop()
+            self.assertTrue(e.switch_mode("windows"))  # start re-applying a persisted mode
+            self._assert_keycode_binds_exact(f"restart windows #{i}")
+        self.assert_no_dups("end")
+
+    def test_dedupe_never_touches_unidentifiable_binds(self):
+        from engine.engine import find_duplicate_binds
+        evals = []
+        self.engine._eval_lua = lambda code: evals.append(code) or True
+        self.assertEqual(find_duplicate_binds(self.fc.hyprctl()), {})
+        self.assertEqual(self.engine.dedupe_binds(), 0)
+        self.assertEqual(evals, [])
+
+    def test_identical_keycode_binds_with_real_keycode_are_duplicates(self):
+        from engine.engine import find_duplicate_binds
+        b = {"modmask": 64, "key": "", "keycode": 10, "dispatcher": "__lua", "arg": "5", "description": "ws1"}
+        c = dict(b, keycode=11)
+        self.assertEqual(find_duplicate_binds([b, dict(b, arg="6"), c]), {(64, "CODE:10"): 1})
+
+
+class TestStopRunsOneRestore(unittest.TestCase):
+    def test_unit_has_no_execstop_restore(self):
+        text = (PROJECT_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+        self.assertNotIn("ExecStop=", text)
+
+    def test_cli_restore_skips_under_systemd_stop(self):
+        env = dict(os.environ, SERVICE_RESULT="success", INVOCATION_ID="x", PATH=str(PROJECT_ROOT / "tests" / "fakebin") + ":" + os.environ.get("PATH", ""))
+        res = subprocess.run([sys.executable, str(PROJECT_ROOT / "bin" / "omni-profile"), "restore"],
+                             capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("skipping duplicate restore", res.stdout)
+
+
+class TestWindowPolicyPersistsFollowProfile(unittest.TestCase):
+    def test_follow_profile_is_persisted_and_returned(self):
+        e = OmniPalEngine(PROJECT_ROOT)
+        written = {}
+        e.get_persistence_status = lambda: {"enabled": True, "profile": "windows",
+                                            "window_policy": written.get("window_policy", "floating")}
+        e.set_persistence = lambda enabled, profile=None, window_policy=None: written.update(window_policy=window_policy) or True
+        e._apply_window_policy = lambda *a, **k: True
+        e._write_state = lambda *a, **k: None
+        self.assertEqual(e.get_persisted_window_policy(), "floating")
+        self.assertTrue(e.set_window_policy("follow-profile"))
+        self.assertEqual(written["window_policy"], "follow-profile")
+        # startup must see follow-profile (previously ignored, so a stale state 'floating' won)
+        self.assertEqual(e.get_persisted_window_policy(), "follow-profile")

@@ -596,6 +596,27 @@ def _native_unstash_lua(combo: str, present: Optional[int] = 0) -> str:
             f'hl.bind({c}, e.h, e.o) end; R.omnipal_stash[{c}] = nil end')
 
 
+def bind_key_name(b: Dict[str, Any]) -> str:
+    """Key of a `hyprctl binds -j` entry as a combo key: the keysym, else `code:N`, else ""
+    (Omarchy's code:NN binds can show key "" with keycode 0: such binds can't be identified)."""
+    key = str(b.get("key", "") or "")
+    if key:
+        return key
+    try:
+        code = int(b.get("keycode", 0) or 0)
+    except (TypeError, ValueError):
+        code = 0
+    return f"code:{code}" if code > 0 else ""
+
+
+def bind_signature(b: Dict[str, Any]) -> Optional[Tuple[int, str]]:
+    """(modmask, KEY) comparable with combo_signature(); None for binds we can't identify."""
+    key = bind_key_name(b)
+    if not key:
+        return None
+    return (int(b.get("modmask", 0) or 0), key.upper())
+
+
 _MODMASK_NAMES = ((64, "SUPER"), (4, "CTRL"), (8, "ALT"), (1, "SHIFT"))
 
 
@@ -613,7 +634,9 @@ def find_duplicate_binds(binds: List[Dict[str, Any]]) -> Dict[Tuple[int, str], i
     for b in binds:
         if not isinstance(b, dict) or b.get("mouse") or b.get("release") or b.get("submap"):
             continue
-        sig = (int(b.get("modmask", 0) or 0), str(b.get("key", "")).upper())
+        sig = bind_signature(b)
+        if sig is None:  # key "" and keycode 0: never assume two of these are the same combo
+            continue
         k = (sig, b.get("description") or "", b.get("dispatcher") or "",
              "" if b.get("dispatcher") == "__lua" else str(b.get("arg", "")),
              tuple(bool(b.get(f)) for f, _ in _FLAG_OPTS))
@@ -639,7 +662,10 @@ def _dedupe_binds_lua(details: Dict[Tuple[int, str], List[Dict[str, Any]]]) -> L
             if k not in seen:
                 seen.add(k)
                 keep.append(b)
-        c = lua_str(_sig_combo((sig[0], str(lst[0].get("key") or sig[1]))))
+        key = bind_key_name(lst[0])
+        if not key or any(bind_key_name(b) != key for b in lst):
+            continue
+        c = lua_str(_sig_combo((sig[0], key)))
         locs = "; ".join(f'local h{i} = R[{int(b["arg"])}]' for i, b in enumerate(keep))
         check = " and ".join(f'type(h{i}) == "function"' for i in range(len(keep)))
         unb = " ".join(f'hl.unbind({c});' for _ in lst)
@@ -839,7 +865,7 @@ class OmniPalEngine:
         """Returns the enabled persisted window policy for daemon/startup use, or None."""
         status = self.get_persistence_status()
         policy = status.get("window_policy")
-        if status["enabled"] and policy in ("tiled", "floating"):
+        if status["enabled"] and policy in ("follow-profile", "tiled", "floating"):
             return policy
         return None
 
@@ -1071,7 +1097,9 @@ class OmniPalEngine:
                     continue
                 if b.get("submap"):
                     continue
-                sig = (int(b.get("modmask", 0) or 0), str(b.get("key", "")).upper())
+                sig = bind_signature(b)
+                if sig is None:
+                    continue
                 counts[sig] = counts.get(sig, 0) + 1
         except Exception as e:
             _debug(f"binds query failed: {e}")
@@ -1089,7 +1117,9 @@ class OmniPalEngine:
             for b in json.loads(res.stdout or "[]"):
                 if not isinstance(b, dict) or b.get("mouse") or b.get("release") or b.get("submap"):
                     continue
-                sig = (int(b.get("modmask", 0) or 0), str(b.get("key", "")).upper())
+                sig = bind_signature(b)
+                if sig is None:
+                    continue
                 out.setdefault(sig, []).append(b)
         except Exception as e:
             _debug(f"binds detail query failed: {e}")
@@ -1903,10 +1933,8 @@ end
             if not isinstance(b, dict):
                 continue
             modmask = b.get("modmask", 0)
-            key = b.get("key", "")
-            if not key and b.get("keycode", 0) > 0:
-                key = f"code:{b.get('keycode')}"
-            if not key:
+            key = bind_key_name(b)
+            if not key or b.get("submap") or b.get("mouse") or b.get("release"):
                 continue
 
             mods = []
@@ -2031,15 +2059,18 @@ end
             # (their baseline registry refs were freed by the unbind and must not be reused).
             stashed = {b.get("combo") for b in active_overlay
                        if b.get("native_unbound") and b.get("native_count", 0) > 0}
-            filt = None
-            if stashed and self.baseline_bindings:
-                filt = set(self.baseline_bindings) - stashed
+            # Only natives our overlay displaced were ever unbound: replay exactly those. Natives
+            # we never touched are still bound (code:NN binds even show key ""/keycode 0 in
+            # hyprctl, so a live check can't vouch for them) and replaying them stacks copies.
+            displaced = {b.get("combo") for b in active_overlay if b.get("native_unbound") and b.get("combo")}
+            replay = displaced - stashed
             native_counts = self._native_counts(active_overlay)
-            dynamic_lua = self._build_dynamic_restore_lua(filter_combos=filt, native_counts=native_counts)
-            if dynamic_lua:
-                lua_lines.append(dynamic_lua)
-            elif not stashed:
-                lua_lines.append(LUA_RESTORE_BASELINE)
+            if replay:
+                dynamic_lua = self._build_dynamic_restore_lua(filter_combos=replay, native_counts=native_counts)
+                if dynamic_lua:
+                    lua_lines.append(dynamic_lua)
+                elif not self.baseline_bindings:
+                    lua_lines.append(LUA_RESTORE_BASELINE)
 
             lua_lines.extend(self._fixed_bind_ops())
             success = self._eval_lua("; ".join(lua_lines))
@@ -3146,7 +3177,8 @@ def run_daemon():
     persisted_policy = engine.get_persisted_window_policy()
     persisted_mode = engine.get_persisted_profile()
 
-    if persisted_policy:
+    if persisted_policy and (persisted_policy != "follow-profile"
+                             or engine.get_window_policy() != "follow-profile"):
         print(f"📦 Restoring persisted window policy on startup: {persisted_policy}", flush=True)
         engine.set_window_policy(persisted_policy)
     elif persisted_status.get("enabled"):

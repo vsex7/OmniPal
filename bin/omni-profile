@@ -7,6 +7,7 @@ Direct controller for OmniPal runtime engine.
 import argparse
 import json
 import sys
+import os
 from pathlib import Path
 
 # Add project root to sys.path
@@ -118,6 +119,12 @@ def cmd_cycle(engine: OmniPalEngine, args):
         sys.exit(1)
 
 def cmd_restore(engine: OmniPalEngine, args):
+    # Legacy units ran `omni-profile restore` as ExecStop while the daemon's SIGTERM handler
+    # restores too: two concurrent restores (and a persistence rewrite to omarchy on every stop).
+    # systemd sets SERVICE_RESULT only for ExecStop/ExecStopPost, so leave it to the daemon.
+    if os.environ.get("SERVICE_RESULT") and os.environ.get("INVOCATION_ID"):
+        print("ℹ️ systemd stop: the daemon restores keybindings on SIGTERM; skipping duplicate restore")
+        return
     try:
         prev_auto = engine.cancel_auto()
         success = engine.restore()
