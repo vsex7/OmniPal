@@ -286,12 +286,16 @@ def cmd_menu(engine: OmniPalEngine, args):
 def cmd_onboarding(engine: OmniPalEngine, args):
     from engine import onboarding
     act = args.onboarding_action
-    if act == "claim":
-        r = {"show": onboarding.onboarding_claim()}
-    elif act == "reset":
-        r = {"reset": onboarding.onboarding_reset()}
-    else:
-        r = onboarding.onboarding_status()
+    try:
+        if act == "claim":
+            r = {"show": onboarding.onboarding_claim()}
+        elif act == "reset":
+            r = {"reset": onboarding.onboarding_reset()}
+        else:
+            r = onboarding.onboarding_status()
+    except OSError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(1)
     if args.json:
         print(json.dumps(r, ensure_ascii=False))
     elif act == "status":
@@ -413,7 +417,11 @@ def cmd_export(engine: OmniPalEngine, args):
     if out.exists() and not args.force:
         print(f"❌ {out} 已存在，加 --force 覆盖", file=sys.stderr)
         sys.exit(1)
-    out.write_text(text, encoding="utf-8")
+    try:
+        out.write_text(text, encoding="utf-8")
+    except OSError as e:
+        print(f"❌ 写入 {out} 失败: {e.strerror or e}", file=sys.stderr)
+        sys.exit(1)
     print(f"✅ 已导出 '{p_id}' 到 {out}")
 
 def cmd_import(engine: OmniPalEngine, args):
@@ -585,7 +593,10 @@ def cmd_rules(engine: OmniPalEngine, args):
         out = Path(args.output).expanduser()
         if out.exists() and not args.force:
             print(f"❌ {out} 已存在，加 --force 覆盖", file=sys.stderr); sys.exit(1)
-        out.write_text(text, encoding="utf-8")
+        try:
+            out.write_text(text, encoding="utf-8")
+        except OSError as e:
+            print(f"❌ 写入 {out} 失败: {e.strerror or e}", file=sys.stderr); sys.exit(1)
         print(f"✅ 已导出 {len(data['rules'])} 条应用规则到 {out}")
         return
     elif act == "import":
@@ -786,7 +797,9 @@ def main():
     wp_sub = p_wp.add_subparsers(dest="policy_action")
     wp_set = wp_sub.add_parser("set", help="设置全局窗口策略（非跟随模式时会覆盖各模式自带的平铺/浮动）")
     wp_set.add_argument("policy", choices=WINDOW_POLICY_CHOICES, help="follow-profile 跟随模式 / tiled 平铺 / floating 浮动")
-    wp_set.add_argument("--json", action="store_true", help="以 JSON 格式输出结果")
+    # SUPPRESS: `window-policy --json set X` must keep the parent's --json instead of
+    # the subparser resetting it to False.
+    wp_set.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="以 JSON 格式输出结果")
     wp_set.set_defaults(func=cmd_window_policy)
 
     args = parser.parse_args()
