@@ -2456,3 +2456,26 @@ class TestModeDiff(unittest.TestCase):
         self.e._live_bind_details = lambda: {}
         d = self.e.mode_diff("mac")
         self.assertEqual((d["source"], d["count"]), ("none", 0))
+
+
+class TestModeDiffFilters(unittest.TestCase):
+    def setUp(self):
+        self.e = OmniPalEngine(PROJECT_ROOT)
+        self.e._get_active_overlay = lambda: []
+        self.e.baseline_bindings = {}
+        self.e._load_baseline_cache = lambda: {}
+
+    def test_dedupes_and_drops_own_binds(self):
+        from engine.engine import combo_signature, format_combo
+        fb = self.e.fixed_bindings[0]
+        fcombo = format_combo(fb.get("mod", ""), fb["key"])
+        own_name = self.e.actions_catalog[fb["action"]]["name"]
+        tab = combo_signature("SUPER + TAB")
+        self.e._live_bind_details = lambda: {
+            tab: [{"description": "Next workspace", "dispatcher": "__lua", "arg": str(i)} for i in range(14)],
+            combo_signature(fcombo): [{"description": own_name, "dispatcher": "__lua", "arg": "9"}],
+        }
+        d = self.e.mode_diff("windows")
+        t = [x for x in d["takeovers"] if x["combo"] == "SUPER + TAB"][0]
+        self.assertEqual(len(t["native"]), 1)
+        self.assertFalse(any(x["combo"] == fcombo for x in d["takeovers"]))

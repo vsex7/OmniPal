@@ -1129,15 +1129,15 @@ class OmniPalEngine:
         return lua_ops, records
 
     # ---------- fixed entry points (same keys in every mode) ----------
-    def mode_diff(self, mode: str) -> Dict[str, Any]:
+    def mode_diff(self, mode: str, live: Optional[Dict[Tuple[int, str], List[Dict[str, Any]]]] = None) -> Dict[str, Any]:
         """Which Omarchy native binds `mode` takes over, and what they did before.
 
         Natives come from live `hyprctl binds` (minus OmniPal's own overlay); combos the active
         overlay already replaced fall back to the baseline snapshot. `source` says which was used."""
         if mode not in self.profiles:
             raise ValueError(f"unknown mode: {mode}")
-        overlay = self._get_active_overlay()
-        live = self._native_details(overlay)
+        if live is None:
+            live = self._own_filtered_natives()
         if not self.baseline_bindings:
             self._load_baseline_cache()
         baseline: Dict[Tuple[int, str], List[Dict[str, Any]]] = {}
@@ -1154,7 +1154,13 @@ class OmniPalEngine:
                 continue
             seen.add(combo)
             sig = combo_signature(combo)
-            natives = live.get(sig) or baseline.get(sig) or []
+            natives, keys = [], set()
+            for n in (live.get(sig) or baseline.get(sig) or []):
+                k = (n.get("description") or "", n.get("dispatcher") or "",
+                     "" if n.get("dispatcher") == "__lua" else str(n.get("arg", "")))
+                if k not in keys:
+                    keys.add(k)
+                    natives.append(n)
             if not natives:
                 continue
             meta = self.actions_catalog.get(b.get("action"), {})
@@ -1170,6 +1176,18 @@ class OmniPalEngine:
             })
         out.sort(key=lambda e: e["combo"])
         return {"mode": mode, "source": source, "count": len(out), "takeovers": out}
+
+    def _own_filtered_natives(self) -> Dict[Tuple[int, str], List[Dict[str, Any]]]:
+        """Live binds minus everything OmniPal injected: the active overlay and the fixed entries,
+        plus any bind whose description is one of OmniPal's action names."""
+        live = self._native_details(self._get_active_overlay())
+        own = {m.get("name") for m in self.actions_catalog.values() if m.get("name")}
+        out = {}
+        for sig, lst in live.items():
+            keep = [n for n in lst if (n.get("description") or "") not in own]
+            if keep:
+                out[sig] = keep
+        return out
 
     def fixed_combos(self) -> Dict[str, str]:
         return {format_combo(b.get("mod", ""), b["key"]): b["action"] for b in self.fixed_bindings}
@@ -2794,11 +2812,15 @@ end"""
         if report["issues"]:
             report["healthy"] = False
 
+        try:
+            live_natives = self._own_filtered_natives()
+        except Exception:
+            live_natives = {}
         for m in self.profiles:
             if m == "omarchy":
                 continue
             try:
-                report["takeovers"][m] = self.mode_diff(m)
+                report["takeovers"][m] = self.mode_diff(m, live_natives)
             except Exception as e:
                 report["takeovers"][m] = {"mode": m, "error": str(e)}
 
