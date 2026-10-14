@@ -17,6 +17,15 @@ if [ -x "${BIN_TARGET}" ]; then
     "${BIN_TARGET}" restore || true
 fi
 
+# 1.5 从 Omarchy 菜单移除「快捷键模式」（只删 OmniPal 标记区块，用户自己的条目保留）
+PROJECT_CLI="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/bin/omni-profile"
+for cli in "${BIN_TARGET}" "${PROJECT_CLI}"; do
+    if [ -x "${cli}" ]; then
+        "${cli}" menu uninstall || echo "⚠️ 菜单移除失败，请手动删除 ~/.config/omarchy/extensions/omarchy-menu.jsonc 中的 OmniPal 区块"
+        break
+    fi
+done
+
 # 2. 停用并移除 systemd 服务及残留孤儿进程
 if [ -f "${SERVICE_FILE}" ]; then
     echo "🛑 停止并清理 systemd 用户服务..."
@@ -63,7 +72,7 @@ fi
 
 # 6. 清理可选持久化与本地使用统计（仅存在于用户配置目录，绝不涉及 ~/.config/hypr）
 OMNIPAL_CONFIG_DIR_PATH="${OMNIPAL_CONFIG_DIR:-${HOME}/.config/omnipal}"
-for user_file in persistence.json stats.json devices.json; do
+for user_file in persistence.json stats.json devices.json onboarding.json menu.json; do
     if [ -f "${OMNIPAL_CONFIG_DIR_PATH}/${user_file}" ]; then
         rm -f "${OMNIPAL_CONFIG_DIR_PATH}/${user_file}"
         echo "🗑️ 已移除: ${OMNIPAL_CONFIG_DIR_PATH}/${user_file}"

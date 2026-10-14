@@ -107,12 +107,35 @@ systemctl --user daemon-reload 2>/dev/null || echo "⚠️ systemd 用户会话�
 systemctl --user enable --now omnipal.service 2>/dev/null || true
 echo "✅ 用户守护服务已生成: ${SERVICE_FILE}"
 
+# 6. 在 Omarchy 菜单（Super+Alt+Space）Setup 下注册「快捷键模式」子菜单
+#    走 Omarchy 官方用户扩展 ~/.config/omarchy/extensions/omarchy-menu.jsonc，
+#    只写入带标记的 OmniPal 区块，不改 Omarchy 系统文件（H-6）。
+track_mkdir "${HOME}/.config/omarchy/extensions"
+"${BIN_TARGET}" menu install || echo "⚠️ 菜单注册失败，可稍后手动运行: omni-profile menu install"
+
 echo ""
 echo "🎉 OmniPal 安装完成！"
-echo "使用说明:"
-echo "  omni-profile status               # 查看当前快捷键模式"
-echo "  omni-profile switch windows       # 切换至 Windows 11 习惯模式"
-echo "  omni-profile switch mac           # 切换至 macOS 习惯模式"
-echo "  omni-profile cycle                # 轮转切换模式"
-echo "  omni-profile cheatsheet           # 查看当前模式快捷键速查表"
-echo "  omni-profile restore              # 恢复系统原始快捷键"
+echo ""
+echo "记住三个固定快捷键（所有模式通用）:"
+python3 - "${PROJECT_ROOT}" <<'PY'
+import json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+names = {"cheat_sheet": "速查表", "omni_settings": "设置", "task_view": "概览"}
+keys = {"SLASH": "/", "SPACE": "Space"}
+fixed = json.loads((root / "schema" / "fixed_bindings.json").read_text(encoding="utf-8"))["bindings"]
+for b in fixed:
+    mods = [m.capitalize() for m in b["mod"].split()]
+    key = keys.get(b["key"].upper(), b["key"].upper() if len(b["key"]) == 1 else b["key"].capitalize())
+    print(f"  {'+'.join(mods + [key]):<16}{names.get(b['action'], b['action'])}")
+PY
+echo ""
+echo "首次登录会自动打开一次速查表和上手指南；之后可在 Omarchy 菜单 Setup → 快捷键模式 → 上手指南 重新打开。"
+echo ""
+echo "命令行:"
+echo "  omni-profile status               # 查看当前模式"
+echo "  omni-profile switch windows       # 切换到 Windows 11 习惯模式"
+echo "  omni-profile switch mac           # 切换到 macOS 习惯模式"
+echo "  omni-profile cycle                # 轮流切换模式"
+echo "  omni-profile cheatsheet           # 查看当前模式的速查表"
+echo "  omni-profile restore              # 恢复 Omarchy 原生快捷键"

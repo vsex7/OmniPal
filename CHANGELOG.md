@@ -7,6 +7,9 @@
 ## [v1.9.0] - 未发布（草稿）
 
 ### ✨ 新功能
+- **上手指南**：安装后第一次登录自动打开一次速查表，显示三步指南（选模式 / 记住三个固定快捷键 / 在设置里调窗口策略或按应用自动切换）。只显示一次（`~/.config/omnipal/onboarding.json`），之后在速查表按 G 或菜单里重新打开；`omni-profile onboarding reset` 可让它下次登录再出现。安装脚本结束时列出三个固定快捷键。
+- **Omarchy 菜单「快捷键模式」**：Super+Alt+Space → Setup → 快捷键模式，可切换模式、打开设置、速查表、上手指南。通过 Omarchy 官方用户扩展 `~/.config/omarchy/extensions/omarchy-menu.jsonc` 注册，只写一个带标记的区块；`omni-profile menu install|uninstall|status`，安装/卸载脚本自动调用，导入模式后自动刷新。
+- **接管的原生快捷键**：设置的模式卡片和速查表列出该模式接管的 Omarchy 原生快捷键与「原来的功能」，固定入口单独标注；读不到 Hyprland 快捷键时显示灰色提示（数据来自 `omni-profile doctor --json` 的 `takeovers`）。
 - **mac 模式快捷键转发**：Super+W、T、Shift+T、F、Z、Shift+Z、A、S、L、R 和 1–9 会转成对应的 Ctrl 组合发给当前应用，比如 Cmd+W 在浏览器里只关标签页，Cmd+1 切到第一个标签。终端里改发 Ctrl+Shift，Ctrl+W 删单词、Ctrl+C 中断不受影响。
 - **mac 模式应用切换**：Super+Tab 和 Super+Shift+Tab 在当前工作区的窗口之间切换，不切走工作区。
 - 转发完全在 Hyprland 的 Lua 里完成，不启动外部进程，连按不发黏。

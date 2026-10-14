@@ -192,6 +192,72 @@ def cmd_diff(engine: OmniPalEngine, args):
         print(f"  {e['combo']}: {was or '未命名'} → {e['name']}{tag}")
 
 
+def _menu_cli_path() -> str:
+    link = Path.home() / ".local" / "bin" / "omni-profile"
+    return str(link) if link.exists() else str(Path(__file__).resolve())
+
+
+def _resync_menu():
+    """模式列表变化后刷新 Omarchy 菜单里的「快捷键模式」（仅当已注册）。"""
+    from engine import onboarding
+    if not onboarding.menu_installed():
+        return
+    try:
+        onboarding.menu_install(OmniPalEngine(PROJECT_ROOT).list_profiles(), _menu_cli_path())
+    except (OSError, ValueError) as e:
+        print(f"⚠️ 菜单未更新: {e}", file=sys.stderr)
+
+
+def _refresh_omarchy_menu():
+    import shutil, subprocess
+    if shutil.which("omarchy-menu"):
+        subprocess.run(["omarchy-menu", "refresh"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=5, check=False)
+
+
+def cmd_menu(engine: OmniPalEngine, args):
+    from engine import onboarding
+    try:
+        if args.menu_action == "install":
+            r = onboarding.menu_install(engine.list_profiles(), _menu_cli_path())
+            _refresh_omarchy_menu()
+        elif args.menu_action == "uninstall":
+            r = onboarding.menu_uninstall()
+            _refresh_omarchy_menu()
+        else:
+            r = {"path": str(onboarding.menu_extension_path()), "installed": onboarding.menu_installed()}
+    except (OSError, ValueError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(1)
+    if args.json:
+        print(json.dumps(r, ensure_ascii=False))
+    elif args.menu_action == "install":
+        print(f"✅ 已在 Omarchy 菜单 Setup 下添加「快捷键模式」（{len(r['modes'])} 个模式）: {r['path']}")
+    elif args.menu_action == "uninstall":
+        print(f"✅ 已从 {r['path']} 移除 OmniPal 菜单" if r["removed_block"] else "ℹ️ 菜单里没有 OmniPal 条目")
+    else:
+        print(f"{'已注册' if r['installed'] else '未注册'}: {r['path']}")
+
+
+def cmd_onboarding(engine: OmniPalEngine, args):
+    from engine import onboarding
+    act = args.onboarding_action
+    if act == "claim":
+        r = {"show": onboarding.onboarding_claim()}
+    elif act == "reset":
+        r = {"reset": onboarding.onboarding_reset()}
+    else:
+        r = onboarding.onboarding_status()
+    if args.json:
+        print(json.dumps(r, ensure_ascii=False))
+    elif act == "status":
+        print("上手指南已显示过" if r["shown"] else "上手指南还没显示过（下次打开速查表插件时自动弹出）")
+    elif act == "reset":
+        print("已重置，下次登录会再显示一次上手指南")
+    else:
+        print("show" if r["show"] else "skip")
+
+
 def cmd_doctor(engine: OmniPalEngine, args):
     diag = engine.doctor()
     if args.json:
@@ -368,6 +434,7 @@ def cmd_import(engine: OmniPalEngine, args):
     os.replace(tmp_path, dest)
     print(f"✅ 已导入 '{p_id}'（{len(p_data.get('bindings', []))} 个快捷键）到 {dest}")
     print(f"   切换: omni-profile switch {p_id}")
+    _resync_menu()
 
 def cmd_persist(engine: OmniPalEngine, args):
     action = getattr(args, "persist_action", None)
@@ -667,6 +734,18 @@ def main():
     p_diff.add_argument("mode", help="模式 id，如 windows / mac / kde")
     p_diff.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_diff.set_defaults(func=cmd_diff)
+
+    # menu
+    p_menu = subparsers.add_parser("menu", help="在 Omarchy 菜单（Super+Alt+Space）Setup 下注册/移除「快捷键模式」")
+    p_menu.add_argument("menu_action", choices=["install", "uninstall", "status"])
+    p_menu.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_menu.set_defaults(func=cmd_menu)
+
+    # onboarding
+    p_onb = subparsers.add_parser("onboarding", help="首次上手指南：status 查看 / reset 下次登录再显示 / claim 供插件调用")
+    p_onb.add_argument("onboarding_action", choices=["status", "claim", "reset"], nargs="?", default="status")
+    p_onb.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_onb.set_defaults(func=cmd_onboarding)
 
     # daemon
     p_daemon = subparsers.add_parser("daemon", help="前台运行守护进程（带自动退出恢复）")

@@ -9,6 +9,7 @@ import qs.Commons as Commons
 import qs.Ui
 import "Icons.js" as Icons
 import "Safety.js" as Safety
+import "Takeovers.js" as Takeovers
 
 // OmniPal 设置与控制中心面板（omni.settings）
 //
@@ -100,6 +101,9 @@ Item {
 
   // 模式元数据：唯一来源为 profiles/*.json（开窗时经 omni-profile list --json 加载），此处不再硬编码。
   property var modeItems: []
+  // 各模式会接管哪些 Omarchy 原生快捷键（omni-profile doctor --json -> takeovers）
+  property var doctorData: null
+  function takeoverOf(id) { return Takeovers.forMode(root.doctorData, id) }
   // 窗口策略：follow-profile（跟随模式）以外的取值即全局覆盖各模式自带的 window_mode
   property string windowPolicy: "follow-profile"
   readonly property bool policyOverridden: root.windowPolicy !== "follow-profile" && root.windowPolicy !== ""
@@ -142,6 +146,7 @@ Item {
     stateFile.reload()
     listProc.running = true
     persistProc.running = true
+    doctorProc.running = true
     if (root.activeTab === 2) root.refreshStats()
     if (root.activeTab === 3) rulesListProc.running = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -507,6 +512,18 @@ Item {
     }
   }
 
+  // doctor 不健康时退出码为 1，但 JSON 照常输出，所以只看 stdout。
+  Process {
+    id: doctorProc
+    command: ["bash", "-c", "omni-profile doctor --json 2>/dev/null; exit 0"]
+    running: false
+    stdout: StdioCollector {
+      id: doctorOut
+      waitForEnd: true
+    }
+    onExited: function(exitCode) { root.doctorData = Takeovers.parseDoctor(doctorOut.text) }
+  }
+
   Process {
     id: persistProc
     command: ["omni-profile", "persist", "status", "--json"]
@@ -854,6 +871,7 @@ Item {
                       required property int index
 
                       readonly property bool isActive: root.currentMode === modelData.id
+                      readonly property var takeover: root.takeoverOf(modelData.id)
                       readonly property bool hot: modeCardHover.containsMouse
                       readonly property color rowText: isActive ? root.accent : root.foreground
                       width: parent.width
@@ -912,6 +930,36 @@ Item {
                           font.family: Style.font.family
                           font.pixelSize: Style.font.body
                           color: Qt.darker(root.foreground, 1.4)
+                          elide: Text.ElideRight
+                        }
+
+                        // 接管的原生快捷键：组合键 · 原来的功能，固定入口单独标注
+                        Repeater {
+                          model: modeCard.takeover.items.slice(0, 4)
+
+                          delegate: Text {
+                            required property var modelData
+                            width: modeCol.width
+                            textFormat: Text.PlainText
+                            text: modelData.combo + "　原来的功能：" + modelData.was
+                              + (modelData.fixed ? "　· 固定入口" : "")
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.body
+                            color: modelData.fixed ? root.accent : Commons.Color.muted
+                            elide: Text.ElideRight
+                          }
+                        }
+
+                        Text {
+                          visible: modeCard.takeover.items.length > 4 || modeCard.takeover.items.length === 0
+                          width: parent.width
+                          textFormat: Text.PlainText
+                          text: modeCard.takeover.items.length > 4
+                            ? "另有 " + (modeCard.takeover.items.length - 4) + " 个，完整列表见速查表"
+                            : (root.doctorData ? modeCard.takeover.hint : "正在读取接管的原生快捷键…")
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.body
+                          color: Commons.Color.muted
                           elide: Text.ElideRight
                         }
                       }

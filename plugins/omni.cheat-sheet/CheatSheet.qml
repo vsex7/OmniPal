@@ -8,6 +8,7 @@ import qs.Commons as Commons
 import qs.Ui
 import "Icons.js" as Icons
 import "CheatSheetData.js" as SheetData
+import "Takeovers.js" as Takeovers
 
 // OmniPal 快捷键 HUD（omni.cheat-sheet）
 //
@@ -48,6 +49,11 @@ Item {
   property string filterText: ""
   property string filterCategory: "all"
   property var categories: []
+  // 接管的原生快捷键（omni-profile doctor --json -> takeovers），见 Takeovers.js
+  property var doctorData: null
+  property var takeover: ({ status: "unknown", items: [], hint: "" })
+  // 上手指南：首次登录自动显示一次（omni-profile onboarding claim），之后按 G 或菜单重新打开
+  property bool guideShown: false
 
   // Live Modifier Highlight 状态：按住 Super/Alt/Ctrl/Shift 时高亮关联行与键帽
   property var liveMods: ({})
@@ -73,7 +79,19 @@ Item {
     var rows = root.filterCategory === "all"
       ? queryRows
       : SheetData.filterRows(root.rawRows, query, root.filterCategory)
-    root.groups = SheetData.groupByCategory(rows)
+    var groups = SheetData.groupByCategory(rows)
+    root.takeover = Takeovers.forMode(root.doctorData, root.displayMode)
+    if (root.filterCategory === "all" && root.takeover.items.length > 0) {
+      var q = query.toLowerCase()
+      var items = []
+      for (var t = 0; t < root.takeover.items.length; t++) {
+        var e = root.takeover.items[t]
+        var row = { key: e.key, name: e.name + (e.fixed ? "（固定入口）" : ""), description: "原来的功能：" + e.was }
+        if (!q || (row.key + " " + e.combo + " " + row.name + " " + row.description).toLowerCase().indexOf(q) >= 0) items.push(row)
+      }
+      if (items.length > 0) groups.push({ id: "takeover", label: "接管的 Omarchy 原生快捷键", items: items })
+    }
+    root.groups = groups
     root.bindingCount = rows.length
   }
 
@@ -121,6 +139,7 @@ Item {
   }
 
   readonly property string pluginId: (root.manifest && root.manifest.id) || "omni.cheat-sheet"
+  readonly property string doctorMark: "<<<OMNI_DOCTOR>>>"
   readonly property string statusMark: "<<<OMNI_STATUS>>>"
   readonly property string sheetMark: "<<<OMNI_SHEET>>>"
   readonly property string rcMark: "<<<OMNI_RC>>>"
@@ -157,8 +176,13 @@ Item {
   readonly property bool categoryBarShown: root.categories.length > 1
   readonly property int categoryBarHeight: categoryBarShown ? pillFlow.implicitHeight : 0
   readonly property int categoryBarGap: categoryBarShown ? blockGap : 0
+  // 接管信息读不到（source none / 出错）时，列表上方一行灰色提示
+  readonly property bool takeoverNoteShown: root.filterCategory === "all" && root.errorKind === ""
+    && !root.loading && root.rawRows.length > 0
+    && (root.takeover.status === "none" || root.takeover.status === "error" || root.takeover.status === "unknown")
+  readonly property int takeoverNoteHeight: takeoverNoteShown ? Style.font.body + Style.space(8) : 0
   readonly property int chromeHeight: card.contentTopInset + card.contentBottomInset
-    + titleHeight + blockGap * 3 + footerHeight + 1 + categoryBarHeight + categoryBarGap
+    + titleHeight + blockGap * 3 + footerHeight + 1 + categoryBarHeight + categoryBarGap + takeoverNoteHeight
   readonly property int bodyContentHeight: root.groups.length > 0
     ? SheetData.contentHeight(root.groups, root.rowHeight, root.groupHeaderHeight, root.groupGap)
     : root.placeholderHeight
@@ -182,6 +206,34 @@ Item {
   readonly property string engineStatusText: root.appRuleLabel !== ""
     ? (root.engineStatusLabel + " · " + root.appRuleLabel) : root.engineStatusLabel
 
+  // 首次登录：Shell 加载插件几秒后问 Engine 要一次「是否显示上手指南」。
+  // claim 用 O_EXCL 创建 onboarding.json，只有第一次返回 show:true，以后不再弹出。
+  Timer {
+    id: onboardingTimer
+    interval: 4000
+    running: true
+    repeat: false
+    onTriggered: onboardingProc.running = true
+  }
+
+  Process {
+    id: onboardingProc
+    command: ["bash", "-c",
+      "CLI=$(command -v omni-profile 2>/dev/null || echo \"$HOME/.local/bin/omni-profile\"); " +
+      "[ -x \"$CLI\" ] && \"$CLI\" onboarding claim --json 2>/dev/null || echo '{}'"]
+    stdout: StdioCollector {
+      id: onboardingOut
+      waitForEnd: true
+    }
+    onExited: function(exitCode) {
+      var r = ({})
+      try { r = JSON.parse(onboardingOut.text || "{}") } catch (e) { r = ({}) }
+      if (r.show !== true) return
+      if (root.shell && typeof root.shell.summon === "function") root.shell.summon(root.pluginId, '{"guide":true}')
+      else root.open('{"guide":true}')
+    }
+  }
+
   FileView {
     path: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/omnipal/app_rule.json"
     watchChanges: true
@@ -190,6 +242,38 @@ Item {
     onLoadFailed: root.appRule = null
     onFileChanged: reload()
   }
+
+  // 上手指南第 2 步的三个固定快捷键：取自 cheatsheet 输出里 fixed 的行（Engine 单一事实源）。
+  readonly property var fixedRows: {
+    var out = []
+    for (var i = 0; i < root.rawRows.length; i++) {
+      var r = root.rawRows[i]
+      if (r && r.fixed === true) out.push({ combo: Takeovers.prettyCombo(r.key), name: String(r.name || "") })
+    }
+    return out
+  }
+
+  function fixedCombo(action) {
+    for (var i = 0; i < root.rawRows.length; i++) {
+      var r = root.rawRows[i]
+      if (r && r.fixed === true && r.action === action) return Takeovers.prettyCombo(r.key)
+    }
+    return ""
+  }
+
+  function openSettings() {
+    root.guideShown = false
+    root.dismiss()
+    if (root.shell && typeof root.shell.summon === "function") root.shell.summon("omni.settings", "{}")
+    else Quickshell.execDetached(["omarchy-shell", "shell", "summon", "omni.settings", "{}"])
+  }
+
+  readonly property var guideSteps: [
+    { title: "选模式", body: "打开设置" + (root.fixedCombo("omni_settings") ? "（" + root.fixedCombo("omni_settings") + "）" : "")
+        + "，选一个和你习惯一样的模式：Windows、macOS 或 KDE。也可以在 Omarchy 菜单 Setup → 快捷键模式 里切换。" },
+    { title: "记住三个固定快捷键", body: "下面三个键在所有模式里都一样：" },
+    { title: "调窗口策略，或按应用自动切换", body: "在设置里把窗口策略设为平铺、浮动或跟随模式；也可以添加应用规则，切到某个应用时自动换模式。" }
+  ]
 
   // -------------------------------------------------------- data plumbing
 
@@ -201,6 +285,7 @@ Item {
     // 塞进 CLI。
     var mode = typeof payload.mode === "string" ? payload.mode.trim().toLowerCase() : ""
     root.requestedMode = /^[a-z0-9][a-z0-9_-]*$/.test(mode) ? mode : ""
+    root.guideShown = payload.guide === true
 
     root.filterText = ""
     root.filterCategory = "all"
@@ -248,7 +333,8 @@ Item {
       "if [ ! -x \"$CLI\" ]; then echo NO_CLI; exit 0; fi; " +
       "echo '<<<OMNI_STATUS>>>'; \"$CLI\" status --json 2>/dev/null || echo '{}'; " +
       "echo '<<<OMNI_SHEET>>>'; if [ -n \"$0\" ]; then \"$CLI\" cheatsheet \"$0\" --json 2>/dev/null || echo '[]'; else \"$CLI\" cheatsheet --json 2>/dev/null || echo '[]'; fi; " +
-      "echo \"<<<OMNI_RC>>>$?\"",
+      "echo \"<<<OMNI_RC>>>$?\"; " +
+      "echo '<<<OMNI_DOCTOR>>>'; \"$CLI\" doctor --json 2>/dev/null; exit 0",
       root.requestedMode
     ]
     dataProc.running = true
@@ -283,18 +369,21 @@ Item {
     var statusJson = ""
     var sheetJson = ""
     var sheetRc = -1
+    var doctorJson = ""
     var section = ""
     var lines = text.split("\n")
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i]
       if (line === root.statusMark) { section = "status"; continue }
       if (line === root.sheetMark) { section = "sheet"; continue }
+      if (line === root.doctorMark) { section = "doctor"; continue }
       if (line.indexOf(root.rcMark) === 0) {
         sheetRc = parseInt(line.slice(root.rcMark.length), 10)
         continue
       }
       if (section === "status") statusJson += line
       else if (section === "sheet") sheetJson += line
+      else if (section === "doctor") doctorJson += line + "\n"
     }
 
     // Status is best-effort: the list still renders without it, the header just
@@ -340,6 +429,7 @@ Item {
     }
 
     root.rawRows = rows
+    root.doctorData = Takeovers.parseDoctor(doctorJson)
     root.applyFilter()
     root.errorKind = ""
     root.errorCommand = ""
@@ -414,7 +504,14 @@ Item {
           var scrollFloor = 0
           var scrollCeil = Math.max(0, body.contentHeight - body.height)
           if (event.key === Qt.Key_Escape) {
-            root.dismiss()
+            if (root.guideShown) root.guideShown = false
+            else root.dismiss()
+            event.accepted = true
+          } else if (event.key === Qt.Key_G) {
+            root.guideShown = !root.guideShown
+            event.accepted = true
+          } else if (root.guideShown && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+            root.guideShown = false
             event.accepted = true
           } else if (event.key === Qt.Key_Tab) {
             root.cycleCategory((event.modifiers & Qt.ShiftModifier) !== 0 ? -1 : 1)
@@ -594,10 +691,29 @@ Item {
         }
       }
 
+      Text {
+        id: takeoverNote
+        anchors.top: categoryBar.bottom
+        anchors.topMargin: 0
+        anchors.left: parent.left
+        anchors.leftMargin: card.contentLeftInset
+        anchors.right: parent.right
+        anchors.rightMargin: card.contentRightInset
+        height: root.takeoverNoteHeight
+        visible: root.takeoverNoteShown
+        textFormat: Text.PlainText
+        text: root.takeover.hint
+        color: Commons.Color.muted
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        elide: Text.ElideRight
+        verticalAlignment: Text.AlignVCenter
+      }
+
       // ------------------------------------------------------------- body
       Flickable {
         id: body
-        anchors.top: categoryBar.bottom
+        anchors.top: takeoverNote.bottom
         anchors.topMargin: root.blockGap
         anchors.left: parent.left
         anchors.leftMargin: card.contentLeftInset
@@ -758,7 +874,7 @@ Item {
       // -------------------------------------------------- degraded states
       Item {
         id: placeholder
-        anchors.top: categoryBar.bottom
+        anchors.top: takeoverNote.bottom
         anchors.topMargin: root.blockGap
         anchors.left: parent.left
         anchors.leftMargin: card.contentLeftInset
@@ -831,7 +947,7 @@ Item {
           textFormat: Text.PlainText
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: "Esc 关闭 · / 搜索 · Tab 切分类 · R 刷新 · ↑↓ 滚动 · 按住 Super/Alt/Ctrl/Shift 高亮关联键位"
+          text: "Esc 关闭 · / 搜索 · Tab 切分类 · R 刷新 · G 上手指南 · 按住 Super/Alt/Ctrl/Shift 高亮关联键位"
           color: root.foreground
           opacity: 0.42
           font.family: root.fontFamily
@@ -847,6 +963,153 @@ Item {
           opacity: 0.32
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
+        }
+      }
+
+      // ------------------------------------------------------- 上手指南
+      // PopupCard 外观：popups 表面 + 2px accent 边框。覆盖在列表之上，Esc / Enter / 知道了 关闭。
+      BorderSurface {
+        id: guideCard
+        visible: root.guideShown
+        z: 10
+        anchors.centerIn: parent
+        width: Math.min(parent.width - Style.space(48), Style.space(520))
+        height: guideCol.implicitHeight + Style.spacing.popupPadding * 2
+        radius: root.cornerRadius
+        color: Commons.Color.popups.background
+        borderSpec: Border.localOrSurfaceSpec("popups", "border", Commons.Color.accent, Commons.Color.popups.border, Math.max(1, Style.space(2)))
+        padding: Style.spacing.popupPadding
+
+        MouseArea { anchors.fill: parent; onClicked: {} }
+
+        Column {
+          id: guideCol
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.margins: Style.spacing.popupPadding
+          spacing: Style.space(12)
+
+          Text {
+            textFormat: Text.PlainText
+            text: "上手指南"
+            color: Commons.Color.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.heading
+          }
+
+          Repeater {
+            model: root.guideSteps
+
+            delegate: Row {
+              id: step
+              required property var modelData
+              required property int index
+              width: guideCol.width
+              spacing: Style.space(10)
+
+              Text {
+                id: stepNo
+                textFormat: Text.PlainText
+                text: String(step.index + 1)
+                color: Commons.Color.accent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.subtitle
+              }
+
+              Column {
+                width: step.width - stepNo.width - step.spacing
+                spacing: Style.space(4)
+
+                Text {
+                  textFormat: Text.PlainText
+                  text: step.modelData.title
+                  color: Commons.Color.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  font.weight: Font.Medium
+                }
+
+                Text {
+                  width: parent.width
+                  textFormat: Text.PlainText
+                  text: step.modelData.body
+                  color: Commons.Color.muted
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  wrapMode: Text.Wrap
+                }
+
+                Repeater {
+                  model: step.index === 1 ? root.fixedRows : []
+
+                  delegate: Text {
+                    required property var modelData
+                    textFormat: Text.PlainText
+                    text: modelData.combo + "　" + modelData.name
+                    color: Commons.Color.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                  }
+                }
+
+                Text {
+                  visible: step.index === 1 && root.fixedRows.length === 0
+                  textFormat: Text.PlainText
+                  text: "暂时读不到，可以在速查表的「OmniPal 固定入口」分组里查看。"
+                  color: Commons.Color.muted
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+              }
+            }
+          }
+
+          Item {
+            width: guideCol.width
+            height: guideButtons.implicitHeight
+
+            Text {
+              anchors.left: parent.left
+              anchors.right: guideButtons.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: "以后按 G，或在 Omarchy 菜单 Setup → 快捷键模式 → 上手指南 重新打开"
+              color: Commons.Color.muted
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.Wrap
+            }
+
+            Row {
+              id: guideButtons
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(6)
+
+              Button {
+                text: "打开设置"
+                bordered: true
+                foreground: Commons.Color.foreground
+                accent: Commons.Color.accent
+                fontFamily: root.fontFamily
+                fontSize: Style.font.body
+                onClicked: root.openSettings()
+              }
+
+              Button {
+                text: "知道了"
+                bordered: true
+                selected: true
+                foreground: Commons.Color.foreground
+                accent: Commons.Color.accent
+                fontFamily: root.fontFamily
+                fontSize: Style.font.body
+                onClicked: root.guideShown = false
+              }
+            }
+          }
         }
       }
     }
