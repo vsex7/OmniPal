@@ -18,6 +18,7 @@ import atexit
 import datetime
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -66,6 +67,42 @@ LUA_DISPATCHERS = {
     "workspace_next": "hl.dsp.focus({ workspace = 'e+1' })",
     "workspace_prev": "hl.dsp.focus({ workspace = 'e-1' })",
 }
+
+# Actions that forward a shortcut to the focused app (Hyprland `sendshortcut`).
+# Their combo usually collides with an Omarchy native bind, so the native bind is
+# unbound while the overlay is active and restored via `hyprctl reload`.
+FORWARD_ACTION = "forward_shortcut"
+TERMINAL_CLASSES = (
+    "alacritty", "kitty", "foot", "footclient", "ghostty", "com.mitchellh.ghostty",
+    "org.wezfurlong.wezterm", "wezterm", "xterm", "konsole", "org.kde.konsole",
+    "gnome-terminal", "org.gnome.terminal", "org.gnome.ptyxis", "tilix", "terminator",
+)
+_FORWARD_MOD_RE = re.compile(r"^[A-Za-z]+$")
+_FORWARD_KEY_RE = re.compile(r"^[A-Za-z0-9_]{1,24}$")
+
+
+def parse_forward(spec: str):
+    """'CTRL SHIFT T' -> (['CTRL','SHIFT'], 'T'). Raises ValueError on bad input."""
+    parts = str(spec or "").replace("+", " ").split()
+    if not parts:
+        raise ValueError("empty forward shortcut")
+    *mods, key = parts
+    mods = [m.upper() for m in mods]
+    for m in mods:
+        if not _FORWARD_MOD_RE.match(m):
+            raise ValueError(f"bad modifier: {m!r}")
+    if not _FORWARD_KEY_RE.match(key):
+        raise ValueError(f"bad key: {key!r}")
+    return mods, (key.upper() if len(key) == 1 else key)
+
+
+def forward_for_class(spec: str, window_class: str):
+    """Terminals keep Ctrl+W / Ctrl+C for the shell, so they get Ctrl+Shift instead."""
+    mods, key = parse_forward(spec)
+    if (window_class or "").strip().lower() in TERMINAL_CLASSES and "CTRL" in mods and "SHIFT" not in mods:
+        mods = mods + ["SHIFT"]
+    return mods, key
+
 
 def _debug(msg) -> None:
     """Prints swallowed errors to stderr when OMNIPAL_DEBUG=1."""
@@ -627,7 +664,36 @@ class OmniPalEngine:
             _debug(_e)
 
         self._write_state("omarchy", 0)
+        # State is already "omarchy", so the reload watcher won't re-apply an overlay.
+        if any(b.get("native_unbound") for b in active_overlay):
+            success = self._reload_hyprland() and success
         return success
+
+    def _reload_hyprland(self) -> bool:
+        try:
+            res = subprocess.run(["hyprctl", "reload"], capture_output=True, text=True, check=False)
+            return res.returncode == 0
+        except Exception as e:
+            print(f"hyprctl reload failed: {e}", file=sys.stderr)
+            return False
+
+    def send_shortcut(self, spec: str, window_class: Optional[str] = None) -> bool:
+        """Forwards a shortcut to the focused window, adjusted for terminals."""
+        if window_class is None:
+            window_class = ""
+            try:
+                res = subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, check=False)
+                window_class = (json.loads(res.stdout or "{}") or {}).get("class", "") or ""
+            except Exception as e:
+                _debug(e)
+        try:
+            mods, key = forward_for_class(spec, window_class)
+        except ValueError as e:
+            print(f"Invalid shortcut: {e}", file=sys.stderr)
+            return False
+        arg = f"{' '.join(mods)}, {key}, activewindow"
+        res = subprocess.run(["hyprctl", "dispatch", "sendshortcut", arg], capture_output=True, text=True, check=False)
+        return res.returncode == 0 and "error" not in (res.stdout or "").lower()
 
     def switch_mode(self, target_mode: str, _rollback: bool = False) -> bool:
         """Atomically switches the in-memory keybindings to target_mode with rollback on error."""
@@ -640,7 +706,9 @@ class OmniPalEngine:
         target_profile = self.profiles[target_mode]
         target_bindings = target_profile.get("bindings", [])
 
-        # 1. Unbind previous overlay
+        # 1. Unbind previous overlay (a reload brings back natives it had unbound)
+        if any(b.get("native_unbound") for b in self._get_active_overlay()):
+            self.restore()
         current_overlay = self._get_active_overlay()
         lua_ops = []
         for b in current_overlay:
@@ -660,7 +728,18 @@ class OmniPalEngine:
                 continue
 
             combo = format_combo(mod, key)
-            if action_id in LUA_DISPATCHERS:
+            unbind_native = False
+            if action_id == FORWARD_ACTION:
+                try:
+                    mods, fkey = parse_forward(b.get("forward", ""))
+                except ValueError as e:
+                    print(f"Skipping forward binding {combo}: {e}", file=sys.stderr)
+                    continue
+                cmd = "omni-profile send " + " ".join(mods + [fkey])
+                lua_ops.append(f'hl.unbind({lua_str(combo)})')
+                lua_ops.append(f'o.bind({lua_str(combo)}, {lua_str(name)}, {lua_str(cmd)})')
+                unbind_native = True
+            elif action_id in LUA_DISPATCHERS:
                 dispatcher_expr = LUA_DISPATCHERS[action_id]
                 lua_ops.append(f'o.bind({lua_str(combo)}, {lua_str(name)}, {dispatcher_expr})')
             else:
@@ -670,7 +749,8 @@ class OmniPalEngine:
             new_overlay_records.append({
                 "action": action_id,
                 "combo": combo,
-                "name": name
+                "name": name,
+                **({"native_unbound": True} if unbind_native else {}),
             })
 
         # 3. Execute batch in single eval call (< 5ms)

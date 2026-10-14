@@ -258,6 +258,14 @@
       "description": "呼出 OmniPal 设置与模式控制面板",
       "dispatcher": "exec",
       "default_arg": "omarchy-shell shell toggle omni.settings"
+    },
+    {
+      "id": "forward_shortcut",
+      "name": "转发快捷键到应用",
+      "category": "app",
+      "description": "把组合键作为另一个快捷键发给当前窗口（如 Super+W 发成 Ctrl+W），终端里自动改发 Ctrl+Shift",
+      "dispatcher": "exec",
+      "default_arg": ""
     }
   ]
 }

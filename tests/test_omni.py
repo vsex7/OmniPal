@@ -1229,5 +1229,66 @@ class TestAppRulesExportImport(unittest.TestCase):
         data = json.loads((Path(self._tmp.name) / "app_rules.json").read_text())
         self.assertEqual([r["class"] for r in data["rules"]], ["kitty"])
 
+class TestForwardShortcut(unittest.TestCase):
+    """mac mode forwards Super+W etc. to the app via sendshortcut."""
+
+    def setUp(self):
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.evals, self.calls = [], []
+        self.engine._eval_lua = lambda code: self.evals.append(code) or True
+        self.engine._reload_hyprland = lambda: self.calls.append("reload") or True
+        self.engine._write_active_overlay = lambda recs: setattr(self, "overlay", recs)
+        self.engine._get_active_overlay = lambda: getattr(self, "overlay", [])
+        self.engine._write_state = lambda *a, **k: None
+        self.engine.record_switch = lambda *a, **k: None
+        self.engine.get_persistence_status = lambda: {"enabled": False}
+
+    def test_parse_and_terminal(self):
+        from engine.engine import parse_forward, forward_for_class
+        self.assertEqual(parse_forward("ctrl shift t"), (["CTRL", "SHIFT"], "T"))
+        self.assertEqual(forward_for_class("CTRL W", "firefox"), (["CTRL"], "W"))
+        self.assertEqual(forward_for_class("CTRL W", "Alacritty"), (["CTRL", "SHIFT"], "W"))
+        self.assertEqual(forward_for_class("CTRL SHIFT T", "kitty"), (["CTRL", "SHIFT"], "T"))
+        for bad in ["", "CTRL W;rm", 'CTRL "x', "C-1 W"]:
+            with self.assertRaises(ValueError):
+                parse_forward(bad)
+
+    def test_mac_unbinds_native_and_quotes_lua(self):
+        from engine.engine import lua_str
+        self.assertTrue(self.engine.switch_mode("mac"))
+        lua = self.evals[-1]
+        fw = [b for b in self.overlay if b.get("native_unbound")]
+        self.assertGreaterEqual(len(fw), 10)
+        for b in fw:
+            self.assertIn(f"hl.unbind({lua_str(b['combo'])})", lua)
+        self.assertIn(lua_str("omni-profile send CTRL W"), lua)
+        # every forwarded command appears only as a lua_str literal
+        for stmt in lua.split("; "):
+            if "omni-profile send" in stmt:
+                self.assertRegex(stmt, r'^o\.bind\("[^"]*", "[^"]*", "omni-profile send [A-Z0-9 ]+"\)$')
+
+    def test_bad_forward_is_skipped(self):
+        prof = self.engine.profiles["mac"]
+        saved = list(prof["bindings"])
+        prof["bindings"] = saved + [{"mod": "SUPER", "key": "F12", "action": "forward_shortcut", "forward": 'CTRL ")os.exit('}]
+        try:
+            self.engine.switch_mode("mac")
+        finally:
+            prof["bindings"] = saved
+        self.assertNotIn("os.exit", self.evals[-1])
+
+    def test_restore_and_switch_reload_natives(self):
+        self.engine.switch_mode("mac")
+        self.engine.switch_mode("windows")
+        self.assertEqual(self.calls, ["reload"])
+        self.assertFalse(any(b.get("native_unbound") for b in self.overlay))
+        self.engine.restore()
+        self.assertEqual(self.calls, ["reload"])  # windows unbound nothing native
+
+    def test_send_cli_stub(self):
+        self.assertTrue(self.engine.send_shortcut("CTRL W", window_class="kitty"))
+        self.assertFalse(self.engine.send_shortcut("CTRL W;x", window_class="kitty"))
+
+
 if __name__ == "__main__":
     unittest.main()

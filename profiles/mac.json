@@ -113,6 +113,120 @@
       "action": "emoji_picker",
       "mod": "SUPER CTRL",
       "key": "space"
+    },
+    {
+      "mod": "SUPER",
+      "key": "W",
+      "action": "forward_shortcut",
+      "forward": "CTRL W"
+    },
+    {
+      "mod": "SUPER",
+      "key": "T",
+      "action": "forward_shortcut",
+      "forward": "CTRL T"
+    },
+    {
+      "mod": "SUPER SHIFT",
+      "key": "T",
+      "action": "forward_shortcut",
+      "forward": "CTRL SHIFT T"
+    },
+    {
+      "mod": "SUPER",
+      "key": "F",
+      "action": "forward_shortcut",
+      "forward": "CTRL F"
+    },
+    {
+      "mod": "SUPER",
+      "key": "Z",
+      "action": "forward_shortcut",
+      "forward": "CTRL Z"
+    },
+    {
+      "mod": "SUPER SHIFT",
+      "key": "Z",
+      "action": "forward_shortcut",
+      "forward": "CTRL SHIFT Z"
+    },
+    {
+      "mod": "SUPER",
+      "key": "A",
+      "action": "forward_shortcut",
+      "forward": "CTRL A"
+    },
+    {
+      "mod": "SUPER",
+      "key": "S",
+      "action": "forward_shortcut",
+      "forward": "CTRL S"
+    },
+    {
+      "mod": "SUPER",
+      "key": "L",
+      "action": "forward_shortcut",
+      "forward": "CTRL L"
+    },
+    {
+      "mod": "SUPER",
+      "key": "R",
+      "action": "forward_shortcut",
+      "forward": "CTRL R"
+    },
+    {
+      "mod": "SUPER",
+      "key": "1",
+      "action": "forward_shortcut",
+      "forward": "CTRL 1"
+    },
+    {
+      "mod": "SUPER",
+      "key": "2",
+      "action": "forward_shortcut",
+      "forward": "CTRL 2"
+    },
+    {
+      "mod": "SUPER",
+      "key": "3",
+      "action": "forward_shortcut",
+      "forward": "CTRL 3"
+    },
+    {
+      "mod": "SUPER",
+      "key": "4",
+      "action": "forward_shortcut",
+      "forward": "CTRL 4"
+    },
+    {
+      "mod": "SUPER",
+      "key": "5",
+      "action": "forward_shortcut",
+      "forward": "CTRL 5"
+    },
+    {
+      "mod": "SUPER",
+      "key": "6",
+      "action": "forward_shortcut",
+      "forward": "CTRL 6"
+    },
+    {
+      "mod": "SUPER",
+      "key": "7",
+      "action": "forward_shortcut",
+      "forward": "CTRL 7"
+    },
+    {
+      "mod": "SUPER",
+      "key": "8",
+      "action": "forward_shortcut",
+      "forward": "CTRL 8"
+    },
+    {
+      "mod": "SUPER",
+      "key": "9",
+      "action": "forward_shortcut",
+      "forward": "CTRL 9"
     }
   ]
 }

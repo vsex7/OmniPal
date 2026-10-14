@@ -121,6 +121,10 @@ def cmd_cheatsheet(engine: OmniPalEngine, args):
         desc_str = item["description"]
         print(f"{key_str}{name_str}{desc_str}")
 
+def cmd_send(engine: OmniPalEngine, args):
+    if not engine.send_shortcut(" ".join(args.keys), window_class=args.window_class):
+        sys.exit(1)
+
 def cmd_snap(engine: OmniPalEngine, args):
     success = engine.snap(args.zone, target_address=getattr(args, "address", None), no_hud=getattr(args, "no_hud", False))
     if not success:
@@ -539,6 +543,11 @@ def main():
     p_cheat.set_defaults(func=cmd_cheatsheet)
 
     # snap
+    p_send = subparsers.add_parser("send", help="把快捷键转发给当前窗口（终端自动改为 Ctrl+Shift）")
+    p_send.add_argument("keys", nargs="+", help="例如: CTRL W")
+    p_send.add_argument("--class", dest="window_class", default=None, help="指定窗口类名（默认读取当前焦点窗口）")
+    p_send.set_defaults(func=cmd_send)
+
     p_snap = subparsers.add_parser("snap", help="触发窗口吸附分屏或呼出吸附布局菜单")
     p_snap.add_argument("zone", help="目标吸附区域 (如 left, right, top-left, center, third-center) 或 layouts (呼出选择器)")
     p_snap.add_argument("address", nargs="?", default=None, help="目标窗口十六进制地址 (如 0x56c7c335e060，默认探测鼠标悬停窗口或活动窗口)")
