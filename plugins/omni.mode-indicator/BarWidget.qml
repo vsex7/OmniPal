@@ -309,7 +309,7 @@ Panel {
     runCmd("which omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1 && omarchy-launch-floating-terminal-with-presentation 'omni-profile doctor' || (which xdg-terminal-exec >/dev/null 2>&1 && xdg-terminal-exec -e omni-profile doctor || omni-profile doctor)")
   }
 
-  ShellIpc {
+  IpcHandler {
     target: "omni.mode-indicator"
     function open(): void { root.open() }
     function close(): void { root.close() }
@@ -363,11 +363,12 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: panel.loadedContent
+    focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(340))
-    contentHeight: panel.fittedContentHeight(panel.loadedContentHeight)
+    contentHeight: panel.fittedContentHeight(keyCatcher.implicitHeight)
 
-    content: PanelKeyCatcher {
+    // Direct child (default contentItem) works on 4.0.4 and main.
+    PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
       implicitHeight: panelLayout.implicitHeight

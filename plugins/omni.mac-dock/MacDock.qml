@@ -95,7 +95,7 @@ Item {
     clientsProc.running = true
   }
 
-  ShellIpc {
+  IpcHandler {
     target: "omni.mac-dock"
     function toggle(): void { root.toggle() }
     function open(): void { root.open("{}") }
@@ -382,7 +382,7 @@ Item {
             }
 
             function bounce() {
-              if (root.magnify && !Style.reduceMotion) bounceAnim.restart()
+              if (root.magnify && !root.theme.reduceMotion) bounceAnim.restart()
             }
 
             // 纵向弹性起跳槽：点击/激活时整槽上跳，带阻尼回落
@@ -396,7 +396,7 @@ Item {
                   target: bounceSlot
                   property: "y"
                   to: -Style.space(13)
-                  duration: Style.duration(140)
+                  duration: root.theme.duration(140)
                   easing.type: Easing.OutCubic
                 }
                 NumberAnimation {
@@ -563,7 +563,7 @@ Item {
       padding: Style.spacing.sm
       opacity: root.contextItem !== null ? 1 : 0
       visible: root.contextItem !== null || opacity > 0
-      Behavior on opacity { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutQuad } }
+      Behavior on opacity { NumberAnimation { duration: root.theme.duration(140); easing.type: Easing.OutQuad } }
 
 
       Column {

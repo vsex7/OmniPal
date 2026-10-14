@@ -202,7 +202,7 @@ Item {
     }
   }
 
-  ShellIpc {
+  IpcHandler {
     target: "omni.overview"
     function toggle(): void { root.toggle() }
     function open(): void { root.open("{}") }
@@ -225,7 +225,7 @@ Item {
       opacity: root.opened ? 1.0 : 0.0
 
       Behavior on opacity {
-        NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic }
+        NumberAnimation { duration: root.theme.duration(140); easing.type: Easing.OutCubic }
       }
 
       // ----------------------------------------------------

@@ -1015,7 +1015,8 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertIn("import qs.Ui", content)
         self.assertIn("KeyboardPanel", content)
         self.assertIn("BarIconButton", content)
-        self.assertIn("ShellIpc", content)
+        self.assertIn("IpcHandler", content)
+        self.assertNotIn("ShellIpc", content)  # absent on Omarchy 4.0.4
         self.assertNotIn("PopupCard", content)
         self.assertIn("windowPolicy", content)
         self.assertIn("effectiveWindowMode", content)

@@ -301,7 +301,7 @@ def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = No
     else:
         print("\n💥 Consistency check failed.", file=sys.stderr)
     # Shared design files: each plugin's copy must match plugins/shared/<name>
-    for shared_name in ("Tokens.js", "OmniTheme.qml", "Icons.js"):
+    for shared_name in ("Tokens.js", "OmniTheme.qml", "Icons.js", "OverlayWindow.qml"):
         shared_file = project_root / "plugins" / "shared" / shared_name
         if not shared_file.exists():
             continue

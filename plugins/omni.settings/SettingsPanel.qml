@@ -525,7 +525,7 @@ Item {
         : 0
       radius: parent.radius
       color: Util.alpha(rankRow.barColor, 0.22)
-      Behavior on width { NumberAnimation { duration: Style.duration(200); easing.type: Easing.OutCubic } }
+      Behavior on width { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutCubic } }
     }
 
     Rectangle {
@@ -603,7 +603,7 @@ Item {
       borderSpec: root.borderSpec
       padding: Style.space(20)
       opacity: root.opened ? 1.0 : 0.0
-      Behavior on opacity { NumberAnimation { duration: Style.duration(140) } }
+      Behavior on opacity { NumberAnimation { duration: root.theme.duration(140) } }
 
       MouseArea {
         anchors.fill: parent
@@ -719,7 +719,7 @@ Item {
             anchors.fill: parent
             opacity: root.activeTab === 0 ? 1.0 : 0.0
             visible: root.activeTab === 0 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: Style.duration(200); easing.type: Easing.OutQuad } }
+            Behavior on opacity { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -836,7 +836,7 @@ Item {
             anchors.fill: parent
             opacity: root.activeTab === 1 ? 1.0 : 0.0
             visible: root.activeTab === 1 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: Style.duration(200); easing.type: Easing.OutQuad } }
+            Behavior on opacity { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -1083,7 +1083,7 @@ Item {
             anchors.fill: parent
             opacity: root.activeTab === 2 ? 1.0 : 0.0
             visible: root.activeTab === 2 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: Style.duration(200); easing.type: Easing.OutQuad } }
+            Behavior on opacity { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent
@@ -1371,7 +1371,7 @@ Item {
             anchors.fill: parent
             opacity: root.activeTab === 3 ? 1.0 : 0.0
             visible: root.activeTab === 3 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutQuad } }
+            Behavior on opacity { NumberAnimation { duration: root.theme.duration(140); easing.type: Easing.OutQuad } }
 
             Flickable {
               anchors.fill: parent

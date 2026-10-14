@@ -152,7 +152,7 @@ Item {
   }
 
   // IPC 接口 (唯一的外部唤出与状态指令通道，杜绝双重监听)
-  ShellIpc {
+  IpcHandler {
     target: "omni.snap-feedback"
     function snap(z: string): void {
       root.open(JSON.stringify({ zone: z, interactive: false }))
@@ -246,7 +246,7 @@ Item {
       visible: root.interactive
       color: Commons.Color.menu.scrim
       opacity: root.interactive ? 1.0 : 0.0
-      Behavior on opacity { NumberAnimation { duration: Style.duration(90) } }
+      Behavior on opacity { NumberAnimation { duration: root.theme.duration(90) } }
 
       MouseArea {
         anchors.fill: parent
@@ -592,16 +592,16 @@ Item {
         property: "opacity"
         from: 0.0
         to: 1.0
-        duration: Style.duration(90)
+        duration: root.theme.duration(90)
         easing.type: Easing.OutCubic
       }
-      PauseAnimation { duration: Style.duration(200) }
+      PauseAnimation { duration: root.theme.duration(200) }
       NumberAnimation {
         target: previewContainer
         property: "opacity"
         from: 1.0
         to: 0.0
-        duration: Style.duration(140)
+        duration: root.theme.duration(140)
         easing.type: Easing.InQuad
       }
     }
@@ -614,7 +614,7 @@ Item {
       width: Math.min(Style.space(560), parent.width - Style.space(32))
       height: Math.min(Style.space(370), parent.height - Style.space(32))
       opacity: root.interactive ? 1.0 : 0.0
-            Behavior on opacity { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic } }
+            Behavior on opacity { NumberAnimation { duration: root.theme.duration(140); easing.type: Easing.OutCubic } }
 
       readonly property real cardRadius: root.hudRadius
 
@@ -765,8 +765,8 @@ Item {
               borderSpec: Border.controlSpec(isSelectedTpl ? "focus" : (isCardHovered ? "hover-cursor" : "normal"), root.theme.text, root.snapColor)
               opacity: isDimmed ? 0.45 : 1.0
 
-              Behavior on color { ColorAnimation { duration: Style.duration(120) } }
-              Behavior on opacity { NumberAnimation { duration: Style.duration(90) } }
+              Behavior on color { ColorAnimation { duration: root.theme.duration(120) } }
+              Behavior on opacity { NumberAnimation { duration: root.theme.duration(90) } }
 
 
               MouseArea {
@@ -876,8 +876,8 @@ Item {
                       border.color: isHovered ? root.snapColor : Util.alpha(root.theme.text, 0.16)
                       border.width: Math.max(1, Style.normalBorderWidth)
 
-                      Behavior on color { ColorAnimation { duration: Style.duration(90) } }
-                      Behavior on border.color { ColorAnimation { duration: Style.duration(90) } }
+                      Behavior on color { ColorAnimation { duration: root.theme.duration(90) } }
+                      Behavior on border.color { ColorAnimation { duration: root.theme.duration(90) } }
 
                       // 选中模板时的数字按键角标 [1]、[2]...
                       Rectangle {

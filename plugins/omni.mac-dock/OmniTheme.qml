@@ -72,4 +72,10 @@ QtObject {
   // Surface border = what OverlayWindow/KeyboardPanel cards use for [menu]/[popups].
   readonly property int borderStrong: Math.max(1, Style.space(2))
   readonly property int borderHair: Math.max(1, Style.normalBorderWidth)
+
+  // ---- motion: Style.reduceMotion / Style.duration() only exist on Omarchy main;
+  // Omarchy 4.0.4 has neither, so read them dynamically and fall back to full motion.
+  function styleFlag(name) { return Style[name] === true }
+  readonly property bool reduceMotion: t.styleFlag("reduceMotion")
+  function duration(ms) { return t.reduceMotion ? 0 : ms }
 }
