@@ -185,6 +185,8 @@ def cmd_doctor(engine: OmniPalEngine, args):
 
     ov = diag.get("overlay", {})
     print(f"  • 内存热绑定生效: {ov.get('verified_in_hyprland')}/{ov.get('count')} 项匹配")
+    conflicts = diag.get("conflicts", [])
+    print(f"  • 与原生快捷键冲突: {'✅ 无' if not conflicts else '⚠️ ' + str(len(conflicts)) + ' 项 (' + ', '.join(conflicts) + ')'}")
 
     print(f"  • Schema 与 Profile 一致性: {'✅ 100% 校验通过' if diag.get('consistency') else '❌ 校验失败'}")
 

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -1306,6 +1307,30 @@ class TestForwardShortcut(unittest.TestCase):
     def test_send_cli_stub(self):
         self.assertTrue(self.engine.send_shortcut("CTRL W", window_class="kitty"))
         self.assertFalse(self.engine.send_shortcut("CTRL W;x", window_class="kitty"))
+
+
+class TestNativeConflicts(unittest.TestCase):
+    def test_combo_signature_matches_hyprctl_modmask(self):
+        from engine.engine import combo_signature
+        self.assertEqual(combo_signature("SUPER + TAB"), (64, "TAB"))
+        self.assertEqual(combo_signature("SUPER + SHIFT + TAB"), (65, "TAB"))
+        self.assertEqual(combo_signature("SUPER + CTRL + LEFT"), (68, "LEFT"))
+
+    def test_switch_unbinds_conflicting_native_binds(self):
+        import engine.engine as eng
+        e = eng.OmniPalEngine()
+        e.restore()
+        seen = []
+        with mock.patch.object(e, "_live_bind_counts", return_value={(64, "TAB"): 1}), \
+             mock.patch.object(e, "_eval_lua", side_effect=lambda code: seen.append(code) or True):
+            self.assertTrue(e.switch_mode("mac"))
+        code = seen[-1]
+        self.assertIn('hl.unbind("SUPER + TAB")', code)
+        self.assertNotIn('hl.unbind("SUPER + SHIFT + TAB")', code)
+        rec = {b["combo"]: b for b in e._get_active_overlay()}
+        self.assertTrue(rec["SUPER + TAB"].get("native_unbound"))
+        self.assertFalse(rec["SUPER + SHIFT + TAB"].get("native_unbound", False))
+        e.restore()
 
 
 if __name__ == "__main__":
