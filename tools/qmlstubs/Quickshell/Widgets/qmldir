@@ -1,0 +1,3 @@
+module Quickshell.Widgets
+typeinfo widgets.qmltypes
+depends QtQuick

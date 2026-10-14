@@ -1008,11 +1008,15 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertEqual(res.returncode, 0, f"Node execution error: {res.stderr}")
 
     def test_mode_indicator_qml_and_ipc_structure(self):
-        """Validates that BarWidget.qml embeds PopupCard with window policy controls and IPC."""
+        """Validates that BarWidget.qml is a native qs.Ui Panel with window policy controls and IPC."""
         qml_file = PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "BarWidget.qml"
         self.assertTrue(qml_file.exists())
         content = qml_file.read_text(encoding="utf-8")
-        self.assertIn("PopupCard", content)
+        self.assertIn("import qs.Ui", content)
+        self.assertIn("KeyboardPanel", content)
+        self.assertIn("BarIconButton", content)
+        self.assertIn("ShellIpc", content)
+        self.assertNotIn("PopupCard", content)
         self.assertIn("windowPolicy", content)
         self.assertIn("effectiveWindowMode", content)
         self.assertIn("compositorConnected", content)
@@ -1023,7 +1027,7 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertIn("getEffectiveWindowMode", content)
         self.assertIn("setWindowPolicy", content)
         self.assertIn("closePanel", content)
-        self.assertIn("releasePopout", content)
+        self.assertIn("panelOpen", content)
 
     def test_mode_indicator_manifest(self):
         """Validates manifest compliance and metadata."""
@@ -1246,25 +1250,16 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertNotIn("0xfff", code)
 
     def test_qml_syntax_via_qmllint(self):
-        """Verifies all locally modified QML entry points with Qt6 qmllint."""
-        qmllint_bin = "/usr/lib/qt6/bin/qmllint"
-        if not os.path.exists(qmllint_bin):
+        """Lints every plugin QML against the Omarchy shell (qs.*) + Quickshell stubs."""
+        if not os.path.exists("/usr/lib/qt6/bin/qmllint"):
             self.skipTest("qmllint not installed on system")
-
-        targets = [
-            ("omni.mode-indicator", "BarWidget.qml"),
-            ("omni.settings", "SettingsPanel.qml"),
-        ]
-        for plugin, filename in targets:
-            with self.subTest(plugin=plugin):
-                plugin_dir = PROJECT_ROOT / "plugins" / plugin
-                p = subprocess.run([
-                    qmllint_bin,
-                    "-I", "/usr/share/omarchy/shell",
-                    "-I", str(plugin_dir),
-                    str(plugin_dir / filename)
-                ], capture_output=True, text=True)
-                self.assertEqual(p.returncode, 0, f"qmllint failed: {p.stderr}")
+        shells = [os.environ.get("OMARCHY_SHELL", ""), "/workspace/ref/omarchy/shell",
+                  "/usr/share/omarchy/shell"]
+        if not any(s and os.path.isdir(os.path.join(s, "Commons")) for s in shells):
+            self.skipTest("Omarchy shell source (qs.Commons/qs.Ui) not available")
+        p = subprocess.run(["bash", str(PROJECT_ROOT / "scripts" / "qmllint.sh")],
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, f"qmllint failed: {p.stdout}{p.stderr}")
 
     def test_normalize_policy_safeguards_in_node(self):
         """Verifies that Model.js normalizePolicy safely defaults to tiled for corrupted/unknown inputs."""

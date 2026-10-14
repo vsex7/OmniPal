@@ -1,0 +1,3 @@
+module Quickshell.Hyprland
+typeinfo hyprland.qmltypes
+depends Quickshell

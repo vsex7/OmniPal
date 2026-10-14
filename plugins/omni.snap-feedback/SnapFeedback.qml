@@ -1,8 +1,10 @@
+pragma ComponentBehavior: Bound
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 import "Tokens.js" as Tokens
@@ -21,10 +23,12 @@ import "Tokens.js" as Tokens
 Item {
   id: root
 
-  // ---- Omarchy theme: Tokens.js is the single source of truth -------------
-  // Follows the current Omarchy theme at runtime (colors.toml), tokyo-night fallback.
+  // ---- Theme ----------------------------------------------------------------
+  // Native first: qs.Commons Color/Style + qs.Ui widgets wherever Omarchy has one.
+  // `theme` (OmniTheme.qml) resolves the remaining custom-surface roles straight from
+  // qs.Commons; the colors.toml palette below only feeds the extended status hues.
   property var themePalette: Tokens.fallback
-  readonly property var theme: Tokens.build(Color, themePalette)
+  readonly property OmniTheme theme: OmniTheme { palette: root.themePalette }
   FileView {
     id: omniThemeFile
     property bool legacy: false
@@ -44,13 +48,16 @@ Item {
   property string zone: "left"
   property string hoveredZone: ""
 
-  readonly property color snapColor: (Color && Color.accent) ? Color.accent : root.theme.accent
-  // Omarchy native chrome: rounding mirrors Hyprland decoration:rounding (Style.cornerRadius, default 0),
-  // popup border = active-border (accent) at border_size 2, solid theme background, no glows/shadows.
-  readonly property int hudRadius: (Style && Style.cornerRadius) ? Style.cornerRadius : Tokens.radius.none
-  readonly property int hudBorder: Tokens.popup.border
-  readonly property color hudBg: (Color && Color.popups && Color.popups.background) ? Color.popups.background : root.theme.bg
-  readonly property color hudBorderColor: (Color && Color.popups && Color.popups.border) ? Color.popups.border : root.snapColor
+  // Native chrome straight from qs.Commons (no null-guards: the Omarchy shell is the only host).
+  //   flyout card  = [menu] surface (like omarchy.emojis / menu overlays)
+  //   snap HUD pill = [popups] surface (like bar panels / OSD)
+  readonly property color snapColor: Commons.Color.accent
+  readonly property int hudRadius: Style.cornerRadius
+  readonly property int hudBorder: Math.max(1, Style.space(2))
+  readonly property color hudBg: Commons.Color.popups.background
+  readonly property color hudBorderColor: Commons.Color.popups.border
+  readonly property var hudBorderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, root.hudBorder)
+  readonly property var flyoutBorderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, root.hudBorder)
 
   // 键盘与焦点导航状态
   property int focusedTemplateIndex: -1  // -1 表示未选模板，0~5 表示当前选中的模板
@@ -155,7 +162,7 @@ Item {
   }
 
   // IPC 接口 (唯一的外部唤出与状态指令通道，杜绝双重监听)
-  IpcHandler {
+  ShellIpc {
     target: "omni.snap-feedback"
     function snap(z: string): void {
       root.open(JSON.stringify({ zone: z, interactive: false }))
@@ -197,7 +204,8 @@ Item {
     stdout: StdioCollector {
       id: schemaCollector
       waitForEnd: true
-      onStreamFinished: function(raw) {
+      onStreamFinished: function() {
+        var raw = text  // streamFinished() carries no args; read StdioCollector.text
         var str = (raw && raw.trim() !== "") ? raw : (schemaCollector.text ? schemaCollector.text : "")
         if (str && str.trim() !== "") {
           Model.loadSchemaJson(str)
@@ -228,15 +236,13 @@ Item {
     running: false
   }
 
-  PanelWindow {
+  // Native qs.Ui OverlayWindow. The passive snap HUD must not steal focus, so keyboard
+  // focus is only Exclusive in interactive (Snap Layouts picker) mode.
+  OverlayWindow {
     id: panel
-    visible: root.opened
-    anchors { top: true; bottom: true; left: true; right: true }
-    color: "transparent"
+    shown: root.opened
+    shownKeyboardFocus: root.interactive ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     WlrLayershell.namespace: "omni-snap-feedback"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: (root.opened && root.interactive) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
-    exclusionMode: ExclusionMode.Ignore
 
     Item {
       id: inputLayer
@@ -248,9 +254,9 @@ Item {
     Rectangle {
       anchors.fill: parent
       visible: root.interactive
-      color: (Color && Color.menu && Color.menu.scrim) ? Color.menu.scrim : Tokens.alpha(root.theme.bg, Tokens.popup.scrimAlpha)
+      color: Commons.Color.menu.scrim
       opacity: root.interactive ? 1.0 : 0.0
-      Behavior on opacity { NumberAnimation { duration: Tokens.motion.fast } }
+      Behavior on opacity { NumberAnimation { duration: Style.duration(90) } }
 
       MouseArea {
         anchors.fill: parent
@@ -280,7 +286,7 @@ Item {
         }
 
         // BackSpace 键：回退至模板选择
-        if (event.key === Qt.Key_BackSpace) {
+        if (event.key === Qt.Key_Backspace) {
           if (root.focusedTemplateIndex >= 0) {
             root.focusedTemplateIndex = -1
             root.focusedSlotIndex = 0
@@ -291,10 +297,11 @@ Item {
         }
 
         // 数字键 1-6 处理 (Windows 11 Snap Layouts 核心两阶逻辑：支持主键盘与小键盘)
+        // Qt has no Key_NumpadN: keypad digits arrive as Key_1..Key_6 + KeypadModifier,
+        // so this one range covers both rows.
         var isNumKey = (event.key >= Qt.Key_1 && event.key <= Qt.Key_6)
-        var isNumpadKey = (event.key >= Qt.Key_Numpad1 && event.key <= Qt.Key_Numpad6)
-        if (isNumKey || isNumpadKey) {
-          var num = isNumKey ? (event.key - Qt.Key_1 + 1) : (event.key - Qt.Key_Numpad1 + 1) // 1 ~ 6
+        if (isNumKey) {
+          var num = event.key - Qt.Key_1 + 1 // 1 ~ 6
 
           if (root.focusedTemplateIndex === -1) {
             // 阶段 1：未选模板时，按 1-6 选中对应模板，并默认聚焦到第 1 个分区
@@ -491,13 +498,13 @@ Item {
           radius: root.hudRadius
 
           color: "transparent"
-          border.width: Tokens.border.hair
+          border.width: Math.max(1, Style.normalBorderWidth)
           border.color: root.theme.line
 
-          Behavior on x { NumberAnimation { duration: Tokens.motion.fast } }
-          Behavior on y { NumberAnimation { duration: Tokens.motion.fast } }
-          Behavior on width { NumberAnimation { duration: Tokens.motion.fast } }
-          Behavior on height { NumberAnimation { duration: Tokens.motion.fast } }
+          Behavior on x { NumberAnimation { duration: Style.duration(90) } }
+          Behavior on y { NumberAnimation { duration: Style.duration(90) } }
+          Behavior on width { NumberAnimation { duration: Style.duration(90) } }
+          Behavior on height { NumberAnimation { duration: Style.duration(90) } }
         }
       }
 
@@ -515,22 +522,23 @@ Item {
         border.width: root.hudBorder
         border.color: root.snapColor
 
-        Behavior on x { NumberAnimation { duration: Tokens.motion.fast } }
-        Behavior on y { NumberAnimation { duration: Tokens.motion.fast } }
-        Behavior on width { NumberAnimation { duration: Tokens.motion.fast } }
-        Behavior on height { NumberAnimation { duration: Tokens.motion.fast } }
+        Behavior on x { NumberAnimation { duration: Style.duration(90) } }
+        Behavior on y { NumberAnimation { duration: Style.duration(90) } }
+        Behavior on width { NumberAnimation { duration: Style.duration(90) } }
+        Behavior on height { NumberAnimation { duration: Style.duration(90) } }
 
 
         // 浮动指示徽章（展示区域图标、中文说明与物理像素分辨率）
-        Rectangle {
+        BorderSurface {
           id: infoPill
           anchors.centerIn: parent
-          implicitWidth: pillRow.implicitWidth + Style.space(24)
-          implicitHeight: pillRow.implicitHeight + Style.space(16)
+          width: implicitWidth
+          height: implicitHeight
+          implicitWidth: pillRow.implicitWidth + Style.spacing.popupPadding * 2 + Border.left(root.hudBorderSpec) + Border.right(root.hudBorderSpec)
+          implicitHeight: pillRow.implicitHeight + Style.spacing.popupPadding + Border.top(root.hudBorderSpec) + Border.bottom(root.hudBorderSpec)
           radius: root.hudRadius
           color: root.hudBg
-          border.color: root.hudBorderColor
-          border.width: root.hudBorder
+          borderSpec: root.hudBorderSpec
 
 
           Row {
@@ -563,12 +571,14 @@ Item {
                 }
 
                 // 物理像素分辨率胶囊
-                Rectangle {
+                BorderSurface {
                   anchors.verticalCenter: parent.verticalCenter
-                  implicitWidth: dimLabel.implicitWidth + 8
-                  height: 16
-                  radius: Tokens.corner(Style)
-                  color: Tokens.alpha(root.theme.text, 0.14)
+                  implicitWidth: dimLabel.implicitWidth + Style.space(10)
+                  width: implicitWidth
+                  height: dimLabel.implicitHeight + Style.space(4)
+                  radius: Style.cornerRadius
+                  color: "transparent"
+                  borderSpec: Border.controlSpec("normal", root.theme.text, root.snapColor)
 
                   Text {
                     id: dimLabel
@@ -604,16 +614,16 @@ Item {
         property: "opacity"
         from: 0.0
         to: 1.0
-        duration: Tokens.motion.fast
+        duration: Style.duration(90)
         easing.type: Easing.OutCubic
       }
-      PauseAnimation { duration: Tokens.motion.slow }
+      PauseAnimation { duration: Style.duration(200) }
       NumberAnimation {
         target: previewContainer
         property: "opacity"
         from: 1.0
         to: 0.0
-        duration: Tokens.motion.normal
+        duration: Style.duration(140)
         easing.type: Easing.InQuad
       }
     }
@@ -628,22 +638,20 @@ Item {
 
       scale: 1.0
       opacity: root.interactive ? 1.0 : 0.0
-            Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutCubic } }
+            Behavior on opacity { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic } }
 
       readonly property real cardRadius: root.hudRadius
 
 
 
       // 卡片主体：Omarchy popup（实色主题背景 + 2px active-border，无阴影/玻璃）
-      Rectangle {
+      BorderSurface {
         id: flyoutCard
         anchors.fill: parent
         radius: flyoutWrapper.cardRadius
-        color: root.hudBg
-        border.color: root.hudBorderColor
-        border.width: root.hudBorder
+        color: Commons.Color.menu.background
+        borderSpec: root.flyoutBorderSpec
         clip: true
-        Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
 
         // 吸收卡片空白区点击，防止点击空白处透传穿透导致面板被全屏遮罩误关闭
         MouseArea {
@@ -672,7 +680,7 @@ Item {
             Rectangle {
               width: Style.space(24)
               height: Style.space(24)
-              radius: Tokens.corner(Style)
+              radius: Style.cornerRadius
               color: Util.alpha(root.snapColor, 0.16)
               border.color: Util.alpha(root.snapColor, 0.40)
               border.width: 1
@@ -697,14 +705,13 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
             }
 
-            // 目标窗口芯片 (如有捕获)
-            Rectangle {
+            // 目标窗口芯片 (如有捕获) — PanelHero-style detail pill
+            BorderSurface {
               visible: (root.targetWindowTitle !== "" || root.targetWindowClass !== "" || root.targetWindowAddress !== "")
               height: Style.space(18)
-              radius: Tokens.corner(Style)
-              color: Tokens.alpha(root.theme.text, 0.08)
-              border.color: Tokens.alpha(root.theme.text, 0.14)
-              border.width: 1
+              radius: Style.cornerRadius
+              color: "transparent"
+              borderSpec: Border.controlSpec("normal", root.theme.text, root.snapColor)
               anchors.verticalCenter: parent.verticalCenter
               implicitWidth: targetWinRow.implicitWidth + Style.space(10)
 
@@ -716,7 +723,7 @@ Item {
                 Rectangle {
                   width: 5
                   height: 5
-                  radius: Tokens.corner(Style)
+                  radius: Style.cornerRadius
                   color: root.theme.ok
                   anchors.verticalCenter: parent.verticalCenter
                 }
@@ -743,12 +750,11 @@ Item {
             spacing: Style.space(8)
 
             // 阶段提示药丸
-            Rectangle {
+            BorderSurface {
               height: Style.space(20)
-              radius: Tokens.corner(Style)
-              color: root.focusedTemplateIndex !== -1 ? Util.alpha(root.snapColor, 0.18) : root.theme.chipFill
-              border.color: root.focusedTemplateIndex !== -1 ? root.snapColor : Tokens.alpha(root.theme.text, 0.12)
-              border.width: 1
+              radius: Style.cornerRadius
+              color: root.focusedTemplateIndex !== -1 ? Style.selectedFillFor(root.theme.text, root.snapColor) : Style.normalFillFor(root.theme.text, root.snapColor)
+              borderSpec: Border.controlSpec(root.focusedTemplateIndex !== -1 ? "focus" : "normal", root.theme.text, root.snapColor)
               anchors.verticalCenter: parent.verticalCenter
               implicitWidth: stepBadgeRow.implicitWidth + Style.space(8)
 
@@ -768,33 +774,13 @@ Item {
               }
             }
 
-            // 关闭按钮
-            Rectangle {
-              width: Style.space(22)
-              height: Style.space(22)
-              radius: Tokens.corner(Style)
-              color: closeMouse.containsMouse ? root.theme.danger : Tokens.alpha(root.theme.text, 0.06)
-              border.color: closeMouse.containsMouse ? "transparent" : Tokens.alpha(root.theme.text, 0.10)
-              border.width: 1
+            // 关闭按钮 — native PanelActionButton
+            PanelActionButton {
+              iconText: "✕"
+              tooltipText: "关闭 (Esc)"
+              foreground: Commons.Color.menu.text
               anchors.verticalCenter: parent.verticalCenter
-              Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
-
-              Text {
-                font.family: Style.font.family
-                anchors.centerIn: parent
-                text: "✕"
-                font.pixelSize: Style.font.caption
-                font.bold: true
-                color: closeMouse.containsMouse ? root.theme.onDanger : Util.alpha(Color.foreground, 0.60)
-              }
-
-              MouseArea {
-                id: closeMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.dismiss()
-              }
+              onClicked: root.dismiss()
             }
           }
         }
@@ -815,7 +801,9 @@ Item {
           Repeater {
             model: root.effectiveTemplates
 
-            delegate: Rectangle {
+            // Template card painted with the same Style state tokens as a bordered native
+            // Button: normal → hover-cursor → focus (selected template).
+            delegate: BorderSurface {
               id: tplCard
               required property var modelData
               required property int index
@@ -826,16 +814,14 @@ Item {
 
               width: (templatesGrid.width - templatesGrid.spacing * 2) / 3
               height: (templatesGrid.height - templatesGrid.spacing) / 2
-              radius: Tokens.corner(Style)
-              color: isSelectedTpl ? Tokens.alpha(root.theme.text, 0.08) : (isCardHovered ? root.theme.hoverFill : "transparent")
-              border.color: isSelectedTpl ? root.snapColor : (isCardHovered ? root.theme.lineStrong : root.theme.line)
-              border.width: isSelectedTpl ? root.hudBorder : Tokens.border.hair
+              radius: Style.cornerRadius
+              color: isSelectedTpl ? Style.selectedFillFor(root.theme.text, root.snapColor)
+                : (isCardHovered ? Style.hoverFillFor(root.theme.text, root.snapColor) : "transparent")
+              borderSpec: Border.controlSpec(isSelectedTpl ? "focus" : (isCardHovered ? "hover-cursor" : "normal"), root.theme.text, root.snapColor)
               opacity: isDimmed ? 0.45 : 1.0
 
-              Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
-              Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
-              Behavior on border.width { NumberAnimation { duration: Tokens.motion.fast } }
-              Behavior on opacity { NumberAnimation { duration: Tokens.motion.fast } }
+              Behavior on color { ColorAnimation { duration: Style.duration(120) } }
+              Behavior on opacity { NumberAnimation { duration: Style.duration(90) } }
 
 
               MouseArea {
@@ -892,9 +878,9 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     width: 16
                     height: 14
-                    radius: Tokens.corner(Style)
+                    radius: Style.cornerRadius
                     color: tplCard.isSelectedTpl ? root.snapColor : root.theme.chipFill
-                    border.color: tplCard.isSelectedTpl ? root.snapColor : Tokens.alpha(root.theme.text, 0.15)
+                    border.color: tplCard.isSelectedTpl ? root.snapColor : Util.alpha(root.theme.text, 0.15)
                     border.width: 1
 
                     Text {
@@ -913,9 +899,9 @@ Item {
                   id: miniCanvas
                   width: parent.width
                   height: parent.height - 21
-                  radius: Tokens.corner(Style)
+                  radius: Style.cornerRadius
                   color: root.theme.sunken
-                  border.color: Tokens.alpha(root.theme.text, 0.06)
+                  border.color: Util.alpha(root.theme.text, 0.06)
                   border.width: 1
                   clip: true
 
@@ -941,14 +927,14 @@ Item {
                       y: slotY + 1
                       width: Math.max(10, slotW - 2)
                       height: Math.max(10, slotH - 2)
-                      radius: Tokens.corner(Style)
+                      radius: Style.cornerRadius
 
-                      color: isHovered ? Util.alpha(root.snapColor, 0.40) : Tokens.alpha(root.theme.text, 0.08)
-                      border.color: isHovered ? root.snapColor : Tokens.alpha(root.theme.text, 0.16)
-                      border.width: Tokens.border.hair
+                      color: isHovered ? Util.alpha(root.snapColor, 0.40) : Util.alpha(root.theme.text, 0.08)
+                      border.color: isHovered ? root.snapColor : Util.alpha(root.theme.text, 0.16)
+                      border.width: Math.max(1, Style.normalBorderWidth)
 
-                      Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
-                      Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
+                      Behavior on color { ColorAnimation { duration: Style.duration(90) } }
+                      Behavior on border.color { ColorAnimation { duration: Style.duration(90) } }
 
                       // 选中模板时的数字按键角标 [1]、[2]...
                       Rectangle {
@@ -956,7 +942,7 @@ Item {
                         anchors.centerIn: parent
                         width: 16
                         height: 16
-                        radius: Tokens.corner(Style)
+                        radius: Style.cornerRadius
                         color: slotRect.isSlotFocused ? root.snapColor : root.theme.sunken
                         border.color: slotRect.isSlotFocused ? root.snapColor : Util.alpha(root.snapColor, 0.5)
                         border.width: 1
@@ -975,7 +961,7 @@ Item {
                       Text {
                         visible: !tplCard.isSelectedTpl && slotRect.isHovered
                         anchors.centerIn: parent
-                        text: modelData.label
+                        text: slotRect.modelData.label
                         font.family: Style.font.family
                         font.pixelSize: Style.font.caption
                         font.bold: true
@@ -989,15 +975,15 @@ Item {
                         cursorShape: Qt.PointingHandCursor
 
                         onEntered: {
-                          root.hoveredZone = modelData.id
+                          root.hoveredZone = slotRect.modelData.id
                         }
                         onExited: {
-                          if (root.hoveredZone === modelData.id) {
+                          if (root.hoveredZone === slotRect.modelData.id) {
                             root.hoveredZone = ""
                           }
                         }
                         onClicked: {
-                          root.executeSnap(modelData.id)
+                          root.executeSnap(slotRect.modelData.id)
                         }
                       }
                     }
@@ -1008,8 +994,8 @@ Item {
           }
         }
 
-        // 底部细线
-        Rectangle {
+        // 底部细线 — native PanelSeparator
+        PanelSeparator {
           id: footerSep
           anchors.bottom: flyoutFooter.top
           anchors.bottomMargin: Style.space(6)
@@ -1017,8 +1003,7 @@ Item {
           anchors.right: parent.right
           anchors.leftMargin: Style.space(14)
           anchors.rightMargin: Style.space(14)
-          height: 1
-          color: Tokens.alpha(root.theme.text, 0.08)
+          foreground: Commons.Color.menu.text
         }
 
         // ============================================================
@@ -1042,7 +1027,7 @@ Item {
             Rectangle {
               width: 5
               height: 5
-              radius: Tokens.corner(Style)
+              radius: Style.cornerRadius
               color: root.hoveredZone !== "" ? root.snapColor : Util.alpha(Color.foreground, 0.4)
               anchors.verticalCenter: parent.verticalCenter
             }
@@ -1081,14 +1066,16 @@ Item {
                 { key: "Esc", desc: "退出" }
               ]
 
-              delegate: Rectangle {
+              // Key-hint chip: normal control fill/border tokens.
+              delegate: BorderSurface {
+                id: kbdChip
                 required property var modelData
-                height: 16
-                radius: Tokens.corner(Style)
-                color: root.theme.chipFill
-                border.color: Tokens.alpha(root.theme.text, 0.12)
-                border.width: 1
-                implicitWidth: kbdRow.implicitWidth + 6
+                height: kbdRow.implicitHeight + Style.space(4)
+                radius: Style.cornerRadius
+                color: Style.normalFillFor(root.theme.text, root.snapColor)
+                borderSpec: Border.controlSpec("normal", root.theme.text, root.snapColor)
+                implicitWidth: kbdRow.implicitWidth + Style.space(8)
+                width: implicitWidth
 
                 Row {
                   id: kbdRow
@@ -1096,7 +1083,7 @@ Item {
                   spacing: 3
 
                   Text {
-                    text: modelData.key
+                    text: kbdChip.modelData.key
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
                     font.bold: true
@@ -1105,7 +1092,7 @@ Item {
                   }
 
                   Text {
-                    text: modelData.desc
+                    text: kbdChip.modelData.desc
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
                     color: Util.alpha(Color.foreground, 0.45)

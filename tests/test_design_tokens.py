@@ -33,8 +33,20 @@ class DesignTokenTests(unittest.TestCase):
         for f in PLUGINS.glob("omni.*/*.qml"):
             s = f.read_text(encoding="utf-8")
             if "  id: root\n" in s:
-                self.assertIn("Tokens.build(Color, themePalette)", s, f.name)
+                # Native Omarchy chrome: Commons singletons + qs.Ui kit; Tokens.js
+                # is only the colors.toml palette fallback.
+                self.assertIn("import qs.Commons", s, f.name)
+                self.assertIn("import qs.Ui", s, f.name)
                 self.assertIn("Tokens.themeFiles", s, f.name)
+                self.assertNotIn("Tokens.build(", s, f.name)
+                self.assertRegex(s, r"\b(BorderSurface|Button|OverlayWindow|Panel)\s*\{", f.name)
+
+    def test_shared_theme_is_native(self):
+        for f in [PLUGINS / "shared" / "OmniTheme.qml", *PLUGINS.glob("omni.*/OmniTheme.qml")]:
+            s = f.read_text(encoding="utf-8")
+            self.assertIn("import qs.Commons", s, f.name)
+            self.assertIn("Commons.Color.menu", s, f.name)
+            self.assertIn("Style.", s, f.name)
 
     @unittest.skipUnless(shutil.which("node"), "node not installed")
     def test_colors_toml_parser_and_fallback(self):

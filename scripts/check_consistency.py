@@ -300,15 +300,17 @@ def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = No
         print("\n🎉 All consistency and plugin validation checks passed cleanly!")
     else:
         print("\n💥 Consistency check failed.", file=sys.stderr)
-    # Design tokens: each plugin's Tokens.js must match plugins/shared/Tokens.js
-    shared_tokens = project_root / "plugins" / "shared" / "Tokens.js"
-    if shared_tokens.exists():
-        src = shared_tokens.read_bytes()
+    # Shared design files: each plugin's copy must match plugins/shared/<name>
+    for shared_name in ("Tokens.js", "OmniTheme.qml"):
+        shared_file = project_root / "plugins" / "shared" / shared_name
+        if not shared_file.exists():
+            continue
+        src = shared_file.read_bytes()
         for p in sorted((project_root / "plugins").glob("omni.*")):
             if p.is_dir():
-                copy = p / "Tokens.js"
+                copy = p / shared_name
                 if not copy.exists() or copy.read_bytes() != src:
-                    print(f"❌ Tokens.js out of sync in {p.name} (run scripts/sync_tokens.py)")
+                    print(f"❌ {shared_name} out of sync in {p.name} (run scripts/sync_tokens.py)")
                     all_passed = False
     return all_passed
 

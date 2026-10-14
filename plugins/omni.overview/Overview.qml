@@ -1,9 +1,11 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 import "Tokens.js" as Tokens
@@ -12,10 +14,12 @@ import "Tokens.js" as Tokens
 Item {
   id: root
 
-  // ---- Omarchy theme: Tokens.js is the single source of truth -------------
-  // Follows the current Omarchy theme at runtime (colors.toml), tokyo-night fallback.
+  // ---- Theme ----------------------------------------------------------------
+  // Native first: qs.Commons Color/Style + qs.Ui widgets wherever Omarchy has one.
+  // `theme` (OmniTheme.qml) resolves the remaining custom-surface roles straight from
+  // qs.Commons; the colors.toml palette below only feeds the extended status hues.
   property var themePalette: Tokens.fallback
-  readonly property var theme: Tokens.build(Color, themePalette)
+  readonly property OmniTheme theme: OmniTheme { palette: root.themePalette }
   FileView {
     id: omniThemeFile
     property bool legacy: false
@@ -209,7 +213,7 @@ Item {
     }
   }
 
-  IpcHandler {
+  ShellIpc {
     target: "omni.overview"
     function toggle(): void { root.toggle() }
     function open(): void { root.open("{}") }
@@ -217,30 +221,22 @@ Item {
     function refresh(): void { root.refresh() }
   }
 
-  PanelWindow {
+  // Native qs.Ui OverlayWindow: focused-monitor fullscreen layer, Overlay layer,
+  // exclusive keyboard focus while shown, scale-safe first frame.
+  OverlayWindow {
     id: panel
-    visible: root.opened
-    anchors {
-      top: true
-      bottom: true
-      left: true
-      right: true
-    }
-    color: "transparent"
+    shown: root.opened
     WlrLayershell.namespace: "omni-overview"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
-    exclusionMode: ExclusionMode.Ignore
 
     // 背景：GTA 5 经典子弹时间慢动作电影暗角与景深晕映
     Rectangle {
       id: backdrop
       anchors.fill: parent
-      color: Tokens.alpha(root.theme.sunken, 0.92)
+      color: root.theme.scrim
       opacity: root.opened ? 1.0 : 0.0
 
       Behavior on opacity {
-        NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic }
       }
 
       // ----------------------------------------------------
@@ -494,7 +490,7 @@ Item {
           ctx.beginPath()
           ctx.arc(cx, cy, 475, 0, 2 * Math.PI)
           ctx.arc(cx, cy, 195, 0, 2 * Math.PI, true)
-          ctx.fillStyle = Tokens.alpha(root.theme.bg, Tokens.popup.scrimAlpha)
+          ctx.fillStyle = root.theme.scrim
           ctx.fill()
 
           // 1.2 绘制每个真实活动窗口扇区
@@ -516,7 +512,7 @@ Item {
               ctx.fill()
 
               // Omarchy 选中态：2px accent 描边，无外发光
-              ctx.lineWidth = Tokens.border.focus
+              ctx.lineWidth = Math.max(1, Style.space(2))
               ctx.strokeStyle = root.theme.accent
               ctx.stroke()
 
@@ -536,7 +532,7 @@ Item {
                             ctx.fillStyle = root.theme.popupBg
               ctx.fill()
 
-              ctx.lineWidth = Tokens.border.hair
+              ctx.lineWidth = Math.max(1, Style.normalBorderWidth)
               ctx.strokeStyle = root.theme.line
               ctx.stroke()
             }
@@ -574,14 +570,14 @@ Item {
         height: 370
 
         // 中心深黑大圆盘底座 (带多层倒角金属轮廓)
-        Rectangle {
+        BorderSurface {
           anchors.fill: parent
           radius: width / 2
-          color: root.theme.sunken
-          border.width: Tokens.border.normal
-          border.color: root.currentSelectedWin ? root.theme.accent : Tokens.alpha(root.theme.text, 0.18)
-
-          Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
+          color: root.theme.bg
+          // [menu] surface border when a window is picked, normal control border otherwise.
+          borderSpec: root.currentSelectedWin
+            ? Border.surfaceSpec("menu", "border", Commons.Color.menu.border, Math.max(1, Style.space(2)))
+            : Border.controlSpec("normal", root.theme.text, root.theme.accent)
 
 
           // 核心内容排版
@@ -591,18 +587,17 @@ Item {
             spacing: 8
 
             // 顶部横条：ACTIVE WINDOW: [APP_NAME]
-            Rectangle {
-              height: 24
+            BorderSurface {
+              height: Math.max(Style.space(24), Style.font.bodySmall + Style.spacing.controlPaddingY * 2)
               width: parent.width
-              color: root.theme.surface
-              radius: Tokens.corner(Style)
-              border.width: 1
-              border.color: root.currentSelectedWin ? Tokens.alpha(root.theme.accent, 0.3) : Tokens.alpha(root.theme.text, 0.08)
+              radius: Style.cornerRadius
+              color: root.currentSelectedWin ? Style.selectedFillFor(root.theme.text, root.theme.accent) : Style.normalFillFor(root.theme.text, root.theme.accent)
+              borderSpec: Border.controlSpec(root.currentSelectedWin ? "selected" : "normal", root.theme.text, root.theme.accent)
 
               Text {
                 anchors.centerIn: parent
                 text: "ACTIVE: [" + (root.currentSelectedWin ? root.currentSelectedWin.activeName : "NONE") + "]"
-                color: root.theme.accent
+                color: root.theme.selectedText
                 font.pixelSize: Style.font.bodySmall
                 font.bold: true
                 font.family: Style.font.family
@@ -623,8 +618,8 @@ Item {
                 anchors.centerIn: parent
                 width: 48
                 height: 48
-                radius: Tokens.corner(Style)
-                color: root.currentSelectedWin ? Tokens.alpha(root.theme.accent, 0.12) : "transparent"
+                radius: Style.cornerRadius
+                color: root.currentSelectedWin ? Util.alpha(root.theme.accent, 0.12) : "transparent"
               }
 
               Image {
@@ -664,13 +659,13 @@ Item {
                 Rectangle {
                   height: 6
                   width: parent.width - 93
-                  radius: Tokens.corner(Style)
+                  radius: Style.cornerRadius
                   color: root.theme.surfaceAlt
                   anchors.verticalCenter: parent.verticalCenter
                   Rectangle {
                     height: parent.height
                     width: parent.width * 0.85
-                    radius: Tokens.corner(Style)
+                    radius: Style.cornerRadius
                     color: root.theme.accent
                   }
                 }
@@ -684,13 +679,13 @@ Item {
                 Rectangle {
                   height: 6
                   width: parent.width - 93
-                  radius: Tokens.corner(Style)
+                  radius: Style.cornerRadius
                   color: root.theme.surfaceAlt
                   anchors.verticalCenter: parent.verticalCenter
                   Rectangle {
                     height: parent.height
                     width: root.currentSelectedWin && root.currentSelectedWin.layoutMode === "FLOAT" ? parent.width * 0.45 : parent.width * 0.95
-                    radius: Tokens.corner(Style)
+                    radius: Style.cornerRadius
                     color: root.theme.info
                   }
                 }
@@ -755,24 +750,23 @@ Item {
       // ==========================================
       // 5. 拖拽跟随幻影 (Drag Ghost Proxy)
       // ==========================================
-      Rectangle {
+      BorderSurface {
         id: dragGhost
         visible: root.isDraggingCard && root.draggedSlotData !== null
         width: 155
         height: 82
-        radius: Tokens.corner(Style)
-        color: portalHole.isDragOver ? Tokens.alpha(root.theme.danger, 0.55) : root.theme.popupBg
-        border.width: 2
-        border.color: portalHole.isDragOver ? root.theme.danger : root.theme.info
+        radius: Style.cornerRadius
+        color: portalHole.isDragOver ? Style.selectedFillFor(root.theme.danger, root.theme.danger) : root.theme.popupBg
+        borderSpec: portalHole.isDragOver
+          ? Border.flat(root.theme.danger, Math.max(1, Style.space(2)))
+          : Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
         z: 999
 
         x: root.dragGlobalX - width / 2
         y: root.dragGlobalY - height / 2
 
         scale: portalHole.isDragOver ? 0.65 : 1.0
-        Behavior on scale { NumberAnimation { duration: Tokens.motion.fast; easing.type: Easing.OutCubic } }
-        Behavior on border.color { ColorAnimation { duration: Tokens.motion.fast } }
-
+        Behavior on scale { NumberAnimation { duration: Style.duration(90); easing.type: Easing.OutCubic } }
         Row {
           anchors.centerIn: parent
           spacing: 10
@@ -811,22 +805,25 @@ Item {
       // ==========================================
       // 6. 底部 GTA 风格操作指示 Bar
       // ==========================================
-      Rectangle {
+      // Hint strip = [menu] surface card, same chrome as the overlay cards.
+      BorderSurface {
         id: gtaFooter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 28
+        anchors.bottomMargin: Style.spacing.panelPadding + Style.gapsOut
         anchors.horizontalCenter: parent.horizontalCenter
-        height: 32
-        radius: Tokens.corner(Style)
-        color: root.theme.surface
-        border.width: 1
-        border.color: Tokens.alpha(root.theme.text, 0.12)
+        padding: Style.spacing.controlPaddingY
+        leftPadding: Style.spacing.popupPadding
+        rightPadding: Style.spacing.popupPadding
+        width: footerRow.implicitWidth + contentLeftInset + contentRightInset
+        height: footerRow.implicitHeight + contentTopInset + contentBottomInset
+        radius: Style.cornerRadius
+        color: root.theme.bg
+        borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, Math.max(1, Style.space(2)))
 
         Row {
+          id: footerRow
           anchors.centerIn: parent
-          anchors.leftMargin: 20
-          anchors.rightMargin: 20
-          spacing: 16
+          spacing: Style.spacing.xxxl
 
           Row {
             spacing: 6
@@ -834,7 +831,7 @@ Item {
             Text { text: "FLICK TO SELECT"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
+          Text { text: "·"; color: Util.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
 
           Row {
             spacing: 6
@@ -842,7 +839,7 @@ Item {
             Text { text: "MOVE TO WORKSPACE [" + root.targetTransferWorkspaceId + "]"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
+          Text { text: "·"; color: Util.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
 
           Row {
             spacing: 6
@@ -850,7 +847,7 @@ Item {
             Text { text: "QUICK TRANSFER"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
+          Text { text: "·"; color: Util.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
 
           Row {
             spacing: 6
@@ -858,7 +855,7 @@ Item {
             Text { text: "EQUIP / FOCUS"; color: root.theme.textMuted; font.pixelSize: Style.font.caption; font.family: Style.font.family }
           }
 
-          Text { text: "·"; color: Tokens.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
+          Text { text: "·"; color: Util.alpha(root.theme.text, 0.2); font.pixelSize: Style.font.bodySmall; font.family: Style.font.family }
 
           Row {
             spacing: 6

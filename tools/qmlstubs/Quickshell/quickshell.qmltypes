@@ -1,0 +1,132 @@
+import QtQuick.tooling 1.2
+// Hand-written lint stubs for Quickshell (NOT the real module). Only what OmniPal
+// and Omarchy shell/Ui touch; extend when qmllint reports a missing member.
+Module {
+  Component {
+    file: "qs"; name: "QsShell"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell/Quickshell 1.0"]; isCreatable: false; isSingleton: true
+    exportMetaObjectRevisions: [256]
+    Property { name: "screens"; type: "QVariantList"; isReadonly: true }
+    Property { name: "shellDir"; type: "QString"; isReadonly: true }
+    Method { name: "env"; type: "QVariant"; Parameter { name: "name"; type: "QString" } }
+    Method { name: "execDetached"; Parameter { name: "cmd"; type: "QVariant" } }
+    Method { name: "iconPath"; type: "QString"; Parameter { name: "n"; type: "QString" } Parameter { name: "f"; type: "QVariant" } }
+    Method { name: "iconPath"; type: "QString"; Parameter { name: "n"; type: "QString" } }
+    Method { name: "reload"; Parameter { name: "hard"; type: "bool" } }
+  }
+  Component {
+    file: "qs"; name: "QsScope"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell/Scope 1.0", "Quickshell/ShellRoot 1.0"]; exportMetaObjectRevisions: [256]
+    defaultProperty: "data"
+    Property { name: "data"; type: "QObject"; isList: true; isReadonly: true }
+  }
+  Component {
+    file: "qs"; name: "QsVariants"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell/Variants 1.0"]; exportMetaObjectRevisions: [256]
+    defaultProperty: "delegate"
+    Property { name: "delegate"; type: "QQmlComponent"; isPointer: true }
+    Property { name: "model"; type: "QVariant" }
+    Property { name: "instances"; type: "QObject"; isList: true; isReadonly: true }
+  }
+  Component {
+    file: "qs"; name: "QsLazyLoader"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell/LazyLoader 1.0"]; exportMetaObjectRevisions: [256]
+    defaultProperty: "component"
+    Property { name: "component"; type: "QQmlComponent"; isPointer: true }
+    Property { name: "active"; type: "bool" }
+    Property { name: "loading"; type: "bool" }
+    Property { name: "item"; type: "QObject"; isPointer: true; isReadonly: true }
+  }
+  Component {
+    file: "qs"; name: "QsMargins"; accessSemantics: "value"
+    Property { name: "left"; type: "int" } Property { name: "right"; type: "int" }
+    Property { name: "top"; type: "int" } Property { name: "bottom"; type: "int" }
+  }
+  Component {
+    file: "qs"; name: "QsAnchors"; accessSemantics: "value"
+    Property { name: "left"; type: "bool" } Property { name: "right"; type: "bool" }
+    Property { name: "top"; type: "bool" } Property { name: "bottom"; type: "bool" }
+  }
+  Component {
+    file: "qs"; name: "QsWindowBase"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell/QsWindow 1.0"]; isCreatable: false; exportMetaObjectRevisions: [256]
+    attachedType: "QsWindowAttached"
+    defaultProperty: "data"
+    Property { name: "data"; type: "QObject"; isList: true; isReadonly: true }
+    Property { name: "contentItem"; type: "QQuickItem"; isPointer: true; isReadonly: true }
+    Property { name: "visible"; type: "bool" }
+    Property { name: "width"; type: "int" }
+    Property { name: "height"; type: "int" }
+    Property { name: "implicitWidth"; type: "int" }
+    Property { name: "implicitHeight"; type: "int" }
+    Property { name: "color"; type: "QColor" }
+    Property { name: "screen"; type: "QObject"; isPointer: true }
+    Property { name: "mask"; type: "QObject"; isPointer: true }
+    Property { name: "surfaceFormat"; type: "QVariant" }
+    Property { name: "backingWindowVisible"; type: "bool"; isReadonly: true }
+    Property { name: "devicePixelRatio"; type: "double"; isReadonly: true }
+    Signal { name: "windowConnected" }
+    Method { name: "mapFromItem"; type: "QPointF"; Parameter { name: "item"; type: "QQuickItem"; isPointer: true } Parameter { name: "x"; type: "double" } Parameter { name: "y"; type: "double" } }
+  }
+  Component {
+    file: "qs"; name: "QsWindowAttached"; accessSemantics: "reference"; prototype: "QObject"
+    Property { name: "window"; type: "QsWindowBase"; isPointer: true; isReadonly: true }
+    Property { name: "contentItem"; type: "QQuickItem"; isPointer: true; isReadonly: true }
+  }
+  Component {
+    file: "qs"; name: "QsPanelWindow"; accessSemantics: "reference"; prototype: "QsWindowBase"
+    exports: ["Quickshell/PanelWindow 1.0"]; exportMetaObjectRevisions: [256]
+    Property { name: "anchors"; type: "QsAnchors" }
+    Property { name: "margins"; type: "QsMargins" }
+    Property { name: "exclusiveZone"; type: "int" }
+    Property { name: "exclusionMode"; type: "int" }
+    Property { name: "aboveWindows"; type: "bool" }
+    Property { name: "focusable"; type: "bool" }
+  }
+  Component {
+    file: "qs"; name: "QsFloatingWindow"; accessSemantics: "reference"; prototype: "QsWindowBase"
+    exports: ["Quickshell/FloatingWindow 1.0"]; exportMetaObjectRevisions: [256]
+    Property { name: "title"; type: "QString" }
+  }
+  Component {
+    file: "qs"; name: "QsPopupAnchor"; accessSemantics: "reference"; prototype: "QObject"
+    Property { name: "window"; type: "QObject"; isPointer: true }
+    Property { name: "item"; type: "QQuickItem"; isPointer: true }
+    Property { name: "rect"; type: "QRectF" }
+    Property { name: "edges"; type: "int" }
+    Property { name: "gravity"; type: "int" }
+    Property { name: "adjustment"; type: "int" }
+    Method { name: "updateAnchor" }
+  }
+  Component {
+    file: "qs"; name: "QsPopupWindow"; accessSemantics: "reference"; prototype: "QsWindowBase"
+    exports: ["Quickshell/PopupWindow 1.0"]; exportMetaObjectRevisions: [256]
+    Property { name: "anchor"; type: "QsPopupAnchor"; isPointer: true; isReadonly: true }
+    Property { name: "grabFocus"; type: "bool" }
+  }
+  Component {
+    file: "qs"; name: "QsRegion"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell/Region 1.0"]; exportMetaObjectRevisions: [256]
+    defaultProperty: "regions"
+    Property { name: "regions"; type: "QsRegion"; isList: true; isReadonly: true }
+    Property { name: "item"; type: "QQuickItem"; isPointer: true }
+    Property { name: "x"; type: "int" } Property { name: "y"; type: "int" }
+    Property { name: "width"; type: "int" } Property { name: "height"; type: "int" }
+    Property { name: "intersection"; type: "int" }
+  }
+  Component {
+    file: "qs"; name: "QsEdges"; accessSemantics: "none"
+    exports: ["Quickshell/Edges 1.0"]; isCreatable: false; exportMetaObjectRevisions: [256]
+    Enum { name: "Flags"; values: ["None", "Top", "Left", "Right", "Bottom"] }
+  }
+  Component {
+    file: "qs"; name: "QsExclusionMode"; accessSemantics: "none"
+    exports: ["Quickshell/ExclusionMode 1.0"]; isCreatable: false; exportMetaObjectRevisions: [256]
+    Enum { name: "Enum"; values: ["Normal", "Ignore", "Auto"] }
+  }
+  Component {
+    file: "qs"; name: "QsIntersection"; accessSemantics: "none"
+    exports: ["Quickshell/Intersection 1.0"]; isCreatable: false; exportMetaObjectRevisions: [256]
+    Enum { name: "Enum"; values: ["Combine", "Subtract", "Intersect", "Xor"] }
+  }
+}

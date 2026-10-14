@@ -1,0 +1,63 @@
+import QtQuick.tooling 1.2
+Module {
+  Component {
+    file: "io"; name: "QsFileView"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell.Io/FileView 1.0"]; exportMetaObjectRevisions: [256]
+    Property { name: "path"; type: "QString" }
+    Property { name: "watchChanges"; type: "bool" }
+    Property { name: "blockLoading"; type: "bool" }
+    Property { name: "blockAllReads"; type: "bool" }
+    Property { name: "preload"; type: "bool" }
+    Property { name: "printErrors"; type: "bool" }
+    Property { name: "atomicWrites"; type: "bool" }
+    Property { name: "loaded"; type: "bool"; isReadonly: true }
+    Signal { name: "loaded" }
+    Signal { name: "loadFailed"; Parameter { name: "error"; type: "int" } }
+    Signal { name: "fileChanged" }
+    Signal { name: "saved" }
+    Signal { name: "saveFailed"; Parameter { name: "error"; type: "int" } }
+    Method { name: "text"; type: "QString" }
+    Method { name: "reload" }
+    Method { name: "setText"; Parameter { name: "t"; type: "QString" } }
+  }
+  Component {
+    file: "io"; name: "QsDataStream"; accessSemantics: "reference"; prototype: "QObject"
+  }
+  Component {
+    file: "io"; name: "QsStdioCollector"; accessSemantics: "reference"; prototype: "QsDataStream"
+    exports: ["Quickshell.Io/StdioCollector 1.0"]; exportMetaObjectRevisions: [256]
+    Property { name: "text"; type: "QString"; isReadonly: true }
+    Property { name: "waitForEnd"; type: "bool" }
+    Signal { name: "streamFinished" }
+  }
+  Component {
+    file: "io"; name: "QsSplitParser"; accessSemantics: "reference"; prototype: "QsDataStream"
+    exports: ["Quickshell.Io/SplitParser 1.0"]; exportMetaObjectRevisions: [256]
+    Property { name: "splitMarker"; type: "QString" }
+    Signal { name: "read"; Parameter { name: "data"; type: "QString" } }
+  }
+  Component {
+    file: "io"; name: "QsProcess"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell.Io/Process 1.0"]; exportMetaObjectRevisions: [256]
+    Property { name: "command"; type: "QVariant" }
+    Property { name: "running"; type: "bool" }
+    Property { name: "environment"; type: "QVariant" }
+    Property { name: "workingDirectory"; type: "QString" }
+    Property { name: "stdinEnabled"; type: "bool" }
+    Property { name: "stdout"; type: "QsDataStream"; isPointer: true }
+    Property { name: "stderr"; type: "QsDataStream"; isPointer: true }
+    Property { name: "processId"; type: "QVariant"; isReadonly: true }
+    Signal { name: "started" }
+    Signal { name: "exited"; Parameter { name: "exitCode"; type: "int" } Parameter { name: "exitStatus"; type: "int" } }
+    Method { name: "startDetached" }
+    Method { name: "signal"; Parameter { name: "s"; type: "int" } }
+    Method { name: "write"; Parameter { name: "d"; type: "QString" } }
+    Method { name: "exec"; Parameter { name: "c"; type: "QVariant" } }
+  }
+  Component {
+    file: "io"; name: "QsIpcHandler"; accessSemantics: "reference"; prototype: "QObject"
+    exports: ["Quickshell.Io/IpcHandler 1.0"]; exportMetaObjectRevisions: [256]
+    Property { name: "target"; type: "QString" }
+    Property { name: "enabled"; type: "bool" }
+  }
+}

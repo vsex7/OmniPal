@@ -1,15 +1,16 @@
+pragma ComponentBehavior: Bound
 import QtQuick
-import "Tokens.js" as Tokens
 import QtQuick.Layouts
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // OmniPal Overview - 黑洞传送门组件 (Black Hole Event Horizon)
 // 支持将窗口拖拽至黑洞，将程序静默吸入并移动至指定工作区
 Item {
   id: blackHoleRoot
-  property var theme: Tokens.build(null, Tokens.fallback)
+  property OmniTheme theme: OmniTheme {}
 
   property int targetWorkspaceId: 2
   property bool isDragOver: false
@@ -80,11 +81,11 @@ Item {
     height: width
     radius: width / 2
     color: "transparent"
-    border.width: blackHoleRoot.isDragOver ? Tokens.border.focus : Tokens.border.hair
-    border.color: blackHoleRoot.isDragOver ? theme.danger : Tokens.alpha(theme.special, 0.25)
+    border.width: blackHoleRoot.isDragOver ? Math.max(1, Style.space(2)) : Math.max(1, Style.normalBorderWidth)
+    border.color: blackHoleRoot.isDragOver ? blackHoleRoot.theme.danger : Util.alpha(blackHoleRoot.theme.special, 0.25)
 
-    Behavior on width { NumberAnimation { duration: Tokens.motion.slow; easing.type: Easing.OutCubic } }
-    Behavior on border.color { ColorAnimation { duration: Tokens.motion.slow } }
+    Behavior on width { NumberAnimation { duration: Style.duration(200); easing.type: Easing.OutCubic } }
+    Behavior on border.color { ColorAnimation { duration: Style.duration(200) } }
 
   }
 
@@ -110,7 +111,7 @@ Item {
       ctx.clearRect(0, 0, w, h)
 
       var isOver = blackHoleRoot.isDragOver
-      var fill = isOver ? Tokens.alpha(theme.danger, 0.12) : Tokens.alpha(theme.special, 0.08)
+      var fill = isOver ? Util.alpha(blackHoleRoot.theme.danger, 0.12) : Util.alpha(blackHoleRoot.theme.special, 0.08)
 
       ctx.beginPath()
       ctx.arc(cx, cy, 115, 0, 2 * Math.PI)
@@ -124,7 +125,7 @@ Item {
         var a = (i * Math.PI * 2) / arcCount
         ctx.beginPath()
         ctx.arc(cx, cy, 75 + (i % 3) * 10, a, a + Math.PI * 0.45)
-        ctx.strokeStyle = isOver ? theme.danger : Tokens.alpha(theme.special, 0.6)
+        ctx.strokeStyle = isOver ? blackHoleRoot.theme.danger : Util.alpha(blackHoleRoot.theme.special, 0.6)
         ctx.stroke()
       }
     }
@@ -139,7 +140,7 @@ Item {
     radius: width / 2
     color: "transparent"
     border.width: 3
-    border.color: theme.info
+    border.color: blackHoleRoot.theme.info
     opacity: 0
   }
 
@@ -150,12 +151,12 @@ Item {
     width: blackHoleRoot.isDragOver ? 92 : 80
     height: width
     radius: width / 2
-    color: theme.sunken
-    border.width: Tokens.border.normal
-    border.color: blackHoleRoot.isDragOver ? theme.info : theme.textStrong
+    color: blackHoleRoot.theme.sunken
+    border.width: Math.max(1, Style.space(2))
+    border.color: blackHoleRoot.isDragOver ? blackHoleRoot.theme.info : blackHoleRoot.theme.textStrong
 
-    Behavior on width { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutCubic } }
-    Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
+    Behavior on width { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutCubic } }
+    Behavior on border.color { ColorAnimation { duration: Style.duration(140) } }
 
     // 中心内环
     Rectangle {
@@ -163,9 +164,9 @@ Item {
       width: parent.width * 0.55
       height: width
       radius: width / 2
-      color: theme.sunken
-      border.width: Tokens.border.hair
-      border.color: blackHoleRoot.isDragOver ? theme.accent : Tokens.alpha(theme.text, 0.4)
+      color: blackHoleRoot.theme.sunken
+      border.width: Math.max(1, Style.normalBorderWidth)
+      border.color: blackHoleRoot.isDragOver ? blackHoleRoot.theme.accent : Util.alpha(blackHoleRoot.theme.text, 0.4)
     }
   }
 
@@ -183,8 +184,8 @@ Item {
       Rectangle {
         width: 7
         height: 7
-        radius: Tokens.corner(Style)
-        color: blackHoleRoot.isDragOver ? theme.danger : theme.special
+        radius: Style.cornerRadius
+        color: blackHoleRoot.isDragOver ? blackHoleRoot.theme.danger : blackHoleRoot.theme.special
         anchors.verticalCenter: parent.verticalCenter
         SequentialAnimation on opacity {
           loops: Animation.Infinite
@@ -196,7 +197,7 @@ Item {
 
       Text {
         text: blackHoleRoot.isDragOver ? "EVENT HORIZON CAPTURE" : "BLACK HOLE PORTAL"
-        color: blackHoleRoot.isDragOver ? theme.danger : theme.text
+        color: blackHoleRoot.isDragOver ? blackHoleRoot.theme.danger : blackHoleRoot.theme.text
         font.pixelSize: Style.font.bodySmall
         font.bold: true
         font.family: Style.font.family
@@ -206,7 +207,7 @@ Item {
     Text {
       anchors.horizontalCenter: parent.horizontalCenter
       text: blackHoleRoot.isDragOver ? ("RELEASE → MOVE TO WORKSPACE [" + blackHoleRoot.targetWorkspaceId + "]") : ("DRAG HERE → WORKSPACE [" + blackHoleRoot.targetWorkspaceId + "]")
-      color: blackHoleRoot.isDragOver ? theme.info : theme.textMuted
+      color: blackHoleRoot.isDragOver ? blackHoleRoot.theme.info : blackHoleRoot.theme.textMuted
       font.pixelSize: Style.font.caption
       font.bold: true
       font.family: Style.font.family

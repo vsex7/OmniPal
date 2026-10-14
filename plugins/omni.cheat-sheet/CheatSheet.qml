@@ -1,8 +1,10 @@
+pragma ComponentBehavior: Bound
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "CheatSheetData.js" as SheetData
 import "Tokens.js" as Tokens
@@ -19,10 +21,13 @@ import "Tokens.js" as Tokens
 Item {
   id: root
 
-  // ---- Omarchy theme: Tokens.js is the single source of truth -------------
-  // Follows the current Omarchy theme at runtime (colors.toml), tokyo-night fallback.
+  // ---- Theme ----------------------------------------------------------------
+  // Chrome is 100% native: qs.Commons Color.menu.* / Style.* + qs.Ui OverlayWindow,
+  // BorderSurface, Button, TextField, PanelSectionHeader, PanelSeparator — the same
+  // kit omarchy.emojis / omarchy.menu use. Tokens.js only supplies the extended
+  // colors.toml palette (the "engine active" green dot), which Commons doesn't expose.
   property var themePalette: Tokens.fallback
-  readonly property var theme: Tokens.build(Color, themePalette)
+  readonly property color okColor: themePalette.green || Commons.Color.accent
   FileView {
     id: omniThemeFile
     property bool legacy: false
@@ -133,17 +138,14 @@ Item {
   readonly property string rcMark: "<<<OMNI_RC>>>"
 
   // ------------------------------------------------------------ theming
-  // 复用 [menu] 表面令牌：任何为 Omarchy 菜单配色的主题会同时给 HUD 配色。
-  // 半透明卡片 + 遮罩由合成器（Hyprland blur）负责毛玻璃效果，这里不加额外的
-  // ShaderEffect 通道，避免常驻 GPU 开销。
-  property color foreground: Color.menu.text
-  property color border: Color.menu.border
-  property var borderSpec: Border.surfaceSpec("popups", "border", root.theme.popupBorder, Tokens.popup.border)
-  property color scrim: root.theme.menuScrim
-  property color accent: Color.menu.selectedText
-  readonly property color glassColor: root.theme.popupBg  // Omarchy popups: opaque
-  readonly property color hairline: Util.alpha(Color.menu.text, 0.14)
-  readonly property color chipColor: Util.alpha(Color.menu.text, 0.07)
+  // 复用 [menu] 表面令牌（与 omarchy.emojis 完全一致）：任何为 Omarchy 菜单配色的
+  // 主题会同时给 HUD 配色。
+  property color background: Commons.Color.menu.background
+  property color foreground: Commons.Color.menu.text
+  property color border: Commons.Color.menu.border
+  property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
+  property color scrim: Commons.Color.menu.scrim
+  property color accent: Commons.Color.menu.selectedText
   readonly property string fontFamily: Style.font.menuFamily
 
   readonly property int cornerRadius: Style.cornerRadius
@@ -380,15 +382,12 @@ Item {
     }
   }
 
-  PanelWindow {
+  // Native fullscreen overlay surface (focused monitor, scale-safe reveal, Overlay layer,
+  // exclusive keyboard focus) — same as omarchy.emojis / omarchy.clipboard.
+  OverlayWindow {
     id: panel
-    visible: root.opened
-    anchors { top: true; bottom: true; left: true; right: true }
-    color: "transparent"
+    shown: root.opened
     WlrLayershell.namespace: "omni-cheat-sheet"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
-    exclusionMode: ExclusionMode.Ignore
 
     Rectangle {
       anchors.fill: parent
@@ -407,7 +406,7 @@ Item {
       height: root.cardHeight
       radius: root.cornerRadius
       anchors.centerIn: parent
-      color: root.glassColor
+      color: root.background
       borderSpec: root.borderSpec
       padding: root.contentMargin
 
@@ -485,55 +484,33 @@ Item {
           Repeater {
             model: root.previewModes
 
-            delegate: Rectangle {
+            // Native ButtonGroup-style chip: bordered Button, selected = previewed mode.
+            delegate: Button {
               id: previewPill
               required property var modelData
-              readonly property bool selected: root.displayMode === modelData.id
               readonly property bool engineActive: root.stateKnown
                 && String(root.engineState.mode || "") === modelData.id
 
-              height: Style.space(26)
-              width: pillInner.implicitWidth + Style.space(16)
-              radius: Tokens.corner(Style)
-              color: selected ? root.theme.selectedFill
-                : pillHover.containsMouse ? Util.alpha(root.foreground, 0.08) : "transparent"
-              border.width: selected ? Tokens.border.focus : Tokens.border.hair
-              border.color: selected ? root.theme.selectedBorder : root.hairline
-              Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
-              Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
+              text: modelData.label
+              bordered: true
+              selected: root.displayMode === modelData.id
+              foreground: root.foreground
+              accent: root.accent
+              fontFamily: root.fontFamily
+              fontSize: Style.font.bodySmall
+              tooltipText: engineActive ? "Engine 当前生效模式" : ""
+              onClicked: root.previewMode(previewPill.modelData.id)
 
-              Row {
-                id: pillInner
-                anchors.centerIn: parent
-                spacing: Style.space(5)
-
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  textFormat: Text.PlainText
-                  text: previewPill.modelData.label
-                  color: previewPill.selected ? root.accent : Util.alpha(root.foreground, 0.82)
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: previewPill.selected
-                }
-
-                Rectangle {
-                  // Engine 当前生效模式绿点标记（预览≠生效时一目了然）
-                  visible: previewPill.engineActive
-                  width: Style.space(5)
-                  height: Style.space(5)
-                  radius: Tokens.corner(Style)
-                  color: root.theme.ok
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-              }
-
-              MouseArea {
-                id: pillHover
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.previewMode(previewPill.modelData.id)
+              Rectangle {
+                // Engine 当前生效模式绿点标记（预览≠生效时一目了然）
+                visible: previewPill.engineActive
+                width: Style.space(5)
+                height: Style.space(5)
+                radius: Style.cornerRadius > 0 ? width / 2 : 0
+                color: root.okColor
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: Style.spacing.xs
               }
             }
           }
@@ -565,58 +542,31 @@ Item {
           }
         }
 
-        BorderSurface {
-          id: searchBox
+        // Native qs.Ui TextField (control fill/border state tokens, theme selection tint).
+        TextField {
+          id: searchInput
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          width: Style.space(160)
-          height: Style.space(26)
-          radius: Tokens.corner(Style)
-          color: Util.alpha(root.foreground, 0.06)
-          borderSpec: root.borderSpec
-          padding: Style.space(4)
-
-          Row {
-            anchors.fill: parent
-            spacing: Style.space(6)
-
-            Text {
-              font.family: Style.font.family
-              text: "🔍"
-              font.pixelSize: Style.font.caption
-              color: Util.alpha(root.foreground, 0.5)
-              anchors.verticalCenter: parent.verticalCenter
-            }
-
-            TextInput {
-              id: searchInput
-              width: parent.width - Style.space(24)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              color: root.foreground
-              anchors.verticalCenter: parent.verticalCenter
-              selectByMouse: true
-
-              Text {
-                text: "搜索 · /"
-                visible: searchInput.text === ""
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                color: Util.alpha(root.foreground, 0.4)
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              onTextChanged: {
-                root.filterText = text
-                root.applyFilter()
-                body.contentY = 0
-              }
-            }
+          width: Style.space(180)
+          foreground: root.foreground
+          accent: root.accent
+          font.family: root.fontFamily
+          placeholderText: "搜索 · /"
+          selectByMouse: true
+          Keys.onEscapePressed: function(event) {
+            if (searchInput.text !== "") searchInput.text = ""
+            else root.focusContent()
+            event.accepted = true
+          }
+          onTextChanged: {
+            root.filterText = text
+            root.applyFilter()
+            body.contentY = 0
           }
         }
       }
 
-      Rectangle {
+      PanelSeparator {
         id: headerRule
         anchors.top: header.bottom
         anchors.topMargin: root.blockGap
@@ -624,8 +574,7 @@ Item {
         anchors.leftMargin: card.contentLeftInset
         anchors.right: parent.right
         anchors.rightMargin: card.contentRightInset
-        height: 1
-        color: root.hairline
+        foreground: root.foreground
       }
 
       // ---- 分类筛选胶囊条（带数量徽章，Tab / Shift+Tab 键盘循环） ----
@@ -648,63 +597,19 @@ Item {
           Repeater {
             model: root.categories
 
-            delegate: Rectangle {
+            delegate: Button {
               id: catPill
               required property var modelData
-              readonly property bool selected: root.filterCategory === modelData.id
 
-              width: catPillRow.implicitWidth + Style.space(14)
-              height: Style.space(24)
-              radius: Tokens.corner(Style)
-              color: selected ? root.theme.selectedFill
-                : catPillHover.containsMouse ? Util.alpha(root.foreground, 0.07) : "transparent"
-              border.width: selected ? Tokens.border.focus : Tokens.border.hair
-              border.color: selected ? root.theme.selectedBorder : root.hairline
-              Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
-              Behavior on border.color { ColorAnimation { duration: Tokens.motion.normal } }
-
-              Row {
-                id: catPillRow
-                anchors.centerIn: parent
-                spacing: Style.space(5)
-
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  textFormat: Text.PlainText
-                  text: catPill.modelData.label
-                  color: catPill.selected ? root.accent : Util.alpha(root.foreground, 0.82)
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  font.bold: catPill.selected
-                }
-
-                Rectangle {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Math.max(Style.space(15), catCountLabel.implicitWidth + Style.space(6))
-                  height: Style.space(14)
-                  radius: Tokens.corner(Style)
-                  color: catPill.selected ? Util.alpha(root.accent, 0.25) : root.chipColor
-
-                  Text {
-                    id: catCountLabel
-                    anchors.centerIn: parent
-                    textFormat: Text.PlainText
-                    text: catPill.modelData.count
-                    color: catPill.selected ? root.accent : Util.alpha(root.foreground, 0.6)
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: true
-                  }
-                }
-              }
-
-              MouseArea {
-                id: catPillHover
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.selectCategory(catPill.modelData.id)
-              }
+              text: modelData.label + "  " + modelData.count
+              bordered: true
+              selected: root.filterCategory === modelData.id
+              foreground: root.foreground
+              accent: root.accent
+              fontFamily: root.fontFamily
+              fontSize: Style.font.caption
+              verticalPadding: Style.spacing.xs
+              onClicked: root.selectCategory(catPill.modelData.id)
             }
           }
         }
@@ -742,40 +647,19 @@ Item {
               width: body.width
               height: root.groupHeaderHeight + group.modelData.items.length * root.rowHeight
 
-              Row {
+              Item {
                 id: groupHeader
                 anchors.left: parent.left
+                anchors.right: parent.right
                 anchors.top: parent.top
                 height: root.groupHeaderHeight
-                spacing: Style.space(7)
 
-                Rectangle {
-                  width: Style.space(3)
-                  height: Style.font.subtitle
-                  radius: Tokens.corner(Style)
+                PanelSectionHeader {
+                  anchors.left: parent.left
                   anchors.verticalCenter: parent.verticalCenter
-                  color: Util.alpha(root.accent, 0.75)
-                }
-
-                Text {
-                  textFormat: Text.PlainText
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: group.modelData.label
-                  color: root.foreground
-                  opacity: 0.92
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.subtitle
-                  font.bold: true
-                }
-
-                Text {
-                  textFormat: Text.PlainText
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: group.modelData.items.length
-                  color: root.foreground
-                  opacity: 0.4
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
+                  text: group.modelData.label + "  ·  " + group.modelData.items.length
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
                 }
               }
 
@@ -796,14 +680,14 @@ Item {
                     width: group.width
                     height: root.rowHeight
 
-                    Rectangle {
+                    // Row state = Style hover-cursor / selected tokens (same as Button).
+                    BorderSurface {
                       anchors.fill: parent
-                      radius: Math.min(root.cornerRadius, Style.space(6))
-                      color: bindingMouse.containsMouse ? Style.hoverFill
-                        : (binding.rowLive ? Util.alpha(root.accent, 0.10) : "transparent")
-                      border.width: binding.rowLive ? 1 : 0
-                      border.color: Util.alpha(root.accent, 0.35)
-                      Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
+                      radius: root.cornerRadius
+                      color: bindingMouse.containsMouse ? Style.hoverFillFor(root.foreground, root.accent)
+                        : (binding.rowLive ? Style.selectedFillFor(root.foreground, root.accent) : "transparent")
+                      borderSpec: binding.rowLive ? Border.controlSpec("selected", root.foreground, root.accent) : Border.none()
+                      Behavior on color { ColorAnimation { duration: Style.duration(120) } }
                     }
 
                     Flow {
@@ -816,26 +700,29 @@ Item {
                       Repeater {
                         model: SheetData.splitCombo(binding.modelData.key)
 
-                        delegate: Rectangle {
+                        // Key cap: Omarchy has no keycap widget, so it is a BorderSurface
+                        // painted with the shared control state tokens (normal / selected),
+                        // i.e. it looks exactly like a bordered native Button chip.
+                        delegate: BorderSurface {
                           id: keyCap
                           required property var modelData
                           readonly property bool capLive: root.modsActive
                             && SheetData.isModifierActive(String(keyCap.modelData), root.liveMods)
 
-                          width: keyLabel.implicitWidth + Style.space(13)
-                          height: Math.max(Style.space(21), Style.font.body + Style.space(7))
-                          // Omarchy key-cap chip (Tokens): flat fill, 1px border, accent when held
-                          radius: Tokens.corner(Style)
-                          border.width: keyCap.capLive ? Tokens.border.focus : Tokens.border.hair
-                          border.color: keyCap.capLive ? root.theme.accent : root.theme.chipBorder
-                          color: keyCap.capLive ? root.theme.selectionFill : root.theme.chipFill
+                          width: keyLabel.implicitWidth + Style.spacing.controlPaddingX * 2
+                          height: Math.max(Style.space(21), Style.font.body + Style.spacing.controlPaddingY)
+                          radius: Style.cornerRadius
+                          color: keyCap.capLive ? Style.selectedFillFor(root.foreground, root.accent)
+                            : Style.normalFillFor(root.foreground, root.accent)
+                          borderSpec: Border.controlSpec(keyCap.capLive ? "focus" : "normal", root.foreground, root.accent)
 
-                          // 实时按键高亮反馈：按住修饰键时关联键帽闪烁
-                          SequentialAnimation on border.color {
+                          // 实时按键高亮反馈：按住修饰键时关联键帽呼吸
+                          SequentialAnimation on opacity {
                             loops: Animation.Infinite
-                            running: keyCap.capLive
-                            ColorAnimation { to: Util.alpha(root.accent, 0.95); duration: Tokens.motion.slow }
-                            ColorAnimation { to: Util.alpha(root.accent, 0.30); duration: Tokens.motion.slow }
+                            running: keyCap.capLive && !Style.reduceMotion
+                            alwaysRunToEnd: true
+                            NumberAnimation { to: 0.55; duration: Style.duration(420) }
+                            NumberAnimation { to: 1.0; duration: Style.duration(420) }
                           }
 
                           Text {
@@ -940,15 +827,14 @@ Item {
             wrapMode: Text.Wrap
           }
 
-          Rectangle {
+          BorderSurface {
             visible: root.placeholderCommand !== ""
             anchors.horizontalCenter: parent.horizontalCenter
-            width: commandLabel.implicitWidth + Style.space(16)
-            height: Math.max(Style.space(22), Style.font.body + Style.space(8))
-            radius: Math.min(root.cornerRadius, height / 2)
-            color: root.chipColor
-            border.color: root.hairline
-            border.width: 1
+            width: commandLabel.implicitWidth + Style.spacing.controlPaddingX * 2
+            height: Math.max(Style.space(22), Style.font.body + Style.spacing.controlPaddingY * 2)
+            radius: Style.cornerRadius
+            color: Style.normalFillFor(root.foreground, root.accent)
+            borderSpec: Border.controlSpec("normal", root.foreground, root.accent)
 
             Text {
               id: commandLabel

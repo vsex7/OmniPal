@@ -1,8 +1,10 @@
+pragma ComponentBehavior: Bound
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Tokens.js" as Tokens
 
@@ -17,10 +19,12 @@ import "Tokens.js" as Tokens
 Item {
   id: root
 
-  // ---- Omarchy theme: Tokens.js is the single source of truth -------------
-  // Follows the current Omarchy theme at runtime (colors.toml), tokyo-night fallback.
+  // ---- Theme ----------------------------------------------------------------
+  // Native first: qs.Commons Color/Style + qs.Ui widgets wherever Omarchy has one.
+  // `theme` (OmniTheme.qml) resolves the remaining custom-surface roles straight from
+  // qs.Commons; the colors.toml palette below only feeds the extended status hues.
   property var themePalette: Tokens.fallback
-  readonly property var theme: Tokens.build(Color, themePalette)
+  readonly property OmniTheme theme: OmniTheme { palette: root.themePalette }
   FileView {
     id: omniThemeFile
     property bool legacy: false
@@ -67,8 +71,10 @@ Item {
   property real contextCenterX: 0
 
   // ---------- 设计令牌 ----------
-  readonly property color dangerColor: root.theme.danger
-  readonly property color hairline: Util.alpha(Color.menu.text, 0.10)
+  // Chrome mirrors omarchy.dock (shell/plugins/dock/DockWindow.qml): [popups] surface
+  // for the bar and its context menu, Style state fills, Color.urgent for alerts.
+  readonly property color dangerColor: Commons.Color.urgent
+  readonly property var popupBorderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
 
   function open(payloadJson) {
     root.opened = true
@@ -95,7 +101,7 @@ Item {
     clientsProc.running = true
   }
 
-  IpcHandler {
+  ShellIpc {
     target: "omni.mac-dock"
     function toggle(): void { root.toggle() }
     function open(): void { root.open("{}") }
@@ -303,7 +309,8 @@ Item {
     running: false
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: function(raw) {
+      onStreamFinished: function() {
+        var raw = text  // streamFinished() carries no args; read StdioCollector.text
         if (!raw || raw.trim() === "") return
         try {
           var parsed = JSON.parse(raw)
@@ -344,17 +351,16 @@ Item {
     exclusionMode: ExclusionMode.Ignore
 
     // 居中 Dock 胶囊条
-    Rectangle {
+    BorderSurface {
       id: dockBar
       anchors.bottom: parent.bottom
       anchors.bottomMargin: Style.space(12)
       anchors.horizontalCenter: parent.horizontalCenter
       width: contentRow.implicitWidth + Style.space(24)
       height: Style.space(64)
-      radius: Tokens.corner(Style)
-      color: root.theme.popupBg
-      border.width: Tokens.border.hair
-      border.color: root.theme.line
+      radius: Style.cornerRadius
+      color: Commons.Color.popups.background
+      borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Style.normalBorderWidth)
 
 
       Row {
@@ -406,7 +412,7 @@ Item {
                   target: bounceSlot
                   property: "y"
                   to: -Style.space(13)
-                  duration: Tokens.motion.normal
+                  duration: Style.duration(140)
                   easing.type: Easing.OutCubic
                 }
                 NumberAnimation {
@@ -419,25 +425,26 @@ Item {
               }
 
               // 图标容器（底边固定，鱼眼缩放向上生长）
-              Rectangle {
+              BorderSurface {
                 id: iconBox
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: Style.space(6)
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: Style.space(42) * dockItemWrapper.iconScale
                 height: width
-                radius: Tokens.corner(Style)
+                radius: Style.cornerRadius
                 color: dockItemWrapper.waveFalloff > 0.02
-                  ? Util.alpha(Color.menu.text, 0.16)
-                  : Util.alpha(Color.menu.text, 0.08)
+                  ? Style.hoverFillFor(Commons.Color.popups.text, Commons.Color.accent)
+                  : Style.normalFillFor(Commons.Color.popups.text, Commons.Color.accent)
+                borderSpec: Border.controlSpec(dockItemWrapper.waveFalloff > 0.5 ? "hover-cursor" : "normal", Commons.Color.popups.text, Commons.Color.accent)
                 Behavior on width { SpringAnimation { spring: 3.2; damping: 0.62; epsilon: 0.001 } }
-                Behavior on color { ColorAnimation { duration: Tokens.motion.normal } }
+                Behavior on color { ColorAnimation { duration: Style.duration(140) } }
 
                 Text {
                   font.family: Style.font.family
                   text: dockItemWrapper.modelData.icon
                   font.pixelSize: Math.max(10, Math.round(iconBox.width * 0.43))
-                  color: Color.menu.text
+                  color: Commons.Color.popups.text
                   anchors.centerIn: parent
                 }
 
@@ -453,10 +460,10 @@ Item {
                   }
                   width: Math.max(Style.space(16), badgeText.implicitWidth + Style.space(8))
                   height: Style.space(16)
-                  radius: Tokens.corner(Style)
+                  radius: Style.cornerRadius
                   color: root.dangerColor
                   border.width: 1
-                  border.color: Util.alpha(Color.menu.background, 0.85)
+                  border.color: Commons.Color.popups.background
 
                   Text {
                     id: badgeText
@@ -465,7 +472,7 @@ Item {
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
                     font.bold: true
-                    color: root.theme.textStrong
+                    color: Commons.Color.background
                   }
                 }
               }
@@ -478,29 +485,31 @@ Item {
               anchors.horizontalCenter: parent.horizontalCenter
               width: Style.space(4)
               height: Style.space(4)
-              radius: Tokens.corner(Style)
-              color: Color.menu.text
+              radius: Style.cornerRadius
+              color: Commons.Color.popups.text
             }
 
-            // 悬停提示（卡片打开时让位）
-            Rectangle {
+            // 悬停提示（卡片打开时让位）— same [tooltip] chrome native Button/PanelToolTip paint
+            BorderSurface {
+              id: tip
+              readonly property var spec: Border.surfaceSpec("tooltip", "border", Commons.Color.tooltip.border, Math.max(1, Style.normalBorderWidth))
               visible: itemHover.containsMouse && root.contextItem === null
               anchors.bottom: iconBox.top
               anchors.bottomMargin: Style.space(8)
               anchors.horizontalCenter: parent.horizontalCenter
-              width: tipText.implicitWidth + Style.space(12)
-              height: tipText.implicitHeight + Style.space(6)
-              radius: Tokens.corner(Style)
-              color: Util.alpha(Color.menu.background, 0.95)
-              border.width: 1
-              border.color: Util.alpha(Color.menu.border, 0.4)
+              width: tipText.implicitWidth + Style.spacing.controlPaddingX * 2 + Border.left(spec) + Border.right(spec)
+              height: tipText.implicitHeight + Style.spacing.controlPaddingY * 2 + Border.top(spec) + Border.bottom(spec)
+              radius: 0
+              color: Commons.Color.tooltip.background
+              borderSpec: spec
 
               Text {
-                font.family: Style.font.family
                 id: tipText
+                textFormat: Text.PlainText
                 text: dockItemWrapper.modelData.name
-                font.pixelSize: Style.font.caption
-                color: Color.menu.text
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                color: Commons.Color.tooltip.text
                 anchors.centerIn: parent
               }
             }
@@ -556,140 +565,73 @@ Item {
       Keys.onEscapePressed: root.closeContextCard()
     }
 
-    Rectangle {
+    // Context menu card = omarchy.dock's menu chrome: [popups] BorderSurface + native rows.
+    BorderSurface {
       id: contextCard
       property var shown: root.contextShown
       property var actions: root.contextActions(root.contextItem || root.contextShown)
       property real anchorX: root.contextCenterX
 
       width: Style.space(238)
-      height: contextCardCol.implicitHeight + Style.space(18)
+      height: contextCardCol.implicitHeight + contentTopInset + contentBottomInset
       // 悬于 Dock 胶囊条正上方（bar 高 64 + 底边距 12 + 间隙 10），并防止贴边溢出
       x: Math.max(Style.space(10), Math.min(anchorX - width / 2, cardPanel.width - width - Style.space(10)))
       y: cardPanel.height - Style.space(86) - height
-      radius: Tokens.corner(Style)
-      color: root.theme.popupBg
-      border.width: Tokens.popup.border
-      border.color: root.theme.popupBorder
+      radius: Style.cornerRadius
+      color: Commons.Color.popups.background
+      borderSpec: root.popupBorderSpec
+      padding: Style.spacing.sm
       opacity: root.contextItem !== null ? 1 : 0
       scale: 1.0
       visible: root.contextItem !== null || opacity > 0
-      Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutQuad } }
+      Behavior on opacity { NumberAnimation { duration: Style.duration(140); easing.type: Easing.OutQuad } }
 
 
       Column {
         id: contextCardCol
-        x: Style.space(9)
-        y: Style.space(9)
-        width: parent.width - Style.space(18)
-        spacing: Style.space(4)
+        x: contextCard.contentLeftInset
+        y: contextCard.contentTopInset
+        width: contextCard.width - contextCard.contentLeftInset - contextCard.contentRightInset
+        spacing: Style.spacing.sm
 
-        // 头部：应用图标 + 全称 + 运行状态
-        Item {
-          width: parent.width
-          height: Style.space(44)
-
-          Rectangle {
-            id: cardGlyph
-            anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-            width: Style.space(32)
-            height: Style.space(32)
-            radius: Tokens.corner(Style)
-            color: Util.alpha(Color.menu.text, 0.09)
-            border.width: 1
-            border.color: Util.alpha(Color.menu.text, 0.10)
-
-            Text {
-              font.family: Style.font.family
-              anchors.centerIn: parent
-              text: contextCard.shown ? contextCard.shown.icon : ""
-              font.pixelSize: Style.font.title
-              color: Color.menu.text
-            }
+        // 头部：应用图标 + 全称 + 运行状态 — native PanelHero
+        PanelHero {
+          foreground: Commons.Color.popups.text
+          title: contextCard.shown ? contextCard.shown.name : ""
+          meta: {
+            if (!contextCard.shown) return ""
+            if (!contextCard.shown.isRunning) return "未运行"
+            var n = contextCard.shown.windowCount || 1
+            var t = (contextCard.shown.windowTitles && contextCard.shown.windowTitles[0]) || ""
+            return "运行中 · " + n + " 个窗口" + (t ? " · " + t : "")
           }
-
-          Column {
-            anchors {
-              left: cardGlyph.right; leftMargin: Style.space(10)
-              right: parent.right; rightMargin: Style.space(2)
-              verticalCenter: parent.verticalCenter
-            }
-            spacing: 2
-
-            Text {
-              width: parent.width
-              text: contextCard.shown ? contextCard.shown.name : ""
-              font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
-              font.bold: true
-              color: Color.menu.text
-              elide: Text.ElideRight
-            }
-
-            Text {
-              width: parent.width
-              text: {
-                if (!contextCard.shown) return ""
-                if (!contextCard.shown.isRunning) return "未运行"
-                var n = contextCard.shown.windowCount || 1
-                var t = (contextCard.shown.windowTitles && contextCard.shown.windowTitles[0]) || ""
-                return "运行中 · " + n + " 个窗口" + (t ? " · " + t : "")
-              }
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              color: Util.alpha(Color.menu.text, 0.55)
-              elide: Text.ElideRight
-            }
+          iconComponent: Text {
+            textFormat: Text.PlainText
+            text: contextCard.shown ? contextCard.shown.icon : ""
+            font.family: Style.font.family
+            font.pixelSize: Style.font.display
+            color: Commons.Color.popups.text
           }
         }
 
-        Rectangle {
-          width: parent.width
-          height: 1
-          color: root.hairline
-        }
+        PanelSeparator { foreground: Commons.Color.popups.text }
 
-        // 快捷动作行
+        // 快捷动作行 — native Button rows (danger rows tinted with Color.urgent)
         Repeater {
           model: contextCard.actions
 
-          delegate: Rectangle {
+          delegate: Button {
+            id: actionRow
             required property var modelData
-            width: parent.width
-            height: Style.space(30)
-            radius: Tokens.corner(Style)
-            color: cardRowHover.containsMouse
-              ? Util.alpha(modelData.danger ? root.dangerColor : Color.menu.text, modelData.danger ? 0.14 : 0.09)
-              : "transparent"
-            Behavior on color { ColorAnimation { duration: Tokens.motion.fast } }
-
-            Row {
-              anchors { left: parent.left; leftMargin: Style.space(9); verticalCenter: parent.verticalCenter }
-              spacing: Style.space(8)
-
-              Text {
-                font.family: Style.font.family
-                anchors.verticalCenter: parent.verticalCenter
-                text: modelData.icon
-                font.pixelSize: Style.font.caption
-                color: modelData.danger ? root.dangerColor : Util.alpha(Color.menu.text, 0.8)
-              }
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: modelData.label
-                font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
-                color: modelData.danger ? root.dangerColor : Color.menu.text
-              }
-            }
-
-            MouseArea {
-              id: cardRowHover
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.runContextAction(modelData.key)
-            }
+            width: contextCardCol.width
+            leftAlign: true
+            iconText: modelData.icon
+            text: modelData.label
+            fontSize: Style.font.bodySmall
+            iconSize: Style.font.caption
+            foreground: modelData.danger ? root.dangerColor : Commons.Color.popups.text
+            accent: modelData.danger ? root.dangerColor : Commons.Color.accent
+            onClicked: root.runContextAction(actionRow.modelData.key)
           }
         }
       }

@@ -1,8 +1,10 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 import "Tokens.js" as Tokens
@@ -10,22 +12,28 @@ import "Tokens.js" as Tokens
 // OmniPal 托盘模式指示器与右键快捷控制面板（omni.mode-indicator）
 //
 // 遵循 Omarchy Quickshell 规范：
-// 1. 继承 BarWidget，嵌入 Omarchy Top Bar
+// 1. 与 Omarchy 第一方 bar-widget（panels/power、panels/network）同构：
+//    根为 qs.Ui Panel（PanelController 管理开合 + 与其它 bar 面板互斥），
+//    按钮为 BarIconButton，面板为 KeyboardPanel + PanelKeyCatcher（j/k/h/l/Enter/Esc/Tab）
 // 2. 通过 FileView 监听 /run/user/1000/omnipal/state.json，毫秒级响应，零轮询开销
 // 3. 左键：快速轮转切换模式 (omni-profile cycle)
-//    右键：呼出/收起右键快捷控制面板 (PopupCard)
+//    右键：呼出/收起快捷控制面板 (原生 KeyboardPanel)
 //    中键：呼出设置面板 (omarchy-shell shell toggle omni.settings)
-// 4. 右键面板集成 PopupCard，包含肌肉记忆模式与窗口策略（平铺/浮动/跟随模式）控制
-// 5. 支持外部点击自动收起（HyprlandFocusGrab），与 Omarchy 状态栏弹窗互斥协调
+// 4. 面板全部使用原生组件：PanelHero / PanelSectionHeader / PanelSeparator /
+//    Button（列表行，selected + hasCursor）/ ButtonGroup（窗口策略）/ PanelActionButton，包含肌肉记忆模式与窗口策略（平铺/浮动/跟随模式）控制
+// 5. 外部点击收起、bar 弹窗互斥均由 KeyboardPanel/bar 协调器负责
 // 6. 模式与策略数据 100% 来源单一事实源 (omni-profile / state.json)
-BarWidget {
+Panel {
   id: root
 
-  // ---- Omarchy theme: Tokens.js is the single source of truth -------------
-  // Follows the current Omarchy theme at runtime (colors.toml), tokyo-night fallback.
+  // ---- Theme ----------------------------------------------------------------
+  // All chrome comes from qs.Commons (Color / Style) and qs.Ui components, exactly
+  // like first-party panels. The only thing Commons does not expose is the extended
+  // colors.toml palette (green/blue/cyan/...), which we use for per-mode identity
+  // colours — so Tokens.js stays as that palette reader/fallback only.
   property var themePalette: Tokens.fallback
   readonly property var modeColors: Tokens.modeColors(themePalette)
-  readonly property var theme: Tokens.build(Color, themePalette)
+  readonly property color okColor: themePalette.green || Commons.Color.accent
   FileView {
     id: omniThemeFile
     property bool legacy: false
@@ -36,6 +44,9 @@ BarWidget {
     onLoadFailed: if (!legacy) legacy = true
   }
   moduleName: "omni.mode-indicator"
+  ipcTarget: "omni.mode-indicator"
+  // We own the single IpcHandler for this target (extra methods below), like omarchy.power.
+  manageIpc: false
 
   property string statePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/omnipal/state.json"
   property string currentMode: "omarchy"
@@ -46,7 +57,12 @@ BarWidget {
   property int activeBindingsCount: 0
   property bool engineRunning: false
   property string engineStatus: "native"
-  property bool panelOpen: false
+  // Mirrors Panel.opened (PanelController); kept as a name for IPC/tests.
+  readonly property bool panelOpen: root.opened
+  // Keyboard cursor over the panel rows: profiles, then the policy group, then actions.
+  property bool cursorActive: false
+  property int cursorIndex: 0
+  property int policyCursor: -1
   property string windowPolicy: "tiled"
   property string effectiveWindowMode: "tiled"
   property bool compositorConnected: false
@@ -131,7 +147,8 @@ BarWidget {
     command: ["omni-profile", "list", "--json"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: function(raw) {
+      onStreamFinished: function() {
+        var raw = text  // streamFinished() carries no args; read StdioCollector.text
         if (!raw || raw.trim() === "") return
         try {
           var parsed = JSON.parse(raw)
@@ -148,7 +165,8 @@ BarWidget {
     command: ["omni-profile", "cheatsheet", "--json"]
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: function(raw) {
+      onStreamFinished: function() {
+        var raw = text  // streamFinished() carries no args; read StdioCollector.text
         if (raw && raw.trim() !== "") root.loadActionHints(raw)
       }
     }
@@ -167,29 +185,83 @@ BarWidget {
     }
   }
 
-  function openPanel() {
-    root.panelOpen = true
-    if (!listProcess.running) listProcess.running = true
-    if (!hintsProcess.running) hintsProcess.running = true
-    if (root.bar && typeof root.bar.requestPopout === "function") {
-      root.bar.requestPopout(root)
+  // Panel.open()/close()/toggle() drive PanelController; the bar's popout coordinator
+  // (requestPopout/releasePopout on older shells) is handled by KeyboardPanel itself.
+  function openPanel() { root.open() }
+  function closePanel() { root.close() }
+  function togglePanel() { root.toggle() }
+
+  onOpenedChanged: {
+    if (opened) {
+      if (!listProcess.running) listProcess.running = true
+      if (!hintsProcess.running) hintsProcess.running = true
+      root.cursorActive = false
+      root.cursorIndex = 0
+      root.policyCursor = -1
     }
   }
 
-  function closePanel() {
-    root.panelOpen = false
-    if (root.bar && typeof root.bar.releasePopout === "function") {
-      root.bar.releasePopout(root)
+  // ---- keyboard cursor (PanelKeyCatcher) ------------------------------------
+  readonly property var actionRows: [
+    { icon: "📖", label: "快捷键速查表 (Cheat Sheet)", hintKey: "cheat_sheet", run: "cheat", closes: true },
+    { icon: "⚙️", label: "OmniPal 控制中心 (Settings)", hintKey: "omni_settings", run: "settings", closes: true },
+    { icon: "🪟", label: "触发布局吸附 (Snap Layout)", hintKey: "snap_layouts", run: "snap", closes: true },
+    { icon: "🗂️", label: "多任务空间概览 (Overview)", hintKey: "task_view", run: "overview", closes: true }
+  ]
+  readonly property var systemRows: [
+    { icon: "↻", label: "轮转切换下一模式 (Cycle Next)", hint: "Cycle", run: "cycle", closes: false },
+    { icon: "↺", label: "还原原生快捷键 (Restore Baseline)", hint: "0 覆盖", run: "restore", closes: true },
+    { icon: "🩺", label: "运行系统健康诊断 (Doctor)", hint: "Doctor", run: "doctor", closes: true }
+  ]
+  readonly property int policyRowIndex: root.profiles.length
+  readonly property int actionBase: root.profiles.length + 1
+  readonly property int systemBase: root.actionBase + root.actionRows.length
+  readonly property int cursorCount: root.systemBase + root.systemRows.length
+
+  function runAction(row) {
+    if (!row) return
+    if (row.run === "cheat") root.openCheatSheet()
+    else if (row.run === "settings") root.openSettings()
+    else if (row.run === "snap") root.triggerSnap()
+    else if (row.run === "overview") root.openOverview()
+    else if (row.run === "cycle") root.cycleMode(false)
+    else if (row.run === "restore") root.restoreBaseline()
+    else if (row.run === "doctor") root.runDoctor()
+    if (row.closes) root.closePanel()
+  }
+
+  function moveCursor(dx, dy) {
+    if (!root.cursorActive) { root.cursorActive = true; return }
+    if (dy !== 0) {
+      root.cursorIndex = Math.max(0, Math.min(root.cursorCount - 1, root.cursorIndex + dy))
+      root.policyCursor = -1
+    } else if (dx !== 0 && root.cursorIndex === root.policyRowIndex) {
+      var n = root.policyOptions.length
+      var cur = root.policyCursor >= 0 ? root.policyCursor : Math.max(0, root.policySelectedIndex())
+      root.policyCursor = Math.max(0, Math.min(n - 1, cur + dx))
     }
   }
 
-  function togglePanel() {
-    if (root.panelOpen) root.closePanel()
-    else root.openPanel()
+  function policySelectedIndex() {
+    for (var i = 0; i < root.policyOptions.length; i++)
+      if (root.policyOptions[i].id === Model.normalizePolicy(root.windowPolicy)) return i
+    return -1
   }
 
-  function close() {
-    root.closePanel()
+  function activateCursor() {
+    if (!root.cursorActive) return
+    var i = root.cursorIndex
+    if (i < root.profiles.length) root.switchMode(root.profiles[i].id)
+    else if (i === root.policyRowIndex) {
+      if (root.policyCursor >= 0) root.setPolicy(root.policyOptions[root.policyCursor].id)
+    } else if (i < root.systemBase) root.runAction(root.actionRows[i - root.actionBase])
+    else root.runAction(root.systemRows[i - root.systemBase])
+  }
+
+  function hoverRow(i, on) {
+    if (!on) return
+    root.cursorActive = true
+    root.cursorIndex = i
   }
 
   function cycleMode(reverse) {
@@ -257,8 +329,13 @@ BarWidget {
     runCmd("which omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1 && omarchy-launch-floating-terminal-with-presentation 'omni-profile doctor' || (which xdg-terminal-exec >/dev/null 2>&1 && xdg-terminal-exec -e omni-profile doctor || omni-profile doctor)")
   }
 
-  IpcHandler {
+  ShellIpc {
     target: "omni.mode-indicator"
+    function open(): void { root.open() }
+    function close(): void { root.close() }
+    function show(): void { root.open() }
+    function hide(): void { root.close() }
+    function toggle(): void { root.toggle() }
     function cycle(): void { root.cycleMode(false) }
     function cycleReverse(): void { root.cycleMode(true) }
     function refresh(): void {
@@ -284,7 +361,7 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: root.engineRunning ? root.currentIcon : "⊘"
-    foreground: root.engineRunning ? root.currentColor : Color.muted
+    foreground: root.engineRunning ? root.currentColor : Commons.Color.muted
     tooltipText: root.engineRunning
       ? ("OmniPal: " + root.currentName + "\n生效快捷键: " + root.activeBindingsCount + "\n窗口策略: " + Model.resolvePolicyName(root.windowPolicy) + " (" + root.effectiveWindowMode + ")\n左键: 轮转模式 | 右键: 快捷控制面板 | 中键: 设置")
       : "OmniPal Engine 未运行\n左键: 启动/切换 | 右键: 快捷控制面板"
@@ -300,605 +377,280 @@ BarWidget {
     }
   }
 
-  // 右键快捷控制面板 (Omarchy PopupCard)
-  PopupCard {
-    id: contextPopup
+  // 快捷控制面板 — native KeyboardPanel (same chrome/positioning/dismissal as omarchy.power).
+  KeyboardPanel {
+    id: panel
     anchorItem: button
     owner: root
     bar: root.bar
-    open: root.panelOpen
-    triggerMode: "click"
-    padding: Style.space(8)
-    borderColor: Tokens.alpha(root.currentColor, 0.45)
-    contentWidth: contextPopup.fittedContentWidth(Style.space(320))
-    contentHeight: contextPopup.fittedContentHeight(panelLayout.implicitHeight)
+    open: root.opened
+    focusTarget: panel.loadedContent
+    contentWidth: panel.fittedContentWidth(Style.space(340))
+    contentHeight: panel.fittedContentHeight(panel.loadedContentHeight)
 
-    Column {
-      id: panelLayout
-      width: parent.width
-      spacing: Style.space(6)
+    content: PanelKeyCatcher {
+      id: keyCatcher
+      anchors.fill: parent
+      implicitHeight: panelLayout.implicitHeight
+      onMoveRequested: function(dx, dy) { root.moveCursor(dx, dy) }
+      onActivateRequested: root.activateCursor()
+      onCloseRequested: root.closePanel()
+      onTabRequested: function(direction) { root.switchPanel(direction) }
 
-      // 1. Hero 概览区
-      Item {
-        width: parent.width
-        implicitHeight: Math.max(heroBox.implicitHeight, heroTextCol.implicitHeight) + Style.space(2)
+      Column {
+        id: panelLayout
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        spacing: Style.spacing.md
 
-        Row {
-          id: heroBox
-          anchors.left: parent.left
-          anchors.leftMargin: Style.space(4)
-          anchors.verticalCenter: parent.verticalCenter
-
-          Rectangle {
-            width: Style.space(34)
-            height: Style.space(34)
-            implicitWidth: width
-            implicitHeight: height
-            radius: Tokens.corner(Style)
-            color: root.engineRunning
-              ? Tokens.alpha(root.currentColor, 0.15)
-              : Tokens.alpha(Color.foreground, 0.08)
-            border.width: 1
-            border.color: root.engineRunning
-              ? Tokens.alpha(root.currentColor, 0.4)
-              : Tokens.alpha(Color.foreground, 0.15)
-
-            Text {
-              font.family: Style.font.family
-              anchors.centerIn: parent
-              text: root.engineRunning ? root.currentIcon : "⊘"
-              font.pixelSize: Style.font.title
-              color: root.engineRunning ? root.currentColor : Color.muted
-            }
-          }
-        }
-
-        Column {
-          id: heroTextCol
-          anchors.left: heroBox.right
-          anchors.leftMargin: Style.space(8)
-          anchors.right: closeBtn.left
-          anchors.rightMargin: Style.space(4)
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(3)
-
-          Row {
-            width: parent.width
-            spacing: Style.space(6)
-
-            Text {
-              text: root.engineRunning ? root.currentName : "OmniPal Engine 未运行"
-              color: Color.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
-              font.bold: true
-              elide: Text.ElideRight
-              anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Rectangle {
-              visible: root.engineRunning
-              height: Style.space(16)
-              width: heroBriefText.implicitWidth + Style.space(8)
-              radius: Tokens.corner(Style)
-              color: Tokens.alpha(root.currentColor, 0.18)
-              anchors.verticalCenter: parent.verticalCenter
-
-              Text {
-                id: heroBriefText
-                anchors.centerIn: parent
-                text: root.currentBrief
-                color: root.currentColor
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption - 1
-                font.bold: true
-              }
-            }
-          }
-
-          Row {
-            spacing: Style.space(6)
-
-            // 快捷键覆盖状态
-            Row {
-              spacing: Style.space(3)
-              anchors.verticalCenter: parent.verticalCenter
-
-              Rectangle {
-                width: Style.space(6)
-                height: Style.space(6)
-                radius: Tokens.corner(Style)
-                color: root.engineRunning
-                  ? (root.engineStatus === "active" ? root.theme.ok : root.theme.accent)
-                  : Color.muted
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              Text {
-                text: root.engineRunning
-                  ? (root.activeBindingsCount > 0 ? (root.activeBindingsCount + " 项快捷键已覆盖") : "原生零覆盖")
-                  : "引擎已停止"
-                color: Qt.darker(Color.foreground, 1.4)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
-              }
-            }
-
-            // 分隔圆点
-            Text {
-              font.family: Style.font.family
-              text: "•"
-              color: Qt.darker(Color.foreground, 1.8)
-              font.pixelSize: Style.font.caption
-              anchors.verticalCenter: parent.verticalCenter
-            }
-
-            // Compositor 连通状态
-            Row {
-              spacing: Style.space(3)
-              anchors.verticalCenter: parent.verticalCenter
-
-              Rectangle {
-                width: Style.space(6)
-                height: Style.space(6)
-                radius: Tokens.corner(Style)
-                color: root.compositorConnected ? root.theme.ok : root.theme.danger
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              Text {
-                text: root.compositorConnected ? "Hyprland 连通" : "未连接 Compositor"
-                color: root.compositorConnected ? Qt.darker(Color.foreground, 1.4) : root.theme.danger
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
-              }
-            }
-          }
-        }
-
-        Rectangle {
-          id: closeBtn
-          anchors.right: parent.right
-          anchors.rightMargin: Style.space(2)
-          anchors.verticalCenter: parent.verticalCenter
-          width: Style.space(22)
-          height: Style.space(22)
-          radius: Tokens.corner(Style)
-          color: closeMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.foreground) : "transparent"
-
-          Text {
+        // 1. Hero 概览区
+        PanelHero {
+          id: hero
+          foreground: Commons.Color.popups.text
+          title: root.engineRunning ? root.currentName : "OmniPal Engine 未运行"
+          detail: root.engineRunning ? root.currentBrief : ""
+          meta: root.engineRunning
+            ? ((root.activeBindingsCount > 0 ? (root.activeBindingsCount + " 项快捷键已覆盖") : "原生零覆盖")
+               + "  •  " + (root.compositorConnected ? "Hyprland 连通" : "未连接 Compositor"))
+            : "引擎已停止"
+          iconComponent: Text {
+            textFormat: Text.PlainText
+            text: root.engineRunning ? root.currentIcon : "⊘"
+            color: root.engineRunning ? root.currentColor : Commons.Color.muted
             font.family: Style.font.family
-            text: "✕"
-            color: closeMouse.containsMouse ? Color.accent : Qt.darker(Color.foreground, 1.3)
-            font.pixelSize: Style.font.caption
-            anchors.centerIn: parent
+            font.pixelSize: Style.font.display
           }
-
-          MouseArea {
-            id: closeMouse
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
+          trailingControl: PanelActionButton {
+            iconText: "✕"
+            tooltipText: "关闭"
+            foreground: Commons.Color.popups.text
             onClicked: root.closePanel()
           }
         }
-      }
 
-      PanelSeparator {
-        foreground: Color.foreground
-      }
+        // Status lamps (engine / compositor) — the bits PanelHero's meta line can't colour.
+        Row {
+          spacing: Style.spacing.lg
+          StatusLamp {
+            on: root.engineRunning
+            lampColor: root.engineRunning ? (root.engineStatus === "active" ? root.okColor : Commons.Color.accent) : Commons.Color.muted
+            label: root.engineRunning ? "Engine" : "Engine 停止"
+          }
+          StatusLamp {
+            on: root.compositorConnected
+            lampColor: root.compositorConnected ? root.okColor : Commons.Color.urgent
+            label: "Compositor"
+          }
+        }
 
-      // 2. 肌肉记忆模式选择区 (PROFILES)
-      PanelSectionHeader {
-        text: "肌肉记忆模式 (PROFILES)"
-        foreground: Color.foreground
-        fontFamily: Style.font.family
-      }
+        PanelSeparator { foreground: Commons.Color.popups.text }
 
-      Column {
-        width: parent.width
-        spacing: Style.space(2)
+        // 2. 肌肉记忆模式选择区 (PROFILES)
+        PanelSectionHeader {
+          text: "肌肉记忆模式 (PROFILES)"
+          foreground: Commons.Color.popups.text
+        }
 
-        Repeater {
-          model: root.profiles
+        Column {
+          width: parent.width
+          spacing: Style.spacing.xxs
 
-          delegate: Item {
-            id: profileRow
-            required property var modelData
-            required property int index
-            width: parent.width
-            implicitHeight: Style.space(28)
+          Repeater {
+            model: root.profiles
 
-            readonly property bool isActive: root.engineRunning && root.currentMode === modelData.id
-            readonly property color itemColor: Model.resolveColor(modelData)
+            delegate: Button {
+              id: profileRow
+              required property var modelData
+              required property int index
+              readonly property bool isActive: root.engineRunning && root.currentMode === modelData.id
+              readonly property color itemColor: Model.resolveColor(modelData)
 
-            Rectangle {
-              anchors.fill: parent
-              radius: Tokens.corner(Style)
-              color: rowMouse.containsMouse
-                ? Style.hoverFillFor(Color.foreground, Color.accent)
-                : (profileRow.isActive ? Tokens.alpha(profileRow.itemColor, 0.12) : "transparent")
-            }
+              width: parent.width
+              leftAlign: true
+              iconText: Model.resolveIcon(modelData)
+              text: Model.resolveName(modelData)
+              selected: isActive
+              hasCursor: root.cursorActive && root.cursorIndex === index
+              foreground: Commons.Color.popups.text
+              accent: itemColor
+              onHovered: function(on) { root.hoverRow(profileRow.index, on) }
+              onClicked: root.switchMode(profileRow.modelData.id)
 
-            Rectangle {
-              visible: profileRow.isActive
-              width: Style.space(3)
-              height: parent.height - Style.space(6)
-              radius: Tokens.corner(Style)
-              color: profileRow.itemColor
-              anchors.left: parent.left
-              anchors.leftMargin: Style.space(2)
-              anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-              font.family: Style.font.family
-              id: pIcon
-              text: Model.resolveIcon(profileRow.modelData)
-              color: profileRow.itemColor
-              font.pixelSize: Style.font.bodySmall
-              font.bold: true
-              anchors.left: parent.left
-              anchors.leftMargin: Style.space(8)
-              anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-              text: Model.resolveName(profileRow.modelData)
-              color: profileRow.isActive ? profileRow.itemColor : Color.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
-              font.bold: profileRow.isActive
-              anchors.left: pIcon.right
-              anchors.leftMargin: Style.space(8)
-              anchors.right: pRightBadge.left
-              anchors.rightMargin: Style.space(6)
-              anchors.verticalCenter: parent.verticalCenter
-              elide: Text.ElideRight
-            }
-
-            Text {
-              id: pRightBadge
-              anchors.right: parent.right
-              anchors.rightMargin: Style.space(8)
-              anchors.verticalCenter: parent.verticalCenter
-              text: profileRow.isActive ? "✓ 已启用" : (profileRow.modelData.bindings_count + "项")
-              color: profileRow.isActive ? profileRow.itemColor : Qt.darker(Color.foreground, 1.4)
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              font.bold: profileRow.isActive
-            }
-
-            MouseArea {
-              id: rowMouse
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: {
-                root.switchMode(profileRow.modelData.id)
+              RowHint {
+                text: profileRow.isActive ? "✓ 已启用" : (profileRow.modelData.bindings_count + "项")
+                color: profileRow.isActive ? profileRow.itemColor : Qt.darker(Commons.Color.popups.text, 1.4)
+                font.bold: profileRow.isActive
               }
             }
           }
         }
-      }
 
-      PanelSeparator {
-        foreground: Color.foreground
-      }
+        PanelSeparator { foreground: Commons.Color.popups.text }
 
-      // 3. 窗口策略控制区 (WINDOW POLICY)
-      Item {
-        width: parent.width
-        implicitHeight: Math.max(wpHeader.implicitHeight, Style.space(16))
+        // 3. 窗口策略控制区 (WINDOW POLICY)
+        Item {
+          width: parent.width
+          implicitHeight: Math.max(wpHeader.implicitHeight, effPolicyBadge.implicitHeight)
 
-        PanelSectionHeader {
-          id: wpHeader
-          text: "窗口策略 (WINDOW POLICY)"
-          foreground: Color.foreground
-          fontFamily: Style.font.family
-          anchors.left: parent.left
-          anchors.right: effPolicyBadge.left
-          anchors.rightMargin: Style.space(4)
-          anchors.verticalCenter: parent.verticalCenter
+          PanelSectionHeader {
+            id: wpHeader
+            text: "窗口策略 (WINDOW POLICY)"
+            foreground: Commons.Color.popups.text
+            anchors.left: parent.left
+            anchors.right: effPolicyBadge.left
+            anchors.rightMargin: Style.spacing.sm
+            anchors.verticalCenter: parent.verticalCenter
+            elide: Text.ElideRight
+          }
+
+          // Same pill chrome PanelHero uses for its detail badge.
+          BorderSurface {
+            id: effPolicyBadge
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            implicitWidth: effPolicyText.implicitWidth + Style.space(10)
+            implicitHeight: effPolicyText.implicitHeight + Style.space(4)
+            width: implicitWidth
+            height: implicitHeight
+            color: "transparent"
+            radius: Style.cornerRadius
+            borderSpec: Border.controlSpec("normal", root.currentColor, Commons.Color.accent)
+
+            Text {
+              id: effPolicyText
+              textFormat: Text.PlainText
+              anchors.centerIn: parent
+              text: "生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
+              color: root.currentColor
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              font.bold: true
+            }
+          }
+        }
+
+        ButtonGroup {
+          id: policyGroup
+          width: parent.width
+          focusable: false
+          options: root.policyOptions.map(function(p) { return { value: p.id, label: p.name, icon: p.icon } })
+          value: Model.normalizePolicy(root.windowPolicy)
+          cursorIndex: (root.cursorActive && root.cursorIndex === root.policyRowIndex)
+            ? (root.policyCursor >= 0 ? root.policyCursor : Math.max(0, root.policySelectedIndex())) : -1
+          foreground: Commons.Color.popups.text
+          background: "transparent"
+          fontSize: Style.font.caption
+          onChanged: function(v) { root.setPolicy(v) }
+          onHovered: function(i, on) {
+            if (!on) return
+            root.hoverRow(root.policyRowIndex, true)
+            root.policyCursor = i
+          }
+        }
+
+        Text {
+          width: parent.width
+          textFormat: Text.PlainText
+          text: "ℹ " + Model.resolvePolicyDesc(root.windowPolicy, root.currentMode)
+          color: Qt.darker(Commons.Color.popups.text, 1.4)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
           elide: Text.ElideRight
         }
 
-        Rectangle {
-          id: effPolicyBadge
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          height: Style.space(16)
-          width: effPolicyText.implicitWidth + Style.space(8)
-          implicitWidth: width
-          implicitHeight: height
-          radius: Tokens.corner(Style)
-          color: Tokens.alpha(root.currentColor, 0.18)
+        PanelSeparator { foreground: Commons.Color.popups.text }
 
-          Text {
-            id: effPolicyText
-            anchors.centerIn: parent
-            text: "生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
-            color: root.currentColor
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption - 1
-            font.bold: true
-          }
+        // 4. 快捷功能入口 (ACTIONS)
+        PanelSectionHeader {
+          text: "快捷入口 (ACTIONS)"
+          foreground: Commons.Color.popups.text
         }
-      }
 
-      Column {
-        width: parent.width
-        spacing: Style.space(4)
-
-        // 分段选择器 (Segmented Selector)
-        Rectangle {
-          width: parent.width
-          height: Style.space(32)
-          implicitHeight: height
-          radius: Tokens.corner(Style)
-          color: Tokens.alpha(Color.foreground, 0.06)
-          border.width: 1
-          border.color: Tokens.alpha(Color.foreground, 0.1)
-
-          Row {
-            anchors.fill: parent
-            anchors.margins: Style.space(2)
-            spacing: Style.space(2)
-
-            Repeater {
-              model: root.policyOptions
-
-              delegate: Item {
-                id: policySeg
-                required property var modelData
-                required property int index
-
-                width: {
-                  if (!root.policyOptions || root.policyOptions.length === 0) return 0
-                  var count = root.policyOptions.length
-                  var totalGap = Style.space(2) * (count - 1)
-                  var segW = Math.floor((parent.width - totalGap) / count)
-                  return (index === count - 1) ? Math.max(0, parent.width - totalGap - segW * (count - 1)) : segW
-                }
-                height: parent.height
-
-                readonly property bool isSelected: Model.normalizePolicy(root.windowPolicy) === modelData.id
-
-                Rectangle {
-                  anchors.fill: parent
-                  radius: Tokens.corner(Style)
-                  color: policySeg.isSelected
-                    ? root.theme.selectedFill
-                    : (policyMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent) : "transparent")
-                  border.width: policySeg.isSelected ? Tokens.border.focus : 0
-                  border.color: policySeg.isSelected
-                    ? root.theme.selectedBorder
-                    : "transparent"
-
-                  Row {
-                    anchors.centerIn: parent
-                    spacing: Style.space(4)
-
-                    Text {
-                      font.family: Style.font.family
-                      text: policySeg.modelData.icon
-                      color: policySeg.isSelected ? root.theme.selectedText : (policyMouse.containsMouse ? Color.accent : Qt.darker(Color.foreground, 1.2))
-                      font.pixelSize: Style.font.bodySmall
-                    }
-
-                    Text {
-                      text: policySeg.modelData.name
-                      color: policySeg.isSelected ? root.theme.selectedText : (policyMouse.containsMouse ? Color.accent : Color.foreground)
-                      font.family: Style.font.family
-                      font.pixelSize: Style.font.caption
-                      font.bold: policySeg.isSelected
-                    }
-                  }
-
-                  MouseArea {
-                    id: policyMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                      root.setPolicy(policySeg.modelData.id)
-                    }
-                  }
-                }
-              }
-            }
+        Repeater {
+          model: root.actionRows
+          delegate: ActionRow {
+            required property var modelData
+            required property int index
+            row: modelData
+            rowIndex: root.actionBase + index
+            hint: root.actionHints[modelData.hintKey] || ""
           }
         }
 
-        // 当前策略说明提示条
-        Rectangle {
-          width: parent.width
-          implicitHeight: Style.space(22)
-          radius: Tokens.corner(Style)
-          color: Tokens.alpha(Color.foreground, 0.03)
+        PanelSeparator { foreground: Commons.Color.popups.text }
 
-          Item {
-            anchors.fill: parent
-            anchors.leftMargin: Style.space(6)
-            anchors.rightMargin: Style.space(6)
+        // 5. 系统与控制 (SYSTEM)
+        PanelSectionHeader {
+          text: "系统与控制 (SYSTEM)"
+          foreground: Commons.Color.popups.text
+        }
 
-            Text {
-              font.family: Style.font.family
-              id: infoIcon
-              text: "ℹ"
-              color: root.currentColor
-              font.pixelSize: Style.font.caption
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-              id: policyHintText
-              anchors.left: infoIcon.right
-              anchors.leftMargin: Style.space(6)
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              text: Model.resolvePolicyDesc(root.windowPolicy, root.currentMode)
-              color: Qt.darker(Color.foreground, 1.3)
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption - 1
-              elide: Text.ElideRight
-            }
+        Repeater {
+          model: root.systemRows
+          delegate: ActionRow {
+            required property var modelData
+            required property int index
+            row: modelData
+            rowIndex: root.systemBase + index
+            hint: modelData.hint || ""
           }
-        }
-      }
-
-      PanelSeparator {
-        foreground: Color.foreground
-      }
-
-      // 4. 快捷功能入口 (ACTIONS)
-      PanelSectionHeader {
-        text: "快捷入口 (ACTIONS)"
-        foreground: Color.foreground
-        fontFamily: Style.font.family
-      }
-
-      ActionRow {
-        iconText: "📖"
-        label: "快捷键速查表 (Cheat Sheet)"
-        hint: root.actionHints["cheat_sheet"] || ""
-        onTriggered: {
-          root.openCheatSheet()
-          root.closePanel()
-        }
-      }
-
-      ActionRow {
-        iconText: "⚙️"
-        label: "OmniPal 控制中心 (Settings)"
-        hint: root.actionHints["omni_settings"] || ""
-        onTriggered: {
-          root.openSettings()
-          root.closePanel()
-        }
-      }
-
-      ActionRow {
-        iconText: "🪟"
-        label: "触发布局吸附 (Snap Layout)"
-        hint: root.actionHints["snap_layouts"] || ""
-        onTriggered: {
-          root.triggerSnap()
-          root.closePanel()
-        }
-      }
-
-      ActionRow {
-        iconText: "🗂️"
-        label: "多任务空间概览 (Overview)"
-        hint: root.actionHints["task_view"] || ""
-        onTriggered: {
-          root.openOverview()
-          root.closePanel()
-        }
-      }
-
-      PanelSeparator {
-        foreground: Color.foreground
-      }
-
-      // 5. 系统与控制 (SYSTEM)
-      PanelSectionHeader {
-        text: "系统与控制 (SYSTEM)"
-        foreground: Color.foreground
-        fontFamily: Style.font.family
-      }
-
-      ActionRow {
-        iconText: "↻"
-        label: "轮转切换下一模式 (Cycle Next)"
-        hint: "Cycle"
-        onTriggered: {
-          root.cycleMode(false)
-        }
-      }
-
-      ActionRow {
-        iconText: "↺"
-        label: "还原原生快捷键 (Restore Baseline)"
-        hint: "0 覆盖"
-        onTriggered: {
-          root.restoreBaseline()
-          root.closePanel()
-        }
-      }
-
-      ActionRow {
-        iconText: "🩺"
-        label: "运行系统健康诊断 (Doctor)"
-        hint: "Doctor"
-        onTriggered: {
-          root.runDoctor()
-          root.closePanel()
         }
       }
     }
   }
 
-  // 行组件封装
-  component ActionRow: Item {
+  // List row = native Button (hover/cursor/selected fills come from Style state tokens).
+  component ActionRow: Button {
     id: rowItem
-    property string iconText: ""
-    property string label: ""
+    property var row: ({})
+    property int rowIndex: -1
     property string hint: ""
-    signal triggered()
 
-    width: parent.width
-    implicitHeight: Style.space(28)
+    width: parent ? parent.width : implicitWidth
+    leftAlign: true
+    iconText: row.icon || ""
+    text: row.label || ""
+    foreground: Commons.Color.popups.text
+    hasCursor: root.cursorActive && root.cursorIndex === rowIndex
+    onHovered: function(on) { root.hoverRow(rowItem.rowIndex, on) }
+    onClicked: root.runAction(rowItem.row)
 
-    Rectangle {
-      anchors.fill: parent
-      radius: Tokens.corner(Style)
-      color: actionMouse.containsMouse ? Style.hoverFillFor(Color.foreground, Color.accent) : "transparent"
-    }
-
-    Text {
-      font.family: Style.font.family
-      id: rowIcon
-      text: rowItem.iconText
-      font.pixelSize: Style.font.bodySmall
-      anchors.left: parent.left
-      anchors.leftMargin: Style.space(8)
-      anchors.verticalCenter: parent.verticalCenter
-    }
-
-    Text {
-      text: rowItem.label
-      color: Color.foreground
-      font.family: Style.font.family
-      font.pixelSize: Style.font.bodySmall
-      anchors.left: rowIcon.right
-      anchors.leftMargin: Style.space(8)
-      anchors.right: hintText.left
-      anchors.rightMargin: Style.space(4)
-      anchors.verticalCenter: parent.verticalCenter
-      elide: Text.ElideRight
-    }
-
-    Text {
-      id: hintText
+    RowHint {
       visible: rowItem.hint !== ""
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(8)
-      anchors.verticalCenter: parent.verticalCenter
       text: rowItem.hint
-      color: Qt.darker(Color.foreground, 1.4)
+    }
+  }
+
+  // Right-aligned caption inside a Button row (e.g. the bound key / count).
+  component RowHint: Text {
+    textFormat: Text.PlainText
+    anchors.right: parent.right
+    anchors.rightMargin: Style.spacing.controlPaddingX
+    anchors.verticalCenter: parent.verticalCenter
+    color: Qt.darker(Commons.Color.popups.text, 1.4)
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+  }
+
+  component StatusLamp: Row {
+    property bool on: false
+    property color lampColor: Commons.Color.muted
+    property string label: ""
+    spacing: Style.spacing.sm
+    Rectangle {
+      width: Style.space(6)
+      height: Style.space(6)
+      radius: Style.cornerRadius > 0 ? width / 2 : 0
+      color: parent.lampColor
+      anchors.verticalCenter: parent.verticalCenter
+    }
+    Text {
+      textFormat: Text.PlainText
+      text: parent.label
+      color: Qt.darker(Commons.Color.popups.text, 1.4)
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
-    }
-
-    MouseArea {
-      id: actionMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: rowItem.triggered()
     }
   }
 }
