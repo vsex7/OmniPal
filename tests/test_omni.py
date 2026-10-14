@@ -391,13 +391,14 @@ class TestOmniPal(BaseOmniTestCase):
 
         overlay = [{"action": "window_close", "combo": "ALT + F4", "name": "Close Window"}]
         self.engine._write_active_overlay(overlay)
-        self.engine._write_state("windows", len(overlay), policy="floating")
+        self.engine._write_state("windows", len(overlay), policy="follow-profile")
         self.engine._set_applied_window_mode("floating")
 
         original_eval = self.engine._eval_lua
         original_reload = self.engine._reload_config_only
         try:
             self.engine._eval_lua = lambda code: True
+            self.engine._eval_lua_strict = lambda code: False
             self.engine._reload_config_only = lambda: False
             self.assertFalse(self.engine.restore())
             self.assertTrue(OVERLAY_FILE.exists())
@@ -838,6 +839,32 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         # Rejection of empty / null
         self.assertFalse(self.engine.set_window_policy(""))
 
+    def test_tiled_disables_float_rules_without_reload(self):
+        from engine.engine import APPLIED_WINDOW_MODE_FILE
+        import engine.engine as E
+        self.engine._write_state("windows", 1, policy="floating")
+        APPLIED_WINDOW_MODE_FILE.write_text("floating", encoding="utf-8")
+        calls, orig = [], (self.engine._reload_config_only, E.find_socket2_path)
+        try:
+            self.engine._reload_config_only = lambda timeout=3.0: calls.append("reload") or True
+            self.engine._eval_lua_strict = lambda code: calls.append(code) or True
+            self.engine._unfloat_existing_windows = lambda: None
+            E.find_socket2_path = lambda: Path("/")
+            self.assertTrue(self.engine.set_window_policy("tiled"))
+            self.assertNotIn("reload", calls)
+            self.assertTrue(any("set_enabled(false)" in c for c in calls))
+        finally:
+            self.engine._reload_config_only, E.find_socket2_path = orig
+            self.engine._write_state("omarchy", 0, policy="tiled")
+            APPLIED_WINDOW_MODE_FILE.write_text("tiled", encoding="utf-8")
+
+    def test_follow_profile_reads_profile_window_mode(self):
+        self.assertEqual(self.engine.get_effective_window_mode("mac", "follow-profile"), "floating")
+        self.assertEqual(self.engine.get_effective_window_mode("windows", "follow-profile"), "tiled")
+        self.engine.profiles["windows"]["window_mode"] = "floating"
+        self.assertEqual(self.engine.get_effective_window_mode("windows", "follow-profile"), "floating")
+        self.assertEqual(self.engine.get_effective_window_mode("windows", "tiled"), "tiled")
+
     def test_window_policy_reload_failure_rolls_back(self):
         """A requested policy must not be reported successful when reload fails."""
         from engine.engine import APPLIED_WINDOW_MODE_FILE
@@ -846,6 +873,7 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         original_reload = self.engine._reload_config_only
         try:
             self.engine._reload_config_only = lambda timeout=3.0: False
+            self.engine._eval_lua_strict = lambda code: False
             self.assertFalse(self.engine.set_window_policy("tiled"))
             self.assertEqual(self.engine.get_window_policy(), "floating")
             self.assertEqual(APPLIED_WINDOW_MODE_FILE.read_text(encoding="utf-8"), "floating")

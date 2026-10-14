@@ -578,7 +578,7 @@ class OmniPalEngine:
         self.snap_zones: Dict[str, Dict[str, Any]] = {}
         self.snap_layouts: List[Dict[str, Any]] = []
         self._last_summon_proc = None
-        self.window_policy: str = "tiled"
+        self.window_policy: str = "follow-profile"
         self._ensure_run_dir()
         if STATE_FILE.exists():
             try:
@@ -1398,14 +1398,18 @@ end
         if target_mode == "floating":
             if not force and cur_applied == "floating":
                 return True
+            # Rules are kept in the Lua registry so tiled mode can disable them without a reload.
             lua_code = (
-                'if type(hl) == "table" and type(hl.window_rule) == "function" then '
-                'hl.window_rule({ match = {}, float = true, center = true }); '
-                'hl.window_rule({ match = { class = ".*" }, float = true, center = true }); '
-                'hl.window_rule({ match = { tag = "chromium-based-browser" }, float = true, center = true }); '
-                'hl.window_rule({ match = { tag = "terminal" }, float = true, center = true }) '
-                'end; '
-                'if type(o) == "table" and type(o.window) == "function" then '
+                'local R = debug.getregistry(); '
+                'if R.omnipal_float_rules then '
+                'for _, r in ipairs(R.omnipal_float_rules) do r:set_enabled(true) end '
+                'elseif type(hl) == "table" and type(hl.window_rule) == "function" then '
+                'R.omnipal_float_rules = { '
+                'hl.window_rule({ match = {}, float = true, center = true }), '
+                'hl.window_rule({ match = { class = ".*" }, float = true, center = true }), '
+                'hl.window_rule({ match = { tag = "chromium-based-browser" }, float = true, center = true }), '
+                'hl.window_rule({ match = { tag = "terminal" }, float = true, center = true }) } '
+                'elseif type(o) == "table" and type(o.window) == "function" then '
                 'o.window(".*", { float = true, center = true }); '
                 'o.window({ tag = "chromium-based-browser" }, { float = true, center = true }); '
                 'o.window({ tag = "terminal" }, { float = true, center = true }) '
@@ -1420,16 +1424,30 @@ end
             # target_mode == "tiled"
             if not force and cur_applied != "floating":
                 return True
-            if not self._reload_config_only():
+            reloaded = self._disable_float_rules()
+            if reloaded is None:
                 return False
             self._unfloat_existing_windows()
             self._set_applied_window_mode("tiled")
+            if not reloaded:
+                return True
 
             st = self.get_state()
             active_m = st.get("mode", "omarchy")
             if active_m != "omarchy":
                 self._reinject_active_bindings(active_m)
             return True
+
+    def _disable_float_rules(self) -> Optional[bool]:
+        """Turns the floating rules off. Returns False if done in place (no reload), True if it had
+        to fall back to a config-only reload (Lua state rebuilt), None if both failed."""
+        lua = ('local R = debug.getregistry(); local t = R.omnipal_float_rules; '
+               'if not t then error("omnipal: no float rules") end; '
+               'for _, r in ipairs(t) do r:set_enabled(false) end')
+        if self._eval_lua_strict(lua):
+            return False
+        print("Disabling float rules in place failed; falling back to config reload", file=sys.stderr)
+        return True if self._reload_config_only() else None
 
     def get_effective_window_mode(self, mode: Optional[str] = None, policy: Optional[str] = None) -> str:
         pol = normalize_window_policy(policy) or self.get_window_policy()
@@ -1439,6 +1457,10 @@ end
             else:
                 cur_m = mode
             m = str(cur_m).lower().strip()
+            prof = getattr(self, "profiles", {}).get(m) or {}
+            wm = prof.get("window_mode")
+            if wm in ("floating", "tiled"):
+                return wm
             return "floating" if m == "mac" else "tiled"
         return "floating" if pol == "floating" else "tiled"
 
@@ -1454,7 +1476,7 @@ end
                             return pol
             except Exception as _e:
                 _debug(_e)
-        return normalize_window_policy(getattr(self, "window_policy", None)) or "tiled"
+        return normalize_window_policy(getattr(self, "window_policy", None)) or "follow-profile"
 
     def set_window_policy(self, policy: str) -> bool:
         with engine_lock():
@@ -1540,7 +1562,7 @@ end
                 except Exception as _e:
                     _debug(_e)
             if not cur_policy:
-                cur_policy = normalize_window_policy(getattr(self, "window_policy", None)) or "tiled"
+                cur_policy = normalize_window_policy(getattr(self, "window_policy", None)) or "follow-profile"
 
         cur_policy = cur_policy or "tiled"
         self.window_policy = cur_policy
@@ -1803,10 +1825,12 @@ end
 
             policy_restored = True
             config_reloaded = False
-            if self._get_applied_window_mode() == "floating":
-                config_reloaded = True
-                policy_restored = self._reload_config_only()
+            if self._get_applied_window_mode() == "floating" and self.get_effective_window_mode("omarchy") != "floating":
+                res = self._disable_float_rules()
+                policy_restored = res is not None
+                config_reloaded = bool(res)
                 if policy_restored:
+                    self._unfloat_existing_windows()
                     self._set_applied_window_mode("tiled")
             if not policy_restored:
                 print("Warning: Restore window policy reload failed; retaining active overlay for retry", file=sys.stderr)

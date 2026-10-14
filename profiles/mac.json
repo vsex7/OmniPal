@@ -238,5 +238,6 @@
       "mod": "SUPER SHIFT",
       "key": "Tab"
     }
-  ]
+  ],
+  "window_mode": "floating"
 }

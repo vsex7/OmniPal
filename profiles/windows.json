@@ -104,5 +104,6 @@
       "mod": "SUPER",
       "key": "Tab"
     }
-  ]
+  ],
+  "window_mode": "tiled"
 }

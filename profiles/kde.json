@@ -28,5 +28,6 @@
     { "action": "workspace_prev", "mod": "SUPER CTRL", "key": "Left" },
     { "action": "cheat_sheet", "mod": "SUPER", "key": "slash" },
     { "action": "omni_settings", "mod": "SUPER", "key": "I" }
-  ]
+  ],
+  "window_mode": "tiled"
 }

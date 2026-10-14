@@ -8,5 +8,6 @@
     "brief": "OMA",
     "color": "#a3be8c"
   },
-  "bindings": []
+  "bindings": [],
+  "window_mode": "tiled"
 }
