@@ -96,10 +96,50 @@ def parse_forward(spec: str):
     return mods, (key.upper() if len(key) == 1 else key)
 
 
+def load_terminal_patterns() -> List[str]:
+    """Built-in terminals plus ~/.config/omnipal/terminals.json (a JSON list of window
+    classes; a trailing '*' means prefix match). Lower-cased, deduped."""
+    pats = list(TERMINAL_CLASSES)
+    try:
+        path = app_rules_file_path().parent / "terminals.json"
+        if path.exists():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            for x in raw if isinstance(raw, list) else []:
+                if isinstance(x, str) and x.strip():
+                    pats.append(x.strip().lower())
+    except Exception as e:
+        print(f"Warning: Failed to read terminals.json: {e}", file=sys.stderr)
+    return list(dict.fromkeys(pats))
+
+
+def is_terminal_class(window_class: str, patterns: Optional[List[str]] = None) -> bool:
+    wc = (window_class or "").strip().lower()
+    if not wc:
+        return False
+    for p in (patterns if patterns is not None else load_terminal_patterns()):
+        if (p.endswith("*") and wc.startswith(p[:-1])) or wc == p:
+            return True
+    return False
+
+
+def forward_lua(mods: List[str], key: str, patterns: List[str]) -> str:
+    """Pure-Lua forward: reads the focused window class, adds SHIFT for terminals,
+    then dispatches send_shortcut. Every dynamic value goes through lua_str()."""
+    exact = ", ".join(f"[{lua_str(p)}] = true" for p in patterns if not p.endswith("*"))
+    prefix = ", ".join(lua_str(p[:-1]) for p in patterns if p.endswith("*"))
+    term_mods = mods + ["SHIFT"] if "CTRL" in mods and "SHIFT" not in mods else mods
+    return ("function() local w = hl.get_active_window(); "
+            "local c = string.lower((w and w.class) or ''); "
+            f"local t = ({{ {exact} }})[c] or false; "
+            f"for _, p in ipairs({{ {prefix} }}) do if c:sub(1, #p) == p then t = true end end; "
+            f"hl.dispatch(hl.dsp.send_shortcut({{ mods = t and {lua_str(' '.join(term_mods))} or {lua_str(' '.join(mods))}, "
+            f"key = {lua_str(key)} }})) end")
+
+
 def forward_for_class(spec: str, window_class: str):
     """Terminals keep Ctrl+W / Ctrl+C for the shell, so they get Ctrl+Shift instead."""
     mods, key = parse_forward(spec)
-    if (window_class or "").strip().lower() in TERMINAL_CLASSES and "CTRL" in mods and "SHIFT" not in mods:
+    if is_terminal_class(window_class) and "CTRL" in mods and "SHIFT" not in mods:
         mods = mods + ["SHIFT"]
     return mods, key
 
@@ -718,6 +758,7 @@ class OmniPalEngine:
 
         # 2. Add bind commands for new profile
         new_overlay_records = []
+        terminals = None
         for b in target_bindings:
             action_id = b.get("action")
             action_meta = self.actions_catalog.get(action_id, {})
@@ -735,9 +776,10 @@ class OmniPalEngine:
                 except ValueError as e:
                     print(f"Skipping forward binding {combo}: {e}", file=sys.stderr)
                     continue
-                cmd = "omni-profile send " + " ".join(mods + [fkey])
+                if terminals is None:
+                    terminals = load_terminal_patterns()
                 lua_ops.append(f'hl.unbind({lua_str(combo)})')
-                lua_ops.append(f'o.bind({lua_str(combo)}, {lua_str(name)}, {lua_str(cmd)})')
+                lua_ops.append(f'o.bind({lua_str(combo)}, {lua_str(name)}, {forward_lua(mods, fkey, terminals)})')
                 unbind_native = True
             elif action_id in LUA_DISPATCHERS:
                 dispatcher_expr = LUA_DISPATCHERS[action_id]

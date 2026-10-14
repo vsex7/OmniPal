@@ -1261,11 +1261,9 @@ class TestForwardShortcut(unittest.TestCase):
         self.assertGreaterEqual(len(fw), 10)
         for b in fw:
             self.assertIn(f"hl.unbind({lua_str(b['combo'])})", lua)
-        self.assertIn(lua_str("omni-profile send CTRL W"), lua)
-        # every forwarded command appears only as a lua_str literal
-        for stmt in lua.split("; "):
-            if "omni-profile send" in stmt:
-                self.assertRegex(stmt, r'^o\.bind\("[^"]*", "[^"]*", "omni-profile send [A-Z0-9 ]+"\)$')
+        self.assertNotIn("omni-profile send", lua)  # no external process per key
+        self.assertIn('hl.dsp.send_shortcut({ mods = t and "CTRL SHIFT" or "CTRL", key = "W" })', lua)
+        self.assertIn('["alacritty"] = true', lua)
 
     def test_bad_forward_is_skipped(self):
         prof = self.engine.profiles["mac"]
@@ -1284,6 +1282,26 @@ class TestForwardShortcut(unittest.TestCase):
         self.assertFalse(any(b.get("native_unbound") for b in self.overlay))
         self.engine.restore()
         self.assertEqual(self.calls, ["reload"])  # windows unbound nothing native
+
+    def test_user_terminals(self):
+        from engine.engine import load_terminal_patterns, is_terminal_class, forward_lua
+        with tempfile.TemporaryDirectory() as d:
+            old = os.environ.get("OMNIPAL_CONFIG_DIR")
+            os.environ["OMNIPAL_CONFIG_DIR"] = d
+            try:
+                Path(d, "terminals.json").write_text('["MyTerm", "rio*", "x\\"] = true }) os.exit() --"]')
+                pats = load_terminal_patterns()
+                self.assertTrue(is_terminal_class("myterm", pats))
+                self.assertTrue(is_terminal_class("rio-nightly", pats))
+                self.assertFalse(is_terminal_class("firefox", pats))
+                lua = forward_lua(["CTRL"], "W", pats)
+                self.assertIn('"rio"', lua)
+                from engine.engine import lua_str
+                evil = [p for p in pats if "os.exit" in p][0]
+                self.assertIn(f"[{lua_str(evil)}] = true", lua)  # stays one escaped literal
+            finally:
+                if old is None: os.environ.pop("OMNIPAL_CONFIG_DIR", None)
+                else: os.environ["OMNIPAL_CONFIG_DIR"] = old
 
     def test_send_cli_stub(self):
         self.assertTrue(self.engine.send_shortcut("CTRL W", window_class="kitty"))
