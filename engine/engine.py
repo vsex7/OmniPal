@@ -1802,7 +1802,9 @@ end
                 return False
 
             policy_restored = True
+            config_reloaded = False
             if self._get_applied_window_mode() == "floating":
+                config_reloaded = True
                 policy_restored = self._reload_config_only()
                 if policy_restored:
                     self._set_applied_window_mode("tiled")
@@ -1821,6 +1823,9 @@ end
             # Natives we unbound are rebound from the Lua stash; reload only if that isn't possible.
             unbound = [b for b in active_overlay if b.get("native_unbound")]
             if not unbound:
+                return True
+            # A config reload above rebuilt the Lua state: natives are back and the stash is gone.
+            if config_reloaded:
                 return True
             if all(b.get("native_restorable", False) for b in unbound):
                 restore_ops = [_native_unstash_lua(b["combo"]) for b in unbound
