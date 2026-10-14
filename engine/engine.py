@@ -927,7 +927,8 @@ class OmniPalEngine:
             out = res.stdout.strip()
             if res.returncode == 0 and out == "ok":
                 return True
-            print(f"Hyprland eval failed: {out}", file=sys.stderr)
+            print(f"Hyprland strict eval failed: rc={res.returncode} stdout={res.stdout!r} "
+                  f"stderr={res.stderr!r} code={lua_code[:400]!r}", file=sys.stderr)
         except Exception as e:
             print(f"Hyprland eval exception: {e}", file=sys.stderr)
         return False
