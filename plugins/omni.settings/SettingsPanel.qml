@@ -30,6 +30,32 @@ Item {
   // 0 = 模式方案 · 1 = 高级选项 · 2 = 使用洞察
   property int activeTab: 0
 
+  // ---------- 应用规则（omni-profile rules ...，按应用自动切换模式） ----------
+  property var appRules: []
+  property bool appRulesEnabled: true
+  property string appRulesDefault: "none"
+  property var appRuleMatch: null
+  property string newRuleClass: ""
+  property string newRuleMode: ""
+  property string newRuleMatch: "exact"
+  property string rulesError: ""
+  property string appRulePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/omnipal/app_rule.json"
+
+  function loadRules(text) {
+    try {
+      var d = JSON.parse(text)
+      root.appRules = d.rules || []
+      root.appRulesEnabled = d.enabled !== false
+      root.appRulesDefault = d.default_mode || "none"
+    } catch (e) {}
+  }
+
+  function runRules(args) {
+    root.rulesError = ""
+    rulesCmdProc.command = ["omni-profile", "rules"].concat(args)
+    rulesCmdProc.running = true
+  }
+
   // ---------- Engine 状态（tmpfs 单一事实源广播） ----------
   property string statePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/omnipal/state.json"
   property string currentMode: "omarchy"
@@ -131,6 +157,7 @@ Item {
     listProc.running = true
     persistProc.running = true
     if (root.activeTab === 2) root.refreshStats()
+    if (root.activeTab === 3) rulesListProc.running = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -300,9 +327,55 @@ Item {
 
   onActiveTabChanged: {
     if (root.activeTab === 2 && !root.statsLoaded) root.refreshStats()
+    if (root.activeTab === 3) rulesListProc.running = true
   }
 
   // ---------- 数据源进程 ----------
+  FileView {
+    id: appRuleFile
+    path: root.appRulePath
+    watchChanges: true
+    printErrors: false
+    onLoaded: { try { root.appRuleMatch = JSON.parse(text()) } catch (e) {} }
+    onFileChanged: reload()
+  }
+
+  Process {
+    id: rulesListProc
+    command: ["omni-profile", "rules", "list", "--json"]
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: function() { if (text && text.trim() !== "") root.loadRules(text) }
+    }
+  }
+
+  Process {
+    id: rulesCmdProc
+    command: ["omni-profile", "rules", "list"]
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: function() {
+        var t = (text || "").trim()
+        if (t.indexOf("❌") === 0) root.rulesError = t.replace("❌", "").trim()
+      }
+    }
+    onExited: rulesListProc.running = true
+  }
+
+  Process {
+    id: activeWinProc
+    command: ["hyprctl", "activewindow", "-j"]
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: function() {
+        try { var w = JSON.parse(text); if (w && w["class"]) root.newRuleClass = w["class"] } catch (e) {}
+      }
+    }
+  }
+
   FileView {
     id: stateFile
     path: root.statePath
@@ -564,7 +637,7 @@ Item {
           } else if (event.key === Qt.Key_S) {
             root.openCheatSheet()
           } else if (event.key === Qt.Key_Tab) {
-            root.activeTab = (root.activeTab + 1) % 3
+            root.activeTab = (root.activeTab + 1) % 4
           }
         }
 
@@ -635,7 +708,7 @@ Item {
             border.width: 1
             border.color: root.hairline
 
-            readonly property int unit: width / 3
+            readonly property int unit: width / 4
 
             Rectangle {
               id: tabPill
@@ -655,7 +728,7 @@ Item {
               y: 0
               height: parent.height
               Repeater {
-                model: ["🎯 模式方案", "⚙️ 高级选项", "📊 使用洞察"]
+                model: ["🎯 模式方案", "⚙️ 高级选项", "📊 使用洞察", "🧩 应用规则"]
                 delegate: Item {
                   id: tabCell
                   required property var modelData
@@ -1588,6 +1661,362 @@ Item {
                   color: Util.alpha(root.foreground, 0.45)
                   wrapMode: Text.Wrap
                   horizontalAlignment: Text.AlignHCenter
+                }
+              }
+            }
+          }
+
+          // ===== Tab 3：应用规则（按应用自动切换模式） =====
+          Item {
+            id: rulesTab
+            anchors.fill: parent
+            opacity: root.activeTab === 3 ? 1.0 : 0.0
+            visible: root.activeTab === 3 || opacity > 0.0
+            Behavior on opacity { NumberAnimation { duration: Tokens.motion.normal; easing.type: Easing.OutQuad } }
+
+            Flickable {
+              anchors.fill: parent
+              contentWidth: width
+              contentHeight: rulesCol.implicitHeight
+              clip: true
+              boundsBehavior: Flickable.StopAtBounds
+
+              Column {
+                id: rulesCol
+                width: parent.width
+                spacing: Style.space(10)
+
+                // --- 总开关与默认模式 ---
+                Rectangle {
+                  width: parent.width
+                  height: Style.space(84)
+                  radius: Tokens.radius.md
+                  color: Util.alpha(root.foreground, 0.04)
+                  border.width: 1
+                  border.color: root.hairline
+
+                  Column {
+                    anchors { fill: parent; margins: Style.space(12) }
+                    spacing: Style.space(8)
+
+                    Row {
+                      spacing: Style.space(8)
+                      Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "按应用自动切换"
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.body
+                        font.bold: true
+                        color: root.foreground
+                      }
+                      Rectangle {
+                        width: Style.space(56); height: Style.space(22)
+                        radius: Tokens.radius.sm
+                        color: root.appRulesEnabled ? Util.alpha(root.okColor, 0.25) : root.chipColor
+                        border.width: 1
+                        border.color: root.appRulesEnabled ? root.okColor : root.hairline
+                        Text {
+                          anchors.centerIn: parent
+                          text: root.appRulesEnabled ? "已启用" : "已停用"
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.bodySmall
+                          color: root.foreground
+                        }
+                        MouseArea {
+                          anchors.fill: parent
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: root.runRules([root.appRulesEnabled ? "disable" : "enable"])
+                        }
+                      }
+                    }
+
+                    Row {
+                      spacing: Style.space(6)
+                      Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "没有匹配时："
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.bodySmall
+                        color: Util.alpha(root.foreground, 0.7)
+                      }
+                      Repeater {
+                        model: [{ id: "none", label: "手动选择的模式" }].concat(root.modeItems.map(function(m) { return { id: m.id, label: (m.icon ? m.icon + " " : "") + m.id } }))
+                        delegate: Rectangle {
+                          required property var modelData
+                          readonly property bool picked: (root.appRulesDefault || "none") === modelData.id
+                          width: defLabel.implicitWidth + Style.space(14); height: Style.space(22)
+                          radius: Tokens.radius.sm
+                          color: picked ? Util.alpha(root.accent, 0.22) : root.chipColor
+                          border.width: 1
+                          border.color: picked ? root.accent : root.hairline
+                          Text {
+                            id: defLabel
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.bodySmall
+                            color: root.foreground
+                          }
+                          MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.runRules(["default", modelData.id])
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+
+                // --- 规则列表 ---
+                Repeater {
+                  model: root.appRules
+                  delegate: Rectangle {
+                    id: ruleRow
+                    required property var modelData
+                    required property int index
+                    readonly property bool active: root.appRuleMatch && root.appRuleMatch.rule
+                      && root.appRuleMatch.rule["class"] === modelData["class"]
+                    width: rulesCol.width
+                    height: Style.space(40)
+                    radius: Tokens.radius.md
+                    color: active ? Util.alpha(root.accent, 0.12) : root.chipColor
+                    border.width: 1
+                    border.color: active ? root.accent : root.hairline
+                    opacity: modelData.enabled === false ? 0.5 : 1.0
+
+                    Row {
+                      anchors { left: parent.left; leftMargin: Style.space(12); verticalCenter: parent.verticalCenter }
+                      spacing: Style.space(10)
+                      Text {
+                        text: (ruleRow.index + 1) + "."
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.bodySmall
+                        color: Util.alpha(root.foreground, 0.5)
+                      }
+                      Text {
+                        text: ruleRow.modelData["class"]
+                        font.family: Tokens.font.mono
+                        font.pixelSize: Style.font.body
+                        color: root.foreground
+                      }
+                      Text {
+                        text: ({ exact: "精确", prefix: "前缀", regex: "正则" })[ruleRow.modelData.match || "exact"]
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.bodySmall
+                        color: Util.alpha(root.foreground, 0.55)
+                      }
+                      Text {
+                        text: "→ " + ruleRow.modelData.mode
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.body
+                        font.bold: true
+                        color: Tokens.modeColor(ruleRow.modelData.mode, ruleRow.index)
+                      }
+                    }
+
+                    Row {
+                      anchors { right: parent.right; rightMargin: Style.space(10); verticalCenter: parent.verticalCenter }
+                      spacing: Style.space(6)
+                      Repeater {
+                        model: [
+                          { label: ruleRow.modelData.enabled === false ? "启用" : "停用", args: ["toggle", ruleRow.modelData["class"]], danger: false },
+                          { label: "删除", args: ["remove", ruleRow.modelData["class"]], danger: true }
+                        ]
+                        delegate: Rectangle {
+                          required property var modelData
+                          width: btnText.implicitWidth + Style.space(14); height: Style.space(24)
+                          radius: Tokens.radius.sm
+                          color: btnMouse.containsMouse ? Util.alpha(modelData.danger ? root.dangerColor : root.foreground, 0.15) : "transparent"
+                          border.width: 1
+                          border.color: modelData.danger ? root.dangerColor : root.hairline
+                          Text {
+                            id: btnText
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.bodySmall
+                            color: modelData.danger ? root.dangerColor : root.foreground
+                          }
+                          MouseArea {
+                            id: btnMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.runRules(modelData.args)
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+
+                Text {
+                  visible: root.appRules.length === 0
+                  width: parent.width
+                  horizontalAlignment: Text.AlignHCenter
+                  text: "还没有规则。下面填好窗口类名和模式就能添加，比如 code 对应 mac。"
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                  color: Util.alpha(root.foreground, 0.55)
+                }
+
+                // --- 添加规则 ---
+                Rectangle {
+                  width: parent.width
+                  height: Style.space(84)
+                  radius: Tokens.radius.md
+                  color: Util.alpha(root.foreground, 0.04)
+                  border.width: 1
+                  border.color: root.hairline
+
+                  Column {
+                    anchors { fill: parent; margins: Style.space(12) }
+                    spacing: Style.space(8)
+
+                    Row {
+                      spacing: Style.space(8)
+                      Rectangle {
+                        width: Style.space(180); height: Style.space(26)
+                        radius: Tokens.radius.sm
+                        color: root.chipColor
+                        border.width: 1
+                        border.color: classInput.activeFocus ? root.accent : root.hairline
+                        TextInput {
+                          id: classInput
+                          anchors { fill: parent; leftMargin: Style.space(8); rightMargin: Style.space(8) }
+                          verticalAlignment: TextInput.AlignVCenter
+                          text: root.newRuleClass
+                          onTextEdited: root.newRuleClass = text
+                          font.family: Tokens.font.mono
+                          font.pixelSize: Style.font.body
+                          color: root.foreground
+                          clip: true
+                          Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: classInput.text === ""
+                            text: "窗口类名"
+                            font: classInput.font
+                            color: Util.alpha(root.foreground, 0.35)
+                          }
+                        }
+                      }
+                      Rectangle {
+                        width: curText.implicitWidth + Style.space(14); height: Style.space(26)
+                        radius: Tokens.radius.sm
+                        color: root.chipColor
+                        border.width: 1
+                        border.color: root.hairline
+                        Text {
+                          id: curText
+                          anchors.centerIn: parent
+                          text: "填入当前应用"
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.bodySmall
+                          color: root.foreground
+                        }
+                        MouseArea {
+                          anchors.fill: parent
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: activeWinProc.running = true
+                        }
+                      }
+                      Repeater {
+                        model: [{ id: "exact", label: "精确" }, { id: "prefix", label: "前缀" }, { id: "regex", label: "正则" }]
+                        delegate: Rectangle {
+                          required property var modelData
+                          readonly property bool picked: root.newRuleMatch === modelData.id
+                          width: mText.implicitWidth + Style.space(14); height: Style.space(26)
+                          radius: Tokens.radius.sm
+                          color: picked ? Util.alpha(root.accent, 0.22) : root.chipColor
+                          border.width: 1
+                          border.color: picked ? root.accent : root.hairline
+                          Text {
+                            id: mText
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.bodySmall
+                            color: root.foreground
+                          }
+                          MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.newRuleMatch = modelData.id
+                          }
+                        }
+                      }
+                    }
+
+                    Row {
+                      spacing: Style.space(6)
+                      Repeater {
+                        model: root.modeItems
+                        delegate: Rectangle {
+                          required property var modelData
+                          required property int index
+                          readonly property bool picked: root.newRuleMode === modelData.id
+                          width: nmText.implicitWidth + Style.space(14); height: Style.space(26)
+                          radius: Tokens.radius.sm
+                          color: picked ? Util.alpha((modelData.color || Tokens.modeColor(modelData.id, index)), 0.25) : root.chipColor
+                          border.width: 1
+                          border.color: picked ? (modelData.color || Tokens.modeColor(modelData.id, index)) : root.hairline
+                          Text {
+                            id: nmText
+                            anchors.centerIn: parent
+                            text: (modelData.icon ? modelData.icon + " " : "") + modelData.id
+                            font.family: Style.font.family
+                            font.pixelSize: Style.font.bodySmall
+                            color: root.foreground
+                          }
+                          MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.newRuleMode = modelData.id
+                          }
+                        }
+                      }
+                      Rectangle {
+                        readonly property bool ready: root.newRuleClass.trim() !== "" && root.newRuleMode !== ""
+                        width: addText.implicitWidth + Style.space(18); height: Style.space(26)
+                        radius: Tokens.radius.sm
+                        color: ready ? root.accent : root.chipColor
+                        opacity: ready ? 1.0 : 0.5
+                        Text {
+                          id: addText
+                          anchors.centerIn: parent
+                          text: "添加"
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.bodySmall
+                          font.bold: true
+                          color: parent.ready ? Tokens.base.bg : root.foreground
+                        }
+                        MouseArea {
+                          anchors.fill: parent
+                          enabled: parent.ready
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: {
+                            root.runRules(["add", root.newRuleClass.trim(), root.newRuleMode, "--match", root.newRuleMatch])
+                            root.newRuleClass = ""
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+
+                // --- 当前匹配 ---
+                Text {
+                  width: parent.width
+                  text: root.rulesError !== "" ? ("⚠ " + root.rulesError)
+                    : (root.appRuleMatch && root.appRuleMatch.window_class
+                      ? ("当前应用 " + root.appRuleMatch.window_class + "：" + (root.appRuleMatch.rule
+                          ? ("命中规则，切到 " + root.appRuleMatch.rule.mode) : "没有命中规则"))
+                      : "守护进程运行后，这里会显示当前应用匹配到的规则")
+                  wrapMode: Text.WordWrap
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.bodySmall
+                  color: root.rulesError !== "" ? root.dangerColor : Util.alpha(root.foreground, 0.65)
                 }
               }
             }

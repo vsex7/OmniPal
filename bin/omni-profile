@@ -355,6 +355,9 @@ def cmd_rules(engine: OmniPalEngine, args):
     data = engine.load_app_rules()
     act = args.rules_action or "list"
     if act == "list":
+        if getattr(args, "json", False):
+            print(json.dumps(data, ensure_ascii=False))
+            return
         print(f"应用规则: {'启用' if data['enabled'] else '停用'}，无匹配时回到: {data['default_mode'] or '手动选择的模式'}")
         if not data["rules"]:
             print("  （暂无规则，用 omni-profile rules add <窗口类名> <模式> 添加）")
@@ -370,6 +373,12 @@ def cmd_rules(engine: OmniPalEngine, args):
         data["rules"] = [r for r in data["rules"] if r["class"] != args.window_class]
         if len(data["rules"]) == before:
             print(f"❌ 没有找到 {args.window_class} 的规则"); sys.exit(1)
+    elif act == "toggle":
+        hit = [r for r in data["rules"] if r["class"] == args.window_class]
+        if not hit:
+            print(f"❌ 没有找到 {args.window_class} 的规则"); sys.exit(1)
+        for r in hit:
+            r["enabled"] = not r.get("enabled", True)
     elif act in ("enable", "disable"):
         data["enabled"] = act == "enable"
     elif act == "default":
@@ -500,13 +509,16 @@ def main():
     # stats
     p_rules = subparsers.add_parser("rules", help="按应用自动切换模式的规则（需运行守护进程）")
     rules_sub = p_rules.add_subparsers(dest="rules_action")
-    rules_sub.add_parser("list", help="列出规则")
+    r_list = rules_sub.add_parser("list", help="列出规则")
+    r_list.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     r_add = rules_sub.add_parser("add", help="添加或更新一条规则")
     r_add.add_argument("window_class", help="窗口类名，可用 hyprctl activewindow 查看")
     r_add.add_argument("mode", help="目标模式")
     r_add.add_argument("--match", choices=["exact", "prefix", "regex"], default="exact")
     r_rm = rules_sub.add_parser("remove", help="删除一条规则")
     r_rm.add_argument("window_class")
+    r_tg = rules_sub.add_parser("toggle", help="启用或停用某一条规则")
+    r_tg.add_argument("window_class")
     rules_sub.add_parser("enable", help="启用自动切换")
     rules_sub.add_parser("disable", help="停用自动切换")
     r_def = rules_sub.add_parser("default", help="无匹配时回到的模式（none 表示回到手动选择的模式）")
