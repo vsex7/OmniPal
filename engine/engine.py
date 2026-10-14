@@ -35,6 +35,7 @@ OVERLAY_FILE = RUN_DIR / "active_overlay.json"
 SNAP_FILE = RUN_DIR / "snap.json"
 SNAP_LAYOUTS_FILE = RUN_DIR / "snap_layouts.json"
 PID_FILE = RUN_DIR / "daemon.pid"
+APP_RULE_STATE_FILE = RUN_DIR / "app_rule.json"
 
 def lua_str(value: Any) -> str:
     """Returns a safely quoted Lua string literal (prevents broken batches and Lua injection)."""
@@ -130,6 +131,10 @@ def resolve_config_dir() -> Path:
 def persistence_file_path() -> Path:
     """The single explicit opt-in persistence file. Never touched unless the user enables it."""
     return resolve_config_dir() / "persistence.json"
+
+def app_rules_file_path() -> Path:
+    """Per-app auto-switch rules. Only written when the user adds a rule."""
+    return resolve_config_dir() / "app_rules.json"
 
 def stats_file_path() -> Path:
     """The fully local usage statistics file: aggregate counters only, never leaves the machine."""
@@ -707,6 +712,102 @@ class OmniPalEngine:
         self.switch_mode(next_mode)
         return next_mode
 
+    # ---------------- Per-app auto switching ----------------
+    def load_app_rules(self) -> Dict[str, Any]:
+        """Returns {"enabled": bool, "default_mode": str|None, "rules": [...]}; missing file means no rules."""
+        data: Dict[str, Any] = {"enabled": True, "default_mode": None, "rules": []}
+        path = app_rules_file_path()
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                if isinstance(raw, dict):
+                    data["enabled"] = bool(raw.get("enabled", True))
+                    dm = raw.get("default_mode")
+                    data["default_mode"] = dm if dm in self.profiles else None
+                    data["rules"] = [r for r in raw.get("rules", []) if isinstance(r, dict) and r.get("class") and r.get("mode")]
+            except Exception as e:
+                print(f"Warning: Failed to read app rules {path}: {e}", file=sys.stderr)
+        return data
+
+    def save_app_rules(self, data: Dict[str, Any]) -> None:
+        for r in data.get("rules", []):
+            if r.get("mode") not in self.profiles:
+                raise ValueError(f"Unknown mode '{r.get('mode')}' in rule for '{r.get('class')}'")
+            if r.get("match", "exact") not in ("exact", "prefix", "regex"):
+                raise ValueError(f"Invalid match type '{r.get('match')}'")
+            if r.get("match") == "regex":
+                import re
+                re.compile(r["class"])
+        dm = data.get("default_mode")
+        if dm is not None and dm not in self.profiles:
+            raise ValueError(f"Unknown default mode '{dm}'")
+        path = app_rules_file_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.parent / (path.name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        tmp.replace(path)
+
+    def match_app_rule(self, window_class: str, rules: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """First enabled rule whose class matches wins. Matching is case-insensitive."""
+        import re
+        rules = rules if rules is not None else self.load_app_rules()
+        if not rules.get("enabled", True) or not window_class:
+            return None
+        wc = window_class.strip().lower()
+        for r in rules.get("rules", []):
+            if not r.get("enabled", True):
+                continue
+            pat = str(r["class"]).strip()
+            kind = r.get("match", "exact")
+            try:
+                if (kind == "exact" and wc == pat.lower()) or \
+                   (kind == "prefix" and wc.startswith(pat.lower())) or \
+                   (kind == "regex" and re.search(pat, window_class, re.IGNORECASE)):
+                    return r
+            except re.error as e:
+                _debug(e)
+        return None
+
+    def apply_app_rule(self, window_class: str) -> Optional[str]:
+        """Called on focus change. Switches to the rule's mode, or back to the base mode when
+        no rule matches. Returns the mode switched to, or None if nothing changed."""
+        rules = self.load_app_rules()
+        rule = self.match_app_rule(window_class, rules)
+        current = self.get_state().get("mode", "omarchy")
+        if rule is None and getattr(self, "_auto_active", False) is False:
+            self._write_app_rule_state(window_class, None)
+            return None
+        if rule is not None:
+            if not getattr(self, "_auto_active", False):
+                # Remember what the user picked by hand, so we can return to it.
+                self._base_mode = current
+            self._auto_active = True
+            target = rule["mode"]
+        else:
+            self._auto_active = False
+            target = rules.get("default_mode") or getattr(self, "_base_mode", None) or current
+        self._write_app_rule_state(window_class, rule)
+        if target == current or target not in self.profiles:
+            return None
+        if target == "omarchy":
+            ok = self.restore()
+        else:
+            ok = self.switch_mode(target)
+        return target if ok else None
+
+    def _write_app_rule_state(self, window_class: str, rule: Optional[Dict[str, Any]]) -> None:
+        """Broadcasts the currently matched rule for the settings UI and cheat sheet."""
+        try:
+            self._ensure_run_dir()
+            tmp = APP_RULE_STATE_FILE.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"window_class": window_class, "rule": rule}, f, ensure_ascii=False)
+            tmp.replace(APP_RULE_STATE_FILE)
+        except Exception as e:
+            _debug(e)
+
     def cheatsheet(self, mode: Optional[str] = None) -> List[Dict[str, Any]]:
         """Returns structured cheatsheet data from single source of truth."""
         mode = (mode or self.get_state().get("mode", "omarchy")).lower().strip()
@@ -1131,6 +1232,7 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
             s.connect(str(socket_path))
             s.settimeout(2.0)
             buffer = ""
+            last_class = None
             while not stop_event.is_set():
                 try:
                     data = s.recv(4096)
@@ -1140,7 +1242,14 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                     while "\n" in buffer:
                         line, buffer = buffer.split("\n", 1)
                         line = line.strip()
-                        if line == "configreloaded>>":
+                        if line.startswith("activewindow>>"):
+                            win_class = line[len("activewindow>>"):].split(",", 1)[0]
+                            if win_class and win_class != last_class:
+                                last_class = win_class
+                                switched = engine.apply_app_rule(win_class)
+                                if switched:
+                                    print(f"🎯 {win_class} -> {switched}", flush=True)
+                        elif line == "configreloaded>>":
                             time.sleep(0.1)  # Debounce settle time
                             curr_mode = engine.get_state().get("mode", "omarchy")
                             if curr_mode != "omarchy":

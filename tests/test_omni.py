@@ -1096,5 +1096,51 @@ class TestSettingsCounts(unittest.TestCase):
             self.assertEqual(int(m.group(1)), len(prof["bindings"]), mid)
 
 
+
+class TestAppRules(unittest.TestCase):
+    """Per-app auto switching: matching, persistence and return-to-base behavior."""
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._old = os.environ.get("OMNIPAL_CONFIG_DIR")
+        os.environ["OMNIPAL_CONFIG_DIR"] = self._tmp.name
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.engine.restore()
+
+    def tearDown(self):
+        self.engine.restore()
+        if self._old is None:
+            os.environ.pop("OMNIPAL_CONFIG_DIR", None)
+        else:
+            os.environ["OMNIPAL_CONFIG_DIR"] = self._old
+        self._tmp.cleanup()
+
+    def test_match_kinds_and_case(self):
+        rules = {"enabled": True, "rules": [
+            {"class": "Code", "mode": "mac"},
+            {"class": "org.kde.", "match": "prefix", "mode": "kde"},
+            {"class": "^jetbrains-", "match": "regex", "mode": "windows"},
+            {"class": "firefox", "mode": "mac", "enabled": False},
+        ]}
+        m = self.engine.match_app_rule
+        self.assertEqual(m("code", rules)["mode"], "mac")
+        self.assertEqual(m("org.kde.dolphin", rules)["mode"], "kde")
+        self.assertEqual(m("jetbrains-idea", rules)["mode"], "windows")
+        self.assertIsNone(m("firefox", rules))
+        self.assertIsNone(m("code", {"enabled": False, "rules": rules["rules"]}))
+
+    def test_save_rejects_unknown_mode(self):
+        with self.assertRaises(ValueError):
+            self.engine.save_app_rules({"enabled": True, "rules": [{"class": "x", "mode": "nope"}]})
+
+    def test_switch_and_return_to_manual_mode(self):
+        self.engine.save_app_rules({"enabled": True, "default_mode": None,
+                                    "rules": [{"class": "code", "mode": "mac"}]})
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertEqual(self.engine.apply_app_rule("code"), "mac")
+        self.assertEqual(self.engine.get_state().get("mode"), "mac")
+        self.assertEqual(self.engine.apply_app_rule("kitty"), "windows")
+        self.assertEqual(self.engine.get_state().get("mode"), "windows")
+        self.assertIsNone(self.engine.apply_app_rule("kitty"))
+
 if __name__ == "__main__":
     unittest.main()

@@ -351,6 +351,39 @@ def _print_stat_rank(title: str, counts: dict, top: int = 10):
     for i, (name, cnt) in enumerate(ranked, 1):
         print(f"  {i}. {str(name).ljust(22)}{cnt} 次")
 
+def cmd_rules(engine: OmniPalEngine, args):
+    data = engine.load_app_rules()
+    act = args.rules_action or "list"
+    if act == "list":
+        print(f"应用规则: {'启用' if data['enabled'] else '停用'}，无匹配时回到: {data['default_mode'] or '手动选择的模式'}")
+        if not data["rules"]:
+            print("  （暂无规则，用 omni-profile rules add <窗口类名> <模式> 添加）")
+        for i, r in enumerate(data["rules"], 1):
+            flag = "" if r.get("enabled", True) else " [停用]"
+            print(f"  {i}. {r['class']} ({r.get('match', 'exact')}) -> {r['mode']}{flag}")
+        return
+    if act == "add":
+        data["rules"] = [r for r in data["rules"] if r["class"] != args.window_class]
+        data["rules"].append({"class": args.window_class, "match": args.match, "mode": args.mode, "enabled": True})
+    elif act == "remove":
+        before = len(data["rules"])
+        data["rules"] = [r for r in data["rules"] if r["class"] != args.window_class]
+        if len(data["rules"]) == before:
+            print(f"❌ 没有找到 {args.window_class} 的规则"); sys.exit(1)
+    elif act in ("enable", "disable"):
+        data["enabled"] = act == "enable"
+    elif act == "default":
+        data["default_mode"] = None if args.mode == "none" else args.mode
+    elif act == "test":
+        r = engine.match_app_rule(args.window_class, data)
+        print(f"{args.window_class} -> {r['mode'] if r else '无匹配'}")
+        return
+    try:
+        engine.save_app_rules(data)
+    except ValueError as e:
+        print(f"❌ {e}"); sys.exit(1)
+    print("✅ 应用规则已保存，守护进程会在下次切换焦点时生效")
+
 def cmd_stats(engine: OmniPalEngine, args):
     if args.reset:
         if not engine.reset_stats():
@@ -465,6 +498,23 @@ def main():
     p_p_disable.set_defaults(func=cmd_persist)
 
     # stats
+    p_rules = subparsers.add_parser("rules", help="按应用自动切换模式的规则（需运行守护进程）")
+    rules_sub = p_rules.add_subparsers(dest="rules_action")
+    rules_sub.add_parser("list", help="列出规则")
+    r_add = rules_sub.add_parser("add", help="添加或更新一条规则")
+    r_add.add_argument("window_class", help="窗口类名，可用 hyprctl activewindow 查看")
+    r_add.add_argument("mode", help="目标模式")
+    r_add.add_argument("--match", choices=["exact", "prefix", "regex"], default="exact")
+    r_rm = rules_sub.add_parser("remove", help="删除一条规则")
+    r_rm.add_argument("window_class")
+    rules_sub.add_parser("enable", help="启用自动切换")
+    rules_sub.add_parser("disable", help="停用自动切换")
+    r_def = rules_sub.add_parser("default", help="无匹配时回到的模式（none 表示回到手动选择的模式）")
+    r_def.add_argument("mode")
+    r_test = rules_sub.add_parser("test", help="测试某个窗口类名会匹配到哪个模式")
+    r_test.add_argument("window_class")
+    p_rules.set_defaults(func=cmd_rules)
+
     p_stats = subparsers.add_parser("stats", help="查看本地使用统计（切换/吸附/动作排行，完全本地零上传；--reset 清空）")
     p_stats.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_stats.add_argument("--reset", action="store_true", help="清空并重置全部本地统计")
