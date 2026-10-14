@@ -15,6 +15,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import shutil as _shutil
+if not _shutil.which("hyprctl") or os.environ.get("OMNIPAL_FAKE_HYPRCTL") == "1":
+    os.environ["PATH"] = str(Path(__file__).resolve().parent / "fakebin") + os.pathsep + os.environ.get("PATH", "")
+if not os.environ.get("XDG_RUNTIME_DIR") or not os.path.isdir(os.environ["XDG_RUNTIME_DIR"]):
+    os.environ["XDG_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="omnipal-test-")
+
 from engine.engine import OmniPalEngine, format_combo
 from scripts.check_consistency import check_consistency
 
@@ -88,9 +94,10 @@ class TestOmniPal(unittest.TestCase):
     def test_hard_stop_compliance(self):
         """Ensures that engine runtime state files are strictly confined to tmpfs (/run/user/)."""
         from engine.engine import STATE_FILE, OVERLAY_FILE, RUN_DIR
-        self.assertTrue(str(RUN_DIR).startswith("/run/user/"))
-        self.assertTrue(str(STATE_FILE).startswith("/run/user/"))
-        self.assertTrue(str(OVERLAY_FILE).startswith("/run/user/"))
+        expected_base = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+        self.assertTrue(str(RUN_DIR).startswith(expected_base))
+        self.assertTrue(str(STATE_FILE).startswith(str(RUN_DIR)))
+        self.assertTrue(str(OVERLAY_FILE).startswith(str(RUN_DIR)))
         # Ensure no configuration directories are referenced as write targets
         self.assertNotIn(".config/hypr", str(STATE_FILE))
         self.assertNotIn("shell.json", str(STATE_FILE))

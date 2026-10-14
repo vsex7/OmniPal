@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-RUN_DIR = Path(f"/run/user/{os.getuid()}/omnipal")
+RUN_DIR = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "omnipal"
 STATE_FILE = RUN_DIR / "state.json"
 OVERLAY_FILE = RUN_DIR / "active_overlay.json"
 SNAP_FILE = RUN_DIR / "snap.json"
