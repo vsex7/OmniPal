@@ -7,7 +7,7 @@ Item {
     id: root
 
     // --- Config ---
-    property string stateFilePath: "/run/user/1000/omnipal/state.json"
+    property string stateFilePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/omnipal/state.json"
     property int pollIntervalMs: 2000
 
     // --- State ---
