@@ -1053,7 +1053,9 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         self.assertIn("windowPolicy", content)
         self.assertIn("effectiveWindowMode", content)
         self.assertIn("compositorConnected", content)
-        self.assertIn("setPolicy", content)  # IPC only; UI control lives in settings
+        self.assertIn("policyOptions", content)
+        self.assertIn("effPolicyBadge", content)
+        self.assertIn("setPolicy", content)
         self.assertIn("getWindowPolicy", content)
         self.assertIn("getEffectiveWindowMode", content)
         self.assertIn("setWindowPolicy", content)
@@ -2354,7 +2356,7 @@ class TestUiAutoOverrideText(unittest.TestCase):
         bar = (PROJECT_ROOT / "plugins/omni.mode-indicator/BarWidget.qml").read_text(encoding="utf-8")
         self.assertIn("active: root.engineRunning && root.autoActive", bar)
         self.assertIn("离开后回到", bar)
-        self.assertIn("已覆盖", bar)  # tooltip
+        self.assertIn("已覆盖", bar)
         st = (PROJECT_ROOT / "plugins/omni.settings/SettingsPanel.qml").read_text(encoding="utf-8")
         self.assertIn("root.windowModeLabel(modeCard.modelData.windowMode)", st)
         self.assertIn("已覆盖：全局", st)
@@ -2376,11 +2378,23 @@ class TestSettingsSingleEntry(unittest.TestCase):
         for label in ("跟随模式", "平铺", "浮动", "已覆盖 · "):
             self.assertIn(label, self.st)
 
-    def test_bar_menu_only_modes_and_open_settings(self):
+    def test_bar_menu_has_full_quick_controls(self):
+        """User request: functions are back in the bar right-click menu (both places work)."""
         self.assertIn('label: "打开设置"', self.bar)
-        for gone in ("ButtonGroup", "actionRows", "systemRows", "omni-profile restore",
-                     "window-policy set\" + norm", "omni-profile doctor", "snap layouts"):
-            self.assertNotIn(gone, self.bar, gone)
+        for present in ("actionRows", "systemRows", "policyOptions", "effPolicyBadge",
+                        "omni-profile restore", "omni-profile window-policy set ",
+                        "omni-profile doctor", "omni-profile snap layouts",
+                        "omni.overview", "omni.cheat-sheet", '\\"guide\\":true',
+                        '"跟随模式"', '"平铺"', '"浮动"', '"速查表"', '"概览"', '"贴靠布局"',
+                        "还原 Omarchy 原生模式", "PanelSectionHeader", "PanelSeparator",
+                        "restoreArmed", "Safety.CONFIRM_MS", "root.undoMode = root.currentMode"):
+            self.assertIn(present, self.bar, present)
+        # 分组顺序：模式 → 窗口策略 → 快捷入口 → 系统 → 打开设置
+        order = [self.bar.index(f'text: "{h}"') for h in ("模式", "窗口策略", "快捷入口", "系统")]
+        self.assertEqual(order, sorted(order))
+        self.assertLess(order[-1], self.bar.index("row: root.settingsRow"))
+        for bad in ("快捷键速查表\"", "多任务概览", "布局吸附", "控制中心"):
+            self.assertNotIn(bad, self.bar, bad)
 
     def test_restore_merged_into_omarchy_card(self):
         self.assertIn('if (targetMode === "omarchy") root.askRestore()', self.st)
@@ -2389,6 +2403,10 @@ class TestSettingsSingleEntry(unittest.TestCase):
         for bad in ("恢复原生快捷键", "还原原生快捷键", "系统原生还原"):
             self.assertNotIn(bad, self.st)
             self.assertNotIn(bad, self.bar)
+
+    def test_settings_keeps_quick_actions(self):
+        for present in ("omni.cheat-sheet", "omni.snap-feedback", "askRestore"):
+            self.assertIn(present, self.st)
 
 
 class TestCliDeprecatedAliases(unittest.TestCase):

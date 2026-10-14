@@ -29,7 +29,7 @@ omni-profile doctor           # 出问题时先跑这个
 omni-profile window-policy set follow-profile   # 窗口策略：follow-profile 跟随模式 / tiled 平铺 / floating 浮动
 ```
 
-日常操作都可以在 OmniPal 设置（`Super+Alt+I`）里完成：模式切换、窗口策略、配置持久化等。状态栏菜单只保留快速切换模式和「打开设置」。在设置里选择「Omarchy 原生模式」就是还原（等同 `omni-profile restore`）。
+日常操作都可以在 OmniPal 设置（`Super+Alt+I`）里完成：模式切换、窗口策略、配置持久化等。状态栏右键菜单同样提供常用功能（模式切换、窗口策略、速查表、贴靠布局、概览、切换下一模式、还原 Omarchy 原生模式、健康诊断、首次使用引导、打开设置），两处都可用。在设置里选择「Omarchy 原生模式」就是还原（等同 `omni-profile restore`）。
 
 ### CLI 别名弃用
 
