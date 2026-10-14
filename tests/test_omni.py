@@ -1142,5 +1142,13 @@ class TestAppRules(unittest.TestCase):
         self.assertEqual(self.engine.get_state().get("mode"), "windows")
         self.assertIsNone(self.engine.apply_app_rule("kitty"))
 
+    def test_manual_switch_during_rule_becomes_new_base(self):
+        self.engine.save_app_rules({"enabled": True, "rules": [{"class": "code", "mode": "mac"}]})
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertEqual(self.engine.apply_app_rule("code"), "mac")
+        self.assertTrue(self.engine.switch_mode("kde"))  # user overrides by hand inside VS Code
+        self.assertIsNone(self.engine.apply_app_rule("kitty"))  # stays on kde, not back to windows
+        self.assertEqual(self.engine.get_state().get("mode"), "kde")
+
 if __name__ == "__main__":
     unittest.main()

@@ -779,6 +779,15 @@ class OmniPalEngine:
         if rule is None and getattr(self, "_auto_active", False) is False:
             self._write_app_rule_state(window_class, None)
             return None
+        auto_target = getattr(self, "_auto_target", None)
+        if getattr(self, "_auto_active", False) and auto_target and current != auto_target:
+            # The user switched by hand while a rule was active: respect it as the new base.
+            self._base_mode = current
+            self._auto_active = False
+            self._auto_target = None
+            if rule is not None and rule["mode"] == auto_target:
+                self._write_app_rule_state(window_class, rule)
+                return None
         if rule is not None:
             if not getattr(self, "_auto_active", False):
                 # Remember what the user picked by hand, so we can return to it.
@@ -789,6 +798,7 @@ class OmniPalEngine:
             self._auto_active = False
             target = rules.get("default_mode") or getattr(self, "_base_mode", None) or current
         self._write_app_rule_state(window_class, rule)
+        self._auto_target = target if rule is not None else None
         if target == current or target not in self.profiles:
             return None
         if target == "omarchy":
