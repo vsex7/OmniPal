@@ -54,6 +54,13 @@ Panel {
   property string effectiveWindowMode: "tiled"
   property bool compositorConnected: false
   property var actionHints: ({})
+  // 应用规则自动切换：state.json 的 auto = {app, mode, return_to}；手动切换会清除它
+  property var autoInfo: null
+  readonly property bool autoActive: root.autoInfo !== null
+  readonly property bool policyOverridden: Model.normalizePolicy(root.windowPolicy) !== "follow-profile"
+  readonly property string autoText: root.autoActive
+    ? ("自动 · 因为聚焦了 " + (root.autoInfo.app || "") + " · 离开后回到 " + root.modeNameOf(root.autoInfo.return_to || "omarchy"))
+    : ""
 
   property var profiles: Model.fallbackProfiles()
   property var policyOptions: Model.windowPolicies()
@@ -81,6 +88,7 @@ Panel {
     try {
       var data = JSON.parse(rawText)
       root.currentMode = data.mode || "omarchy"
+      root.autoInfo = (data.auto && typeof data.auto === "object") ? data.auto : null
       root.currentName = data.name || Model.resolveName(data)
       root.activeBindingsCount = data.active_bindings_count || 0
       root.engineStatus = data.status || (root.currentMode !== "omarchy" ? "active" : "native")
@@ -375,8 +383,15 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: root.engineRunning ? root.currentIcon : Icons.glyph.pause
+    // 自动切换期间用强调色标记（原生 WidgetButton active 状态）
+    active: root.engineRunning && root.autoActive
+    activeColor: Commons.Color.accent
     tooltipText: root.engineRunning
-      ? ("OmniPal: " + root.currentName + "\n生效快捷键: " + root.activeBindingsCount + "\n窗口策略: " + Model.resolvePolicyName(root.windowPolicy) + " (" + root.effectiveWindowMode + ")\n左键: 轮转模式 | 右键: 快捷控制面板 | 中键: 设置")
+      ? ("OmniPal: " + root.currentName + (root.autoActive ? "\n" + root.autoText : "")
+         + "\n生效快捷键: " + root.activeBindingsCount
+         + "\n窗口策略: " + Model.resolvePolicyName(root.windowPolicy) + (root.policyOverridden ? "（已覆盖）" : "")
+         + " · 生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
+         + "\n左键: 轮转模式 | 右键: 快捷控制面板 | 中键: 设置")
       : "OmniPal Engine 未运行\n左键: 启动/切换 | 右键: 快捷控制面板"
 
     onPressed: function(b) {
@@ -426,8 +441,10 @@ Panel {
           title: root.engineRunning ? root.currentName : "OmniPal Engine 未运行"
           detail: root.engineRunning ? root.currentBrief : ""
           meta: root.engineRunning
-            ? ((root.activeBindingsCount > 0 ? (root.activeBindingsCount + " 项快捷键已覆盖") : "原生零覆盖")
-               + "  •  " + (root.compositorConnected ? "Hyprland 连通" : "未连接 Compositor"))
+            ? (root.autoActive
+               ? root.autoText
+               : ((root.activeBindingsCount > 0 ? (root.activeBindingsCount + " 项快捷键已覆盖") : "原生零覆盖")
+                  + "  •  " + (root.compositorConnected ? "Hyprland 连通" : "未连接 Compositor")))
             : "引擎已停止"
           iconComponent: Text {
             textFormat: Text.PlainText
@@ -495,8 +512,10 @@ Panel {
               onClicked: root.switchModeWithUndo(profileRow.modelData.id)
 
               RowHint {
-                text: profileRow.isActive ? "active" : String(profileRow.modelData.bindings_count)
-                color: profileRow.isActive ? Commons.Color.accent : Qt.darker(Commons.Color.popups.text, 1.4)
+                readonly property bool isReturn: root.autoActive && root.autoInfo.return_to === profileRow.modelData.id
+                text: profileRow.isActive ? (root.autoActive ? "自动" : "active")
+                  : (isReturn ? "离开后回到" : String(profileRow.modelData.bindings_count))
+                color: (profileRow.isActive || isReturn) ? Commons.Color.accent : Qt.darker(Commons.Color.popups.text, 1.4)
               }
             }
           }
@@ -525,8 +544,8 @@ Panel {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
-            text: "生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
-            color: Qt.darker(Commons.Color.popups.text, 1.4)
+            text: (root.policyOverridden ? "已覆盖 · " : "") + "生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
+            color: root.policyOverridden ? Commons.Color.accent : Qt.darker(Commons.Color.popups.text, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.body
           }

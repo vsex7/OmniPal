@@ -23,6 +23,7 @@ var CATEGORY_LABELS = {
   apps: "系统应用",
   tools: "效率工具",
   system: "会话与安全",
+  omnipal: "OmniPal 固定入口（所有模式通用）",
   other: "其他"
 };
 

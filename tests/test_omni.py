@@ -4,6 +4,8 @@ OmniPal Automated Unit Tests
 Tests schema consistency, state management, profile parsing, and plugin compliance.
 """
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -2214,3 +2216,149 @@ class TestNativeConflicts(unittest.TestCase):
         self.assertTrue(self.engine.switch_mode("windows"))
         unbound = {combo_signature(b["combo"]) for b in self.overlay if b.get("native_unbound")}
         self.assertEqual(unbound, colliding)
+
+
+class TestFixedEntryPoints(unittest.TestCase):
+    """Cheat sheet / settings / overview have the same keys in every mode."""
+
+    def setUp(self):
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.evals = []
+        self.overlay = []
+        e = self.engine
+        e._eval_lua = lambda code: self.evals.append(code) or True
+        e._eval_lua_strict = lambda code: self.evals.append(code) or True
+        e._reload_hyprland = lambda: True
+        e._write_active_overlay = lambda recs: setattr(self, "overlay", recs)
+        e._get_active_overlay = lambda: self.overlay
+        e._write_state = lambda *a, **k: None
+        e.record_switch = lambda *a, **k: None
+        e.get_persistence_status = lambda: {"enabled": False}
+        e._live_bind_counts = lambda: {}
+        e._apply_window_policy = lambda *a, **k: True
+
+    def test_fixed_combos(self):
+        self.assertEqual(self.engine.fixed_combos(), {
+            "SUPER + CTRL + SLASH": "cheat_sheet",
+            "SUPER + ALT + I": "omni_settings",
+            "SUPER + ALT + O": "task_view",
+        })
+
+    def test_fixed_combos_free_in_omarchy_defaults(self):
+        import re, glob
+        from engine.engine import combo_signature
+        ref = Path("/workspace/ref/omarchy/default/hypr")
+        if not ref.is_dir():
+            self.skipTest("Omarchy reference not available")
+        native = set()
+        for f in glob.glob(str(ref / "**" / "*.lua"), recursive=True):
+            for m in re.finditer(r'o\.bind\w*\(\s*"([^"]+)"', Path(f).read_text(encoding="utf-8")):
+                native.add(combo_signature(m.group(1)))
+        for combo in self.engine.fixed_combos():
+            self.assertNotIn(combo_signature(combo), native, combo)
+
+    def test_injected_in_every_mode(self):
+        for mode in ("windows", "mac", "kde", "omarchy"):
+            self.evals.clear()
+            self.assertTrue(self.engine.switch_mode(mode), mode)
+            code = "; ".join(self.evals)
+            for combo in self.engine.fixed_combos():
+                self.assertIn(f'o.bind("{combo}"', code, (mode, combo))
+
+    def test_profile_cannot_override(self):
+        self.engine.profiles["windows"]["bindings"] = self.engine.profiles["windows"]["bindings"] + [
+            {"action": "lock_screen", "mod": "SUPER ALT", "key": "I"}]
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertNotIn("SUPER + ALT + I", {b["combo"] for b in self.overlay})
+        code = self.evals[-1]
+        self.assertIn('o.bind("SUPER + ALT + I", "OmniPal 控制中心"', code)
+
+    def test_cheatsheet_lists_fixed_in_omarchy(self):
+        sheet = self.engine.cheatsheet("omarchy")
+        self.assertEqual({e["key"] for e in sheet if e.get("fixed")}, set(self.engine.fixed_combos()))
+
+    def test_check_consistency_rejects_override(self):
+        sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+        import check_consistency as cc
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "bad.json"
+            bad.write_text(json.dumps({"bindings": [{"action": "lock_screen", "mod": "SUPER CTRL", "key": "slash"}]}))
+            ok_alias = Path(tmp) / "ok.json"
+            ok_alias.write_text(json.dumps({"bindings": [{"action": "cheat_sheet", "mod": "SUPER CTRL", "key": "slash"}]}))
+            actions = {a["id"]: a for a in json.loads((PROJECT_ROOT / "schema" / "actions.json").read_text())["actions"]}
+            with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+                self.assertFalse(cc._validate_fixed_bindings(PROJECT_ROOT, actions, [bad]))
+                self.assertTrue(cc._validate_fixed_bindings(PROJECT_ROOT, actions, [ok_alias]))
+
+
+class TestAutoSwitchState(unittest.TestCase):
+    """Auto switches mark state['auto'], notify, and manual switches cancel the auto-return."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._old = os.environ.get("OMNIPAL_CONFIG_DIR")
+        os.environ["OMNIPAL_CONFIG_DIR"] = self._tmp.name
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.engine.restore()
+        self.notes = []
+        self._orig_notify = engine_module.notify_user
+        engine_module.notify_user = lambda t, b="": self.notes.append((t, b))
+        self.engine.save_app_rules({"enabled": True, "rules": [{"class": "code", "mode": "mac"}]})
+
+    def tearDown(self):
+        engine_module.notify_user = self._orig_notify
+        self.engine.restore(auto=None)
+        if self._old is None:
+            os.environ.pop("OMNIPAL_CONFIG_DIR", None)
+        else:
+            os.environ["OMNIPAL_CONFIG_DIR"] = self._old
+        self._tmp.cleanup()
+
+    def test_auto_marks_state_and_notifies(self):
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertEqual(self.engine.apply_app_rule("code"), "mac")
+        auto = self.engine.get_state().get("auto")
+        self.assertEqual((auto["app"], auto["mode"], auto["return_to"]), ("code", "mac", "windows"))
+        self.assertIn("因为聚焦了 code", self.notes[-1][0])
+        self.assertIn("离开后回到", self.notes[-1][1])
+        self.assertEqual(self.engine.apply_app_rule("kitty"), "windows")
+        self.assertIsNone(self.engine.get_state().get("auto"))
+        self.assertIn("回到", self.notes[-1][0])
+
+    def test_manual_switch_cancels_auto_return(self):
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.engine.apply_app_rule("code")
+        prev = self.engine.cancel_auto()           # what the CLI does before a manual switch
+        self.assertEqual(prev["return_to"], "windows")
+        self.assertTrue(self.engine.switch_mode("kde"))
+        self.engine.notify_manual_override(prev, "kde")
+        self.assertIn("已取消自动返回", self.notes[-1][1])
+        self.assertIsNone(self.engine.get_state().get("auto"))
+        self.assertIsNone(self.engine.apply_app_rule("kitty"))   # stays on kde (new base)
+        self.assertEqual(self.engine.get_state().get("mode"), "kde")
+        self.assertEqual(self.engine.apply_app_rule("code"), "mac")
+        self.assertEqual(self.engine.get_state()["auto"]["return_to"], "kde")
+
+    def test_manual_switch_to_same_mode_still_cancels(self):
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.engine.apply_app_rule("code")
+        self.engine.cancel_auto()
+        self.assertTrue(self.engine.switch_mode("mac"))
+        self.assertIsNone(self.engine.get_state().get("auto"))
+        self.assertIsNone(self.engine.apply_app_rule("kitty"))
+        self.assertEqual(self.engine.get_state().get("mode"), "mac")
+
+
+class TestUiAutoOverrideText(unittest.TestCase):
+    def test_bar_and_settings_show_auto_and_override(self):
+        bar = (PROJECT_ROOT / "plugins/omni.mode-indicator/BarWidget.qml").read_text(encoding="utf-8")
+        self.assertIn("active: root.engineRunning && root.autoActive", bar)
+        self.assertIn("离开后回到", bar)
+        self.assertIn("已覆盖", bar)
+        st = (PROJECT_ROOT / "plugins/omni.settings/SettingsPanel.qml").read_text(encoding="utf-8")
+        self.assertIn("root.windowModeLabel(modeCard.modelData.windowMode)", st)
+        self.assertIn("已覆盖：全局", st)
+        self.assertIn("Super+Ctrl+/", st)
+        for qml in (bar, st):
+            self.assertNotIn("Style.font.caption", qml)
+            self.assertNotIn("Style.font.bodySmall", qml)

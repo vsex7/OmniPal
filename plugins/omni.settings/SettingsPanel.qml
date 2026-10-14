@@ -98,6 +98,15 @@ Item {
 
   // 模式元数据：唯一来源为 profiles/*.json（开窗时经 omni-profile list --json 加载），此处不再硬编码。
   property var modeItems: []
+  // 窗口策略：follow-profile（跟随模式）以外的取值即全局覆盖各模式自带的 window_mode
+  property string windowPolicy: "follow-profile"
+  readonly property bool policyOverridden: root.windowPolicy !== "follow-profile" && root.windowPolicy !== ""
+  // 应用规则自动切换标记（state.json auto）
+  property var autoInfo: null
+  // 固定入口（schema/fixed_bindings.json），所有模式通用
+  readonly property string fixedKeysText: "固定入口（所有模式通用）：Super+Ctrl+/ 速查表 · Super+Alt+I 控制中心 · Super+Alt+O 概览"
+
+  function windowModeLabel(m) { return m === "floating" ? "浮动" : "平铺" }
 
   // 主题样式令牌：直接取 Omarchy Shell 的 qs.Commons（[menu] 表面，与 omarchy.menu /
   // omarchy.emojis 一致）。卡片/芯片用 Style 的 normal 控件 fill/border 令牌（见 Card 组件）。
@@ -292,6 +301,9 @@ Item {
       root.enginePid = d.pid || 0
       root.engineUpdatedAt = d.updated_at || ""
       root.engineStatus = d.status || "native"
+      var wp = String(d.window_policy || "follow-profile").toLowerCase()
+      root.windowPolicy = (wp === "follow" || wp === "follow_profile") ? "follow-profile" : (wp === "float" ? "floating" : (wp === "tile" ? "tiled" : wp))
+      root.autoInfo = (d.auto && typeof d.auto === "object") ? d.auto : null
       root.engineRunning = true
     } catch (e) {
       root.engineRunning = false
@@ -446,6 +458,7 @@ Item {
                 name: p.name || p.id,
                 desc: desc,
                 count: p.bindings_count || 0,
+                windowMode: p.window_mode || "tiled",
                 source: p.source || "project",
                 override: p.override || false
               })
@@ -855,6 +868,8 @@ Item {
                             + (modeCard.modelData.source === "user"
                                 ? (modeCard.modelData.override ? "用户自定义（覆盖内置）" : "用户自定义")
                                 : "内置")
+                            + " · " + root.windowModeLabel(modeCard.modelData.windowMode)
+                            + (root.policyOverridden ? "（已覆盖：全局" + root.windowModeLabel(root.windowPolicy) + "）" : "")
                             + (modeCard.modelData.desc ? " · " + modeCard.modelData.desc : "")
                           font.family: Style.font.family
                           font.pixelSize: Style.font.body
@@ -867,7 +882,7 @@ Item {
                       Text {
                         id: modeKeycap
                         anchors { right: parent.right; rightMargin: Style.spacing.rowPaddingX; verticalCenter: parent.verticalCenter }
-                        text: modeCard.isActive ? "active" : String(modeCard.index + 1)
+                        text: modeCard.isActive ? (root.autoInfo ? "自动" : "active") : String(modeCard.index + 1)
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
                         color: modeCard.isActive ? root.accent : Qt.darker(root.foreground, 1.4)
@@ -1121,6 +1136,16 @@ Item {
                   accent: root.accent
                   verticalPadding: Style.space(10)
                   onClicked: root.openCheatSheet()
+                }
+
+                Text {
+                  width: parent.width
+                  textFormat: Text.PlainText
+                  text: root.fixedKeysText
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                  color: Qt.darker(root.foreground, 1.4)
+                  wrapMode: Text.Wrap
                 }
               }
             }

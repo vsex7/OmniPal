@@ -22,6 +22,7 @@ import fcntl
 import io
 import os
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -410,6 +411,30 @@ def combo_signature(combo: str) -> Tuple[int, str]:
     return (mask, parts[-1].upper())
 
 
+# Sentinel: keep the current auto-switch marker only if it still describes the target mode.
+_KEEP = object()
+
+
+def notify_user(title: str, body: str = "") -> None:
+    """Short desktop notice via notify-send (mako on Omarchy). Silent no-op when unavailable."""
+    if compositor_mutation_disabled() or not shutil.which("notify-send"):
+        return
+    try:
+        subprocess.Popen(["notify-send", "-a", "OmniPal", "-t", "5000", title] + ([body] if body else []),
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        _debug(e)
+
+
+def load_fixed_bindings(root_dir: Path) -> List[Dict[str, Any]]:
+    """Mode-independent OmniPal entry points (schema/fixed_bindings.json), injected in every mode."""
+    try:
+        data = json.loads((Path(root_dir) / "schema" / "fixed_bindings.json").read_text(encoding="utf-8"))
+        return [b for b in data.get("bindings", []) if b.get("action") and b.get("key")]
+    except Exception:
+        return []
+
+
 def format_combo(mod: str, key: str) -> str:
     parts = []
     if mod:
@@ -573,6 +598,7 @@ class OmniPalEngine:
         self.schema_file = self.root_dir / "schema" / "actions.json"
         self.snap_schema_file = self.root_dir / "schema" / "snap_layouts.json"
         self.profiles_dir = self.root_dir / "profiles"
+        self.fixed_bindings: List[Dict[str, Any]] = load_fixed_bindings(self.root_dir)
         self.actions_catalog: Dict[str, Dict[str, Any]] = {}
         self.profiles: Dict[str, Dict[str, Any]] = {}
         self.snap_zones: Dict[str, Dict[str, Any]] = {}
@@ -700,6 +726,7 @@ class OmniPalEngine:
                 "name": p_data.get("name", p_id),
                 "description": p_data.get("description", ""),
                 "bindings_count": len(p_data.get("bindings", [])),
+                "window_mode": p_data.get("window_mode", "tiled"),
                 "display": p_data.get("display", {}),
                 "source": p_data.get("_source", "project"),
                 "override": p_data.get("_override", False),
@@ -1101,17 +1128,36 @@ class OmniPalEngine:
             })
         return lua_ops, records
 
+    # ---------- fixed entry points (same keys in every mode) ----------
+    def fixed_combos(self) -> Dict[str, str]:
+        return {format_combo(b.get("mod", ""), b["key"]): b["action"] for b in self.fixed_bindings}
+
+    def _without_fixed(self, bindings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Profile bindings minus those on fixed combos (fixed entries always win)."""
+        fixed = self.fixed_combos()
+        return [b for b in bindings if format_combo(b.get("mod", ""), b.get("key", "")) not in fixed]
+
+    def _fixed_bind_ops(self) -> List[str]:
+        ops, _records = self._build_bind_ops(self.fixed_bindings)
+        return ops
+
+    def apply_fixed_bindings(self) -> bool:
+        """(Re-)injects the fixed entry points, e.g. in omarchy mode or after a config reload."""
+        ops = self._fixed_bind_ops()
+        return self._eval_lua("; ".join(ops)) if ops else True
+
     def _reinject_active_bindings(self, target_mode: str) -> bool:
         """Re-applies the active overlay bindings into Hyprland (e.g. after a config reload)."""
         if target_mode not in self.profiles or target_mode == "omarchy":
-            return True
+            return self.apply_fixed_bindings()
         target_profile = self.profiles[target_mode]
-        target_bindings = target_profile.get("bindings", [])
+        target_bindings = self._without_fixed(target_profile.get("bindings", []))
         # Called after a config reload: the overlay is gone and natives are back, so live == native.
         live = self._live_bind_counts()
         lua_ops, new_overlay_records = self._build_bind_ops(target_bindings, live, self._live_bind_details())
         if lua_ops:
             lua_ops.insert(0, 'debug.getregistry().omnipal_stash = nil')
+        lua_ops.extend(self._fixed_bind_ops())
 
         if lua_ops:
             ok = self._eval_lua("; ".join(lua_ops))
@@ -1540,7 +1586,14 @@ end
         except Exception:
             return default_state
 
-    def _write_state(self, mode: str, count: int, policy: Optional[str] = None):
+    def _resolve_auto(self, mode: str, auto: Any) -> Optional[Dict[str, Any]]:
+        if auto is _KEEP:
+            prev = self.get_state().get("auto")
+            return prev if isinstance(prev, dict) and prev.get("mode") == mode else None
+        return auto or None
+
+    def _write_state(self, mode: str, count: int, policy: Optional[str] = None, auto: Any = _KEEP):
+        auto = self._resolve_auto(mode, auto)
         self._ensure_run_dir()
         profile_data = self.profiles.get(mode, {})
         profile_name = profile_data.get("name", mode)
@@ -1587,6 +1640,9 @@ end
             "effective_window_mode": effective_mode,
             "compositor_connected": compositor_connected,
         }
+        if auto:
+            # Set only while an app rule switched the mode: {app, mode, return_to, since}
+            state_data["auto"] = auto
         write_state_json(STATE_FILE, state_data)
         if not compositor_mutation_disabled():
             try:
@@ -1791,9 +1847,10 @@ end
 
         return "; ".join(lua_ops)
 
-    def restore(self) -> bool:
+    def restore(self, auto: Any = _KEEP) -> bool:
         """Restores Hyprland keybindings by unbinding all currently injected overlays and re-registering baseline."""
         with engine_lock():
+            auto = self._resolve_auto("omarchy", auto)
             active_overlay = self._get_active_overlay()
             lua_lines = []
             for b in active_overlay:
@@ -1818,6 +1875,7 @@ end
             elif not stashed:
                 lua_lines.append(LUA_RESTORE_BASELINE)
 
+            lua_lines.extend(self._fixed_bind_ops())
             success = self._eval_lua("; ".join(lua_lines))
 
             # Never discard the active overlay while the compositor still reports a failure.
@@ -1845,7 +1903,7 @@ end
             except Exception:
                 pass
 
-            self._write_state("omarchy", 0)
+            self._write_state("omarchy", 0, auto=auto)
             # State is already "omarchy", so the reload watcher won't re-apply an overlay.
             # Natives we unbound are rebound from the Lua stash; reload only if that isn't possible.
             unbound = [b for b in active_overlay if b.get("native_unbound")]
@@ -1853,14 +1911,16 @@ end
                 return True
             # A config reload above rebuilt the Lua state: natives are back and the stash is gone.
             if config_reloaded:
-                return True
+                return self.apply_fixed_bindings()
             if all(b.get("native_restorable", False) for b in unbound):
                 restore_ops = [_native_unstash_lua(b["combo"]) for b in unbound
                                if b.get("native_count", 0) > 0]
                 if not restore_ops or self._eval_lua_strict("; ".join(restore_ops)):
                     return True
                 print("Native rebind from stash failed; falling back to hyprctl reload", file=sys.stderr)
-            return self._reload_hyprland()
+            if not self._reload_hyprland():
+                return False
+            return self.apply_fixed_bindings()
 
     def _reload_hyprland(self) -> bool:
         if compositor_mutation_disabled():
@@ -1893,7 +1953,7 @@ end
         res = subprocess.run(["hyprctl", "dispatch", "sendshortcut", arg], capture_output=True, text=True, check=False)
         return res.returncode == 0 and "error" not in (res.stdout or "").lower()
 
-    def switch_mode(self, target_mode: str, record: bool = True, _rollback: bool = False) -> bool:
+    def switch_mode(self, target_mode: str, record: bool = True, _rollback: bool = False, auto: Any = _KEEP) -> bool:
         """Atomically switches the in-memory keybindings to target_mode with rollback on error.
 
         record=False skips the local-usage-stats increment (used by the non-destructive
@@ -1906,7 +1966,7 @@ end
 
             # Switching to omarchy mode means clearing all overlays and restoring system baseline
             if target_mode == "omarchy":
-                ok = self.restore()
+                ok = self.restore(auto=auto)
                 if ok and record:
                     self.record_switch("omarchy")
                 if ok and self.get_persistence_status()["enabled"]:
@@ -1914,8 +1974,10 @@ end
                 return ok
 
             previous_mode = self.get_state().get("mode", "omarchy")
+            auto = self._resolve_auto(target_mode, auto)
             target_profile = self.profiles[target_mode]
-            target_bindings = target_profile.get("bindings", [])
+            # Fixed entry points (schema/fixed_bindings.json) always win over profile bindings.
+            target_bindings = self._without_fixed(target_profile.get("bindings", []))
 
             # A previous overlay that unbound natives needs a restore first (exact rebind, reload only as fallback)
             if any(b.get("native_unbound") for b in self._get_active_overlay()):
@@ -1956,13 +2018,14 @@ end
             native_details = self._native_details(current_overlay)
             bind_ops, new_overlay_records = self._build_bind_ops(target_bindings, native_counts, native_details)
             lua_ops.extend(bind_ops)
+            lua_ops.extend(self._fixed_bind_ops())
 
             # Execute batch in single eval call (< 5ms)
             success = self._eval_lua("; ".join(lua_ops))
 
             if success:
                 self._write_active_overlay(new_overlay_records)
-                self._write_state(target_mode, len(new_overlay_records))
+                self._write_state(target_mode, len(new_overlay_records), auto=auto)
                 if record:
                     self.record_switch(target_mode)
                 # Configuration persistence: mirror the successful switch when persistence is enabled.
@@ -2088,41 +2151,70 @@ end
                 _debug(e)
         return None
 
+    def mode_display_name(self, mode: Optional[str]) -> str:
+        return self.profiles.get(mode or "", {}).get("name", mode or "")
+
+    def cancel_auto(self) -> Optional[Dict[str, Any]]:
+        """Manual switch while an app rule is active: drop the auto-return and return the old marker.
+        The mode the user picks by hand becomes the new base (what later auto switches return to)."""
+        st = self.get_state()
+        auto = st.get("auto")
+        if not isinstance(auto, dict):
+            return None
+        mode = st.get("mode", "omarchy")
+        self._write_state(mode, int(st.get("active_bindings_count", 0) or 0), auto=None)
+        return auto
+
+    def notify_manual_override(self, prev_auto: Optional[Dict[str, Any]], new_mode: str) -> None:
+        if not prev_auto:
+            return
+        notify_user(f"已手动切换到 {self.mode_display_name(new_mode)}",
+                    f"已取消自动返回 {self.mode_display_name(prev_auto.get('return_to'))}；"
+                    f"{self.mode_display_name(new_mode)} 成为新的基础模式")
+
     def apply_app_rule(self, window_class: str) -> Optional[str]:
-        """Called on focus change. Switches to the rule's mode, or back to the base mode when
-        no rule matches. Returns the mode switched to, or None if nothing changed."""
+        """Called on focus change. Switches to the rule's mode (marking state["auto"]), or back to
+        the remembered return mode when the focused app no longer matches. A manual switch clears
+        state["auto"] (see cancel_auto), so the hand-picked mode is the new base.
+        Returns the mode switched to, or None if nothing changed."""
         rules = self.load_app_rules()
         rule = self.match_app_rule(window_class, rules)
-        current = self.get_state().get("mode", "omarchy")
-        if rule is None and getattr(self, "_auto_active", False) is False:
-            self._write_app_rule_state(window_class, None)
-            return None
-        auto_target = getattr(self, "_auto_target", None)
-        if getattr(self, "_auto_active", False) and auto_target and current != auto_target:
-            # The user switched by hand while a rule was active: respect it as the new base.
-            self._base_mode = current
-            self._auto_active = False
-            self._auto_target = None
-            if rule is not None and rule["mode"] == auto_target:
-                self._write_app_rule_state(window_class, rule)
-                return None
-        if rule is not None:
-            if not getattr(self, "_auto_active", False):
-                # Remember what the user picked by hand, so we can return to it.
-                self._base_mode = current
-            self._auto_active = True
-            target = rule["mode"]
-        else:
-            self._auto_active = False
-            target = rules.get("default_mode") or getattr(self, "_base_mode", None) or current
+        st = self.get_state()
+        current = st.get("mode", "omarchy")
+        auto = st.get("auto") if isinstance(st.get("auto"), dict) else None
         self._write_app_rule_state(window_class, rule)
-        self._auto_target = target if rule is not None else None
-        if target == current or target not in self.profiles:
+
+        if rule is not None:
+            target = rule["mode"]
+            if target not in self.profiles:
+                return None
+            if auto and auto.get("mode") == target and current == target:
+                return None  # still inside the same rule (e.g. another window of a matching app)
+            if not auto and target == current:
+                return None  # user is already in that mode by hand: nothing to return to
+            base = auto.get("return_to") if auto else current
+            return_to = rules.get("default_mode") or base
+            if return_to not in self.profiles:
+                return_to = base
+            new_auto = {
+                "app": window_class, "mode": target, "return_to": return_to,
+                "since": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+            ok = self.switch_mode(target, auto=new_auto)
+            if ok:
+                notify_user(f"因为聚焦了 {window_class}，切到 {self.mode_display_name(target)}",
+                            f"离开后回到 {self.mode_display_name(return_to)}")
+            return target if ok else None
+
+        if not auto:
             return None
-        if target == "omarchy":
-            ok = self.restore()
-        else:
-            ok = self.switch_mode(target)
+        target = auto.get("return_to") or current
+        if target not in self.profiles or target == current:
+            self.cancel_auto()
+            return None
+        ok = self.switch_mode(target, auto=None)
+        if ok:
+            notify_user(f"离开了 {auto.get('app', '')}，回到 {self.mode_display_name(target)}")
         return target if ok else None
 
     def _write_app_rule_state(self, window_class: str, rule: Optional[Dict[str, Any]]) -> None:
@@ -2154,6 +2246,19 @@ end
                 "name": action_meta.get("name", action_id),
                 "category": action_meta.get("category", "other"),
                 "description": action_meta.get("description", "")
+            })
+        # Fixed entry points are live in every mode (incl. Omarchy 原生模式).
+        fixed = self.fixed_combos()
+        sheet = [e for e in sheet if e["key"] not in fixed]
+        for b in self.fixed_bindings:
+            meta = self.actions_catalog.get(b["action"], {})
+            sheet.append({
+                "action": b["action"],
+                "key": format_combo(b.get("mod", ""), b["key"]),
+                "name": meta.get("name", b["action"]),
+                "category": "omnipal",
+                "description": "固定入口：所有模式通用",
+                "fixed": True,
             })
         return sheet
 
@@ -2531,6 +2636,9 @@ end"""
             "state": self.get_state(),
             "overlay": {"count": 0, "verified_in_hyprland": 0, "missing": []},
             "consistency": False,
+            "window_policy": {"policy": self.get_window_policy(),
+                              "overridden": self.get_window_policy() != "follow-profile"},
+            "fixed_bindings": sorted(self.fixed_combos()),
             "issues": [],
             "fixes": []
         }
@@ -2673,6 +2781,9 @@ def restore_persisted_profile(engine: "OmniPalEngine", attempts: int = 4, base_d
     """Waits for Hyprland, then applies the persisted profile with retry + exponential backoff."""
     mode = engine.get_persisted_profile()
     if not mode or mode == "omarchy":
+        # Native mode still gets the fixed OmniPal entry points.
+        if wait_for_hyprland(timeout=wait_timeout):
+            engine.apply_fixed_bindings()
         return True
     if not wait_for_hyprland(timeout=wait_timeout):
         print(f"⚠️ Hyprland socket not found after {wait_timeout:.0f}s; will restore '{mode}' when the socket appears.", file=sys.stderr, flush=True)
@@ -2752,6 +2863,7 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                                 engine.switch_mode(curr_mode)
                             else:
                                 engine._snapshot_baseline_bindings(force=True)
+                                engine.apply_fixed_bindings()
                             eff_mode = engine.get_effective_window_mode()
                             if eff_mode == "floating":
                                 print("🔄 Hyprland config reload detected. Re-applying floating window rule...", flush=True)
