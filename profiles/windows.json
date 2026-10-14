@@ -10,6 +10,11 @@
   },
   "bindings": [
     {
+      "action": "app_launcher",
+      "mod": "SUPER",
+      "key": "space"
+    },
+    {
       "action": "close_window",
       "mod": "ALT",
       "key": "F4"
@@ -43,11 +48,6 @@
       "action": "lock_screen",
       "mod": "SUPER",
       "key": "L"
-    },
-    {
-      "action": "task_view",
-      "mod": "SUPER",
-      "key": "Tab"
     },
     {
       "action": "clipboard_history",
@@ -98,6 +98,11 @@
       "action": "screenshot_fullscreen",
       "mod": "",
       "key": "Print"
+    },
+    {
+      "action": "task_view",
+      "mod": "SUPER",
+      "key": "Tab"
     }
   ]
 }

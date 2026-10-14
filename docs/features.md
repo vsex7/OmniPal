@@ -1,6 +1,6 @@
 # OmniPal 功能清单
 
-**文档版本**：v1.7.1
+**文档版本**：v1.8.0
 **最后更新**：2026-09-15  
 **对应开发文档**：OmniPal 完整开发文档
 
@@ -48,12 +48,12 @@
 | 自定义 Profile | 允许用户在 `~/.config/omnipal/profiles/` 中扩展或覆盖个人方案 | v1.1.0 已交付 |
 | 更丰富吸附布局 | 居中浮动 (60%x70%)、左右三分屏、左右双三分屏 | v1.1.0 已交付 |
 | 托盘与右键快捷控制面板 | Top Bar 托盘指示器与 Omarchy PopupCard 右键快捷面板，支持模式热切换、快捷入口与系统控制 | v1.2.0 已交付 |
-| 可视化吸附布局选择器 (Snap Layouts) | Windows 11 风格两级布局菜单：Win+Z / Super+Alt+Z 呼出，模板→分区选择后吸附；`schema/snap_layouts.json` 单一事实源（30 分区 + 6 模板） | v1.3.0 已交付 |
+| 可视化吸附布局选择器 (Snap Layouts) | Windows 11 风格两级布局菜单：Win+Z / Super+Alt+Z 呼出，模板→分区选择后吸附；`schema/snap_layouts.json` 单一事实源（37 分区 + 6 模板） | v1.3.0 已交付 |
 | 空间多工作区任务视图 | 16:9 画布卡片平铺全部工作区，窗口按矢量元数据映射真实相对位置，零截图、跨桌面键盘瞬移 | v1.3.0 已交付 |
 | 吸附布局一致性校验 | `check_consistency.py` 全面校验 `snap_layouts.json`：分区几何越界、图标/标签、模板唯一性与槽位合法性 | v1.3.0 已交付 |
 | 快捷键搜索 | 在 HUD (omni.cheat-sheet) 中支持全分类实时模糊检索 | v1.0.0 已交付 |
-| 可选配置持久化 | 用户显式开启（`omni-profile persist enable`）后，才将当前模式写入 `~/.config/omnipal/persistence.json`；`switch_mode` 自动同步，非法模式拒绝，`persist disable` 与卸载彻底清理 | v1.4.0 已交付 |
-| 本地使用统计 | 纯本地聚合计数（模式切换 / 吸附区域 / 动作触发），仅写 `~/.config/omnipal/stats.json`，零按键内容、零网络上传，静默容错不影响切换延迟；CLI `stats [--json|--reset]` | v1.7.1 已交付 |
+| 配置持久化 | 默认记录最后使用的 Profile 与 Window Policy，仅写 `~/.config/omnipal/persistence.json`；`persist disable` 关闭重启恢复，卸载会清理该文件，本地统计仍由 `stats.json` 独立管理 | v1.4.0 引入，当前默认开启 |
+| 本地使用统计 | 纯本地聚合计数（模式切换 / 吸附区域 / 动作触发），仅写 `~/.config/omnipal/stats.json`，零按键内容、零网络上传，静默容错不影响切换延迟；CLI `stats [--json|--reset]` | v1.5.0 已交付 |
 
 ---
 
@@ -101,7 +101,7 @@
 - 用户自定义 Profile 扩展与丰富吸附布局
 - 托盘指示器与右键快捷控制面板（显示元数据 SSOT）
 - 可视化吸附布局选择器（Snap Layouts Picker）与空间多工作区任务视图
-- 可选配置持久化（Opt-in Profile Persistence，默认关闭、显式开启、可完全卸载）
+- 配置持久化（默认开启、可显式关闭、可完全卸载）
 - 本地使用统计（纯本地、零上传、零开销容错）
 
 ---

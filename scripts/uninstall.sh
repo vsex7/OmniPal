@@ -7,7 +7,7 @@ set -euo pipefail
 BIN_TARGET="${HOME}/.local/bin/omni-profile"
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 SERVICE_FILE="${SYSTEMD_USER_DIR}/omnipal.service"
-RUN_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omnipal"
+RUN_DIR="${OMNIPAL_RUN_DIR:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omnipal}"
 
 echo "=== OmniPal 卸载程序 ==="
 
@@ -17,14 +17,23 @@ if [ -x "${BIN_TARGET}" ]; then
     "${BIN_TARGET}" restore || true
 fi
 
-# 2. 停用并移除 systemd 服务
+# 2. 停用并移除 systemd 服务及残留孤儿进程
 if [ -f "${SERVICE_FILE}" ]; then
     echo "🛑 停止并清理 systemd 用户服务..."
     systemctl --user stop omnipal.service 2>/dev/null || true
     systemctl --user disable omnipal.service 2>/dev/null || true
     rm -f "${SERVICE_FILE}"
-    systemctl --user daemon-reload
+    systemctl --user daemon-reload 2>/dev/null || true
 fi
+pkill -f 'omni-profile daemon' 2>/dev/null || true
+pkill -f 'engine/engine.py --daemon' 2>/dev/null || true
+# 等待守护进程退出，避免文件删除竞争
+for _ in {1..20}; do
+    if ! pgrep -f 'omni-profile daemon|engine/engine.py --daemon' >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.1
+done
 
 # 3. 移除 CLI 软链接
 if [ -L "${BIN_TARGET}" ] || [ -f "${BIN_TARGET}" ]; then
@@ -36,9 +45,12 @@ fi
 OMARCHY_PLUGINS_DIR="${HOME}/.config/omarchy/plugins"
 if [ -d "${OMARCHY_PLUGINS_DIR}" ]; then
     for p_link in "${OMARCHY_PLUGINS_DIR}"/omni.*; do
-        if [ -L "${p_link}" ] || [ -d "${p_link}" ]; then
-            rm -rf "${p_link}"
+        if [ -L "${p_link}" ]; then
+            rm -f "${p_link}"
             echo "🗑️ 已移除插件软链接: $(basename "${p_link}")"
+        elif [ -d "${p_link}" ]; then
+            # 真实目录（非安装脚本创建的软链接）不做递归删除，避免误删用户文件。
+            echo "⚠️ 跳过非软链接目录（请确认归属后手动处理）: ${p_link}"
         fi
     done
 fi
@@ -51,7 +63,7 @@ fi
 
 # 6. 清理可选持久化与本地使用统计（仅存在于用户配置目录，绝不涉及 ~/.config/hypr）
 OMNIPAL_CONFIG_DIR_PATH="${OMNIPAL_CONFIG_DIR:-${HOME}/.config/omnipal}"
-for user_file in persistence.json stats.json; do
+for user_file in persistence.json stats.json devices.json; do
     if [ -f "${OMNIPAL_CONFIG_DIR_PATH}/${user_file}" ]; then
         rm -f "${OMNIPAL_CONFIG_DIR_PATH}/${user_file}"
         echo "🗑️ 已移除: ${OMNIPAL_CONFIG_DIR_PATH}/${user_file}"
@@ -74,4 +86,4 @@ if [ -f "${CREATED_DIRS_FILE}" ]; then
     done <<< "${DIRS_LIST}"
 fi
 
-echo "✅ 卸载完毕！系统快捷键与配置已完整恢复至原始状态，零文件残留。"
+echo "✅ 卸载完毕！系统快捷键与 OmniPal 所有受管文件已清理；用户自定义 Profile 会按设计保留。"

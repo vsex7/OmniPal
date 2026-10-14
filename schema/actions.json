@@ -212,14 +212,6 @@
       "default_arg": "omarchy-shell shell toggle omarchy.emojis"
     },
     {
-      "id": "task_view",
-      "name": "任务视图 / 概览",
-      "category": "navigation",
-      "description": "打开多工作区与窗口概览界面",
-      "dispatcher": "exec",
-      "default_arg": "omarchy-shell shell toggle omni.overview"
-    },
-    {
       "id": "workspace_next",
       "name": "下一工作区",
       "category": "navigation",
@@ -282,6 +274,14 @@
       "description": "在当前工作区内切到上一个窗口，不切换工作区（类似 Cmd+Shift+Tab）",
       "dispatcher": "cyclenext",
       "default_arg": "prev"
+    },
+    {
+      "id": "task_view",
+      "name": "多任务全景概览 / 任务切换器",
+      "category": "navigation",
+      "description": "呼出多任务概览与窗口空间切换器",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-shell shell toggle omni.overview"
     }
   ]
 }

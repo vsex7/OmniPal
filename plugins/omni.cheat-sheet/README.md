@@ -17,13 +17,13 @@
 ## 数据流
 
 ```
-CheatSheet.qml ──Process──▶ fetch.sh ──▶ omni-profile status    --json
-   (一次 bash 启动)              └────▶ omni-profile cheatsheet [mode] --json
-                                        ▲
-                                        └─ Engine 联合 active_overlay.json × schema/actions.json
+CheatSheet.qml ──Process──▶ omni-profile status    --json
+   (一次 bash 启动)     └────▶ omni-profile cheatsheet [mode] --json
+                             ▲
+                             └─ Engine 联合 active_overlay.json × schema/actions.json
 ```
 
-`fetch.sh` 输出三段，以标记分隔（CLI 缺失时只输出 `NO_CLI` 并以 0 退出）：
+进程通过内联 bash 脚本输出三段，以标记分隔（CLI 缺失时只输出 `NO_CLI` 并以 0 退出）：
 
 ```
 <<<OMNI_STATUS>>>{status JSON}
@@ -39,9 +39,8 @@ CheatSheet.qml ──Process──▶ fetch.sh ──▶ omni-profile status    
 | 文件 | 职责 |
 |---|---|
 | `manifest.json` | 插件清单，`kinds: ["overlay"]`、`keepLoaded: true` |
-| `CheatSheet.qml` | 展示层：PanelWindow + 遮罩 + Profile 预览胶囊 + 分类过滤条 + 键帽行列表 + 实时修饰键高亮 + 降级状态 |
+| `CheatSheet.qml` | 展示层：直接调用 `omni-profile`，PanelWindow + 遮罩 + Profile 预览胶囊 + 分类过滤条 + 键帽行列表 + 实时修饰键高亮 + 降级状态 |
 | `CheatSheetData.js` | 纯函数：分类标题映射、分组、组合键拆分、高度计算、`formatKeyCap` 键帽转译、`extractCategories` 分类计数、`filterRows` 查询×分类过滤、`isModifierActive` 按下修饰键匹配 |
-| `fetch.sh` | 只读数据助手（唯一的外部命令入口） |
 
 ## 宿主契约
 
