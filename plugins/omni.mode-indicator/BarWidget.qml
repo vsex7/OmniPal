@@ -8,6 +8,7 @@ import qs.Commons as Commons
 import qs.Ui
 import "Icons.js" as Icons
 import "Model.js" as Model
+import "Safety.js" as Safety
 
 // OmniPal 托盘模式指示器与右键快捷控制面板（omni.mode-indicator）
 //
@@ -235,7 +236,7 @@ Panel {
   function activateCursor() {
     if (!root.cursorActive) return
     var i = root.cursorIndex
-    if (i < root.profiles.length) root.switchMode(root.profiles[i].id)
+    if (i < root.profiles.length) root.switchModeWithUndo(root.profiles[i].id)
     else if (i === root.policyRowIndex) {
       if (root.policyCursor >= 0) root.setPolicy(root.policyOptions[root.policyCursor].id)
     } else if (i < root.systemBase) root.runAction(root.actionRows[i - root.actionBase])
@@ -251,6 +252,39 @@ Panel {
   function cycleMode(reverse) {
     var cmd = reverse ? "omni-profile cycle --reverse" : "omni-profile cycle"
     runCmd(cmd)
+  }
+
+  // ---- undoable mode switch (same behaviour/texts as SettingsPanel via Safety.js)
+  property string undoMode: ""
+  property string toastText: ""
+
+  function modeNameOf(id) {
+    for (var i = 0; i < root.profiles.length; i++)
+      if (root.profiles[i].id === id) return Model.resolveName(root.profiles[i])
+    return id
+  }
+
+  function switchModeWithUndo(modeId) {
+    if (!modeId || modeId === root.currentMode) return
+    root.undoMode = root.currentMode
+    root.toastText = Safety.switchedText(root.modeNameOf(modeId))
+    toastTimer.restart()
+    root.switchMode(modeId)
+  }
+
+  function undoSwitch() {
+    if (!root.undoMode) return
+    var m = root.undoMode
+    root.undoMode = ""
+    root.toastText = Safety.undoneText(root.modeNameOf(m))
+    toastTimer.restart()
+    root.switchMode(m)
+  }
+
+  Timer {
+    id: toastTimer
+    interval: Safety.UNDO_MS
+    onTriggered: { root.undoMode = ""; root.toastText = "" }
   }
 
   function switchMode(modeId) {
@@ -376,6 +410,7 @@ Panel {
       onActivateRequested: root.activateCursor()
       onCloseRequested: root.closePanel()
       onTabRequested: function(direction) { root.switchPanel(direction) }
+      onTextKey: function(t) { if ((t === "u" || t === "U") && root.undoMode !== "") root.undoSwitch() }
 
       Column {
         id: panelLayout
@@ -415,6 +450,19 @@ Panel {
           elide: Text.ElideRight
         }
 
+        // 模式切换撤销提示（~5s，点击或按 U 撤销）
+        Text {
+          width: parent.width
+          visible: root.toastText !== ""
+          textFormat: Text.PlainText
+          text: root.toastText
+          color: Commons.Color.accent
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          leftPadding: Style.spacing.controlPaddingX
+          MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.undoSwitch() }
+        }
+
         PanelSeparator { foreground: Commons.Color.popups.text }
 
         // 2. 肌肉记忆模式选择区 (PROFILES)
@@ -444,7 +492,7 @@ Panel {
               hasCursor: root.cursorActive && root.cursorIndex === index
               foreground: Commons.Color.popups.text
               onHovered: function(on) { root.hoverRow(profileRow.index, on) }
-              onClicked: root.switchMode(profileRow.modelData.id)
+              onClicked: root.switchModeWithUndo(profileRow.modelData.id)
 
               RowHint {
                 text: profileRow.isActive ? "active" : String(profileRow.modelData.bindings_count)

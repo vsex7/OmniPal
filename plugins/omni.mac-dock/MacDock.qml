@@ -7,6 +7,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "Icons.js" as Icons
+import "Safety.js" as Safety
 
 // OmniPal macOS 风格底部 Dock 栏（omni.mac-dock）
 //
@@ -167,6 +168,18 @@ Item {
 
   function closeContextCard() {
     root.contextItem = null
+    root.closeArmedKey = ""
+  }
+
+  // 多窗口“关闭”会关掉该应用全部窗口且无法撤销：首次点击提示“再按一次关闭”，
+  // Safety.CONFIRM_MS 内再点才执行（单窗口直接关闭）。
+  property string closeArmedKey: ""
+  function itemKey(item) { return item ? String(item.classKey || item.id || item.name) : "" }
+
+  Timer {
+    id: closeArmTimer
+    interval: Safety.CONFIRM_MS
+    onTriggered: root.closeArmedKey = ""
   }
 
   onContextItemChanged: {
@@ -186,7 +199,10 @@ Item {
       acts.push({ key: "new", icon: Icons.glyph.plus, label: item.isRunning ? "新建" : "启动", danger: false })
     }
     if (item.isRunning && item.windowCount > 0) {
-      acts.push({ key: "close", icon: Icons.glyph.close, label: "关闭", danger: true })
+      var armed = item.windowCount > 1 && Safety.isArmed(root.closeArmedKey, root.itemKey(item))
+      acts.push({ key: "close", icon: Icons.glyph.close, danger: true,
+                  label: armed ? (Safety.CLOSE_AGAIN_TEXT + " (" + item.windowCount + " 个窗口)")
+                               : (item.windowCount > 1 ? "关闭全部 (" + item.windowCount + ")" : "关闭") })
     }
     return acts
   }
@@ -201,6 +217,12 @@ Item {
     } else if (key === "new") {
       root.launchExec(it.exec)
     } else if (key === "close") {
+      if (it.windowCount > 1 && !Safety.isArmed(root.closeArmedKey, root.itemKey(it))) {
+        root.closeArmedKey = root.itemKey(it)
+        closeArmTimer.restart()
+        return
+      }
+      root.closeArmedKey = ""
       root.closeApp(it)
     }
     root.bounceAt(root.indexOfItem(it))

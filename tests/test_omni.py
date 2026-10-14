@@ -2012,3 +2012,130 @@ class TestOmarchyVersionGate(unittest.TestCase):
         self.assertNotIn("exit 1", unknown)
         too_old = sh.split("too_old)", 1)[1].split(";;", 1)[0]
         self.assertIn("exit 1", too_old)
+
+
+class TestUxSafetyRound2(unittest.TestCase):
+    """Overview typing goes to search, closes need a second press, mode switches are undoable."""
+    P = PROJECT_ROOT / "plugins"
+
+    def read(self, rel):
+        return (self.P / rel).read_text(encoding="utf-8")
+
+    def test_overview_plain_letters_are_not_shortcuts(self):
+        qml = self.read("omni.overview/Overview.qml")
+        self.assertNotIn('root.searchQuery === "" && (event.key', qml)
+        self.assertNotIn('root.searchQuery === "" && event.key', qml)
+        self.assertIn("(alt && event.key === Qt.Key_X)", qml)
+        self.assertIn("alt && event.key === Qt.Key_M", qml)
+        self.assertIn("alt && (event.key === Qt.Key_L || event.key === Qt.Key_J)", qml)
+        self.assertNotIn("Qt.Key_Space", qml)
+
+    def test_overview_close_requires_second_press(self):
+        qml = self.read("omni.overview/Overview.qml")
+        self.assertIn("root.requestClose(root.currentSelectedWin.address)", qml)
+        self.assertEqual(qml.count("root.closeWindow("), 1)  # only from requestClose
+        self.assertIn("interval: Safety.CONFIRM_MS", qml)
+        self.assertIn("Safety.CLOSE_AGAIN_TEXT", qml)
+
+    def test_overview_number_range_matches_settings(self):
+        qml = self.read("omni.overview/Overview.qml")
+        self.assertIn("event.key <= Qt.Key_9", qml)
+        self.assertNotIn("Qt.Key_8", qml)
+        self.assertNotIn("(i < 8)", self.read("omni.overview/Model.js"))
+        self.assertIn("num < 9", self.read("omni.settings/SettingsPanel.qml"))
+
+    def test_dock_multi_window_close_arms_first(self):
+        qml = self.read("omni.mac-dock/MacDock.qml")
+        self.assertIn("it.windowCount > 1 && !Safety.isArmed(root.closeArmedKey", qml)
+        self.assertIn("interval: Safety.CONFIRM_MS", qml)
+
+    def test_mode_indicator_switch_is_undoable(self):
+        qml = self.read("omni.mode-indicator/BarWidget.qml")
+        self.assertIn("onClicked: root.switchModeWithUndo(profileRow.modelData.id)", qml)
+        self.assertIn("root.switchModeWithUndo(root.profiles[i].id)", qml)
+        self.assertIn("interval: Safety.UNDO_MS", qml)
+        self.assertIn("root.undoSwitch()", qml)
+
+    def test_safety_js_is_shared(self):
+        js = self.read("shared/Safety.js")
+        self.assertIn("var UNDO_MS = 5000", js)
+        self.assertIn("var CONFIRM_MS = 2000", js)
+        self.assertIn("再按一次关闭", js)
+        for d in ("omni.overview", "omni.mac-dock", "omni.mode-indicator", "omni.settings"):
+            self.assertEqual((self.P / d / "Safety.js").read_text(encoding="utf-8"), js, d)
+
+
+class TestNativeConflicts(unittest.TestCase):
+    """Overlay combos that collide with live Omarchy binds unbind the native(s) and restore reloads them."""
+
+    def setUp(self):
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.evals, self.calls = [], []
+        self.overlay = []
+        self.live = {}
+        e = self.engine
+        e._eval_lua = lambda code: self.evals.append(code) or True
+        e._reload_hyprland = lambda: self.calls.append("reload") or True
+        e._write_active_overlay = lambda recs: setattr(self, "overlay", recs)
+        e._get_active_overlay = lambda: self.overlay
+        e._write_state = lambda *a, **k: None
+        e.record_switch = lambda *a, **k: None
+        e.get_persistence_status = lambda: {"enabled": False}
+        e._live_bind_counts = lambda: dict(self.live)
+        e._apply_window_policy = lambda *a, **k: True
+
+    def test_combo_signature_matches_hyprctl_modmask(self):
+        from engine.engine import combo_signature
+        self.assertEqual(combo_signature("SUPER + TAB"), (64, "TAB"))
+        self.assertEqual(combo_signature("SUPER + SHIFT + TAB"), (65, "TAB"))
+        self.assertEqual(combo_signature("SUPER + CTRL + LEFT"), (68, "LEFT"))
+
+    def test_windows_super_tab_unbinds_native_and_restore_reloads(self):
+        self.live = {(64, "TAB"): 1}  # Omarchy "Next workspace"
+        self.assertTrue(self.engine.switch_mode("windows"))
+        rec = {b["combo"]: b for b in self.overlay}
+        self.assertTrue(rec["SUPER + TAB"].get("native_unbound"))
+        self.assertIn('hl.unbind("SUPER + TAB")', self.evals[-1])
+        self.assertTrue(self.engine.restore())
+        self.assertIn("reload", self.calls)
+
+    def test_multiple_natives_on_one_combo_all_unbound(self):
+        self.live = {(64, "TAB"): 2}
+        self.assertTrue(self.engine.switch_mode("windows"))
+        code = self.evals[-1]
+        self.assertGreaterEqual(code.count('hl.unbind("SUPER + TAB")'), 2)
+
+    def test_own_overlay_not_counted_as_native(self):
+        # windows overlay already active, live shows only our own SUPER + TAB → not a native conflict
+        self.overlay = [{"action": "task_view", "combo": "SUPER + TAB", "name": "x"}]
+        self.live = {(64, "TAB"): 1}
+        self.assertTrue(self.engine.switch_mode("windows"))
+        rec = {b["combo"]: b for b in self.overlay}
+        self.assertFalse(rec["SUPER + TAB"].get("native_unbound", False))
+
+    def test_no_live_conflict_no_reload(self):
+        self.live = {}
+        self.assertTrue(self.engine.switch_mode("windows"))
+        self.assertFalse(any(b.get("native_unbound") for b in self.overlay))
+        self.calls.clear()
+        self.assertTrue(self.engine.restore())
+        self.assertNotIn("reload", self.calls)
+
+    def test_profiles_cover_omarchy_default_collisions(self):
+        """Every OmniPal combo that collides with an Omarchy default bind gets unbound when live."""
+        import re, glob
+        from engine.engine import format_combo, combo_signature
+        ref = Path("/workspace/ref/omarchy/default/hypr/bindings")
+        if not ref.is_dir():
+            self.skipTest("Omarchy reference bindings not available")
+        native = set()
+        for f in glob.glob(str(ref / "*.lua")):
+            for m in re.finditer(r'o\.bind\w*\(\s*"([^"]+)"', Path(f).read_text(encoding="utf-8")):
+                native.add(combo_signature(m.group(1)))
+        prof = json.loads((PROJECT_ROOT / "profiles" / "windows.json").read_text(encoding="utf-8"))
+        colliding = {combo_signature(format_combo(b.get("mod", ""), b["key"])) for b in prof["bindings"]} & native
+        self.assertIn((64, "TAB"), colliding)
+        self.live = {sig: 1 for sig in colliding}
+        self.assertTrue(self.engine.switch_mode("windows"))
+        unbound = {combo_signature(b["combo"]) for b in self.overlay if b.get("native_unbound")}
+        self.assertEqual(unbound, colliding)

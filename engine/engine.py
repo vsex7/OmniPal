@@ -395,6 +395,21 @@ def is_special_window(
         return False, True
     return False, False
 
+_MODMASK = {"SHIFT": 1, "CAPS": 2, "CTRL": 4, "CONTROL": 4, "ALT": 8, "MOD2": 16,
+            "MOD3": 32, "SUPER": 64, "WIN": 64, "MOD4": 64, "LOGO": 64, "MOD5": 128}
+
+
+def combo_signature(combo: str) -> Tuple[int, str]:
+    """(modmask, KEY) for a combo like 'SUPER + SHIFT + TAB', comparable with `hyprctl binds -j`."""
+    parts = [p.strip() for p in str(combo or "").split("+") if p.strip()]
+    if not parts:
+        return (0, "")
+    mask = 0
+    for m in parts[:-1]:
+        mask |= _MODMASK.get(m.upper(), 0)
+    return (mask, parts[-1].upper())
+
+
 def format_combo(mod: str, key: str) -> str:
     parts = []
     if mod:
@@ -907,8 +922,43 @@ class OmniPalEngine:
         except Exception:
             pass
 
-    def _build_bind_ops(self, target_bindings: List[Dict[str, Any]]) -> Tuple[List[str], List[Dict[str, Any]]]:
-        """Builds unbind-then-bind Lua ops (incl. shortcut forwarding) and overlay records for bindings."""
+    def _live_bind_counts(self) -> Dict[Tuple[int, str], int]:
+        """How many compositor key binds sit on each (modmask, KEY); empty if hyprctl can't be queried."""
+        counts: Dict[Tuple[int, str], int] = {}
+        if compositor_mutation_disabled():
+            return counts
+        try:
+            _ensure_hyprland_instance()
+            res = subprocess.run(["hyprctl", "binds", "-j"], capture_output=True, text=True,
+                                 check=True, timeout=2.0, env=os.environ)
+            for b in json.loads(res.stdout or "[]"):
+                if not isinstance(b, dict) or b.get("mouse") or b.get("release"):
+                    continue
+                if b.get("submap"):
+                    continue
+                sig = (int(b.get("modmask", 0) or 0), str(b.get("key", "")).upper())
+                counts[sig] = counts.get(sig, 0) + 1
+        except Exception as e:
+            _debug(f"binds query failed: {e}")
+        return counts
+
+    def _native_counts(self, own_overlay: Optional[List[Dict[str, Any]]] = None) -> Dict[Tuple[int, str], int]:
+        """Live binds minus the ones `own_overlay` (OmniPal's currently injected binds) put there."""
+        counts = self._live_bind_counts()
+        for b in own_overlay or []:
+            sig = combo_signature(b.get("combo", ""))
+            if counts.get(sig, 0) > 0:
+                counts[sig] -= 1
+        return counts
+
+    def _build_bind_ops(self, target_bindings: List[Dict[str, Any]],
+                        native_counts: Optional[Dict[Tuple[int, str], int]] = None) -> Tuple[List[str], List[Dict[str, Any]]]:
+        """Builds unbind-then-bind Lua ops (incl. shortcut forwarding) and overlay records for bindings.
+
+        native_counts (from _native_counts) marks combos that displace a live native Omarchy bind:
+        those are unbound once per native bind (a combo can carry several, e.g. ALT + TAB) and the
+        record gets native_unbound=True so restore() reloads Hyprland to bring the natives back."""
+        native_counts = native_counts or {}
         lua_ops: List[str] = []
         records: List[Dict[str, Any]] = []
         terminals = None
@@ -921,7 +971,11 @@ class OmniPalEngine:
             if not key:
                 continue
             combo = format_combo(mod, key)
-            unbind_native = False
+            n_native = native_counts.get(combo_signature(combo), 0)
+            unbind_native = n_native > 0
+            # Extra unbinds for combos carrying more than one native bind (first one is below).
+            for _ in range(max(0, n_native - 1)):
+                lua_ops.append(f'hl.unbind({lua_str(combo)})')
             if action_id == FORWARD_ACTION:
                 try:
                     mods, fkey = parse_forward(b.get("forward", ""))
@@ -954,7 +1008,8 @@ class OmniPalEngine:
             return True
         target_profile = self.profiles[target_mode]
         target_bindings = target_profile.get("bindings", [])
-        lua_ops, new_overlay_records = self._build_bind_ops(target_bindings)
+        # Called after a config reload: the overlay is gone and natives are back, so live == native.
+        lua_ops, new_overlay_records = self._build_bind_ops(target_bindings, self._live_bind_counts())
 
         if lua_ops:
             ok = self._eval_lua("; ".join(lua_ops))
@@ -1748,7 +1803,9 @@ end
 
 
             # Stage 3: Unbind-before-bind for every target combo (incl. forwarded shortcuts)
-            bind_ops, new_overlay_records = self._build_bind_ops(target_bindings)
+            # Native binds = live binds minus those our current overlay injected.
+            native_counts = self._native_counts(current_overlay)
+            bind_ops, new_overlay_records = self._build_bind_ops(target_bindings, native_counts)
             lua_ops.extend(bind_ops)
 
             # Execute batch in single eval call (< 5ms)
@@ -2378,12 +2435,26 @@ end"""
             except Exception as e:
                 report["issues"].append(f"Failed to query hyprctl binds: {e}")
 
+        # 3.5 Overlay combos that still share their key with a native bind fire twice
+        report["conflicts"] = []
+        if overlay:
+            counts = self._live_bind_counts()
+            for item in overlay:
+                combo = item.get("combo")
+                if combo and counts.get(combo_signature(combo), 0) > 1:
+                    report["conflicts"].append(combo)
+            if report["conflicts"]:
+                report["issues"].append(
+                    f"Conflict: {len(report['conflicts'])} overlay combos also have a native bind (fire twice): "
+                    + ", ".join(report["conflicts"]))
+                report["fixes"].append("omni-profile switch <当前模式>（会自动解绑冲突的原生快捷键）")
+
         # 4. Installation self-check (CLI link, plugin links, systemd unit, token copies)
         install = self.check_installation()
         report["install"] = install
         for item in install["problems"]:
             report["issues"].append(item["problem"])
-        report["fixes"] = [item["fix"] for item in install["problems"]]
+        report["fixes"] += [item["fix"] for item in install["problems"]]
 
         # 4.5 Omarchy version gate (shared with scripts/install.sh)
         try:

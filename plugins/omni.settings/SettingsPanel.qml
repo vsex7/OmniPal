@@ -8,6 +8,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "Icons.js" as Icons
+import "Safety.js" as Safety
 
 // OmniPal 设置与控制中心面板（omni.settings）
 //
@@ -201,7 +202,7 @@ Item {
   function switchModeWithUndo(targetMode) {
     if (!targetMode || targetMode === root.currentMode) return
     root.undoMode = root.currentMode
-    root.toastText = "已切换至 " + root.modeNameOf(targetMode) + " · U 撤销"
+    root.toastText = Safety.switchedText(root.modeNameOf(targetMode))
     toastTimer.restart()
     root.switchMode(targetMode)
   }
@@ -210,14 +211,14 @@ Item {
     if (!root.undoMode) return
     var m = root.undoMode
     root.undoMode = ""
-    root.toastText = "已撤销 · 回到 " + root.modeNameOf(m)
+    root.toastText = Safety.undoneText(root.modeNameOf(m))
     toastTimer.restart()
     root.switchMode(m)
   }
 
   Timer {
     id: toastTimer
-    interval: 5000
+    interval: Safety.UNDO_MS
     onTriggered: { root.undoMode = ""; root.toastText = "" }
   }
 
