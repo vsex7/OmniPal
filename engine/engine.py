@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-__version__ = "1.7.1"
+__version__ = "1.8.0"
 
 RUN_DIR = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "omnipal"
 STATE_FILE = RUN_DIR / "state.json"

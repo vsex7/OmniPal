@@ -4,6 +4,28 @@
 
 ---
 
+## [v1.8.0] - 2026-10-14
+
+### ✨ 新功能
+- **按应用自动切换**：为窗口类名配置规则，聚焦到对应应用时自动切换模式，离开后恢复；手动切换的模式会成为新的基础模式。
+- `omni-profile rules add/test --current [--delay N]`：倒计时后直接取当前窗口建规则；`rules list --json`、`rules toggle <class>`。
+- `omni-profile rules export / import`：导出导入应用规则，默认按类名合并，`--replace` 整体替换，指向缺失模式的规则会跳过。
+- `omni-profile export / import`：导出导入自定义 profile。
+- 新增 KDE 模式。
+- `omni-profile doctor`：一键自检环境、引擎状态和配置。
+- 设置面板新增“应用规则”页：全局开关、默认模式、规则启停和删除、“填入当前应用”。
+- 速查表搜索结果高亮匹配文字，状态行显示当前命中的应用规则。
+- Windows 模式补充 Win+Ctrl+←/→ 切工作区、Win+S 启动器、Print 全屏截图；Mac 模式补充 Cmd+Opt+Space 文件管理器、Ctrl+Cmd+Space 表情面板。
+
+### 🎨 设计
+- 全新视觉：炭黑、米白加琥珀强调色，统一由 `plugins/shared/Tokens.js` 管理，各插件同步副本（`scripts/sync_tokens.py`），去掉 QML 里的硬编码颜色。
+- 新 Logo、横幅和演示动图，README 精简，新增 `docs/PROFILE_GUIDE.md`、`docs/APP_RULES.md`、`docs/REFERENCE.md`。
+
+### 🧪 工程
+- 测试增至 69 个。
+
+---
+
 ## [v1.7.1] - 2026-10-14
 
 ### 🔒 安全
