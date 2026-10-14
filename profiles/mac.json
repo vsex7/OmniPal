@@ -103,6 +103,16 @@
       "action": "snap_layouts",
       "mod": "SUPER ALT",
       "key": "Z"
+    },
+    {
+      "action": "file_manager",
+      "mod": "SUPER ALT",
+      "key": "space"
+    },
+    {
+      "action": "emoji_picker",
+      "mod": "SUPER CTRL",
+      "key": "space"
     }
   ]
 }

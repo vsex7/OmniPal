@@ -67,7 +67,7 @@ Item {
       icon: "⊞",
       name: "Windows 11 习惯模式",
       desc: "Alt+F4 关闭窗口 · Win+方向键智能吸附 · Win+E 文件管理器 · Ctrl+Shift+Esc 任务管理器",
-      count: 14,
+      count: 18,
       color: Tokens.mode.windows,
       source: "project",
       override: false
@@ -77,7 +77,7 @@ Item {
       icon: "◆",
       name: "macOS 习惯模式",
       desc: "Super+Q 退出程序 · Super+Space 聚焦搜索 · Super+Shift+3/4 截图 · Super+H 最小化",
-      count: 19,
+      count: 21,
       color: Tokens.mode.mac,
       source: "project",
       override: false

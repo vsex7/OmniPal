@@ -1085,5 +1085,16 @@ class TestDoctorInstallCheck(unittest.TestCase):
         self.assertEqual(len(info["problems"]), 1)
 
 
+class TestSettingsCounts(unittest.TestCase):
+    def test_settings_panel_counts_match_profiles(self):
+        import re
+        qml = (PROJECT_ROOT / "plugins" / "omni.settings" / "SettingsPanel.qml").read_text(encoding="utf-8")
+        for mid in ("windows", "mac", "kde"):
+            m = re.search(r'id:\s*"%s".*?count:\s*(\d+)' % mid, qml, re.S)
+            self.assertIsNotNone(m, mid)
+            prof = json.loads((PROJECT_ROOT / "profiles" / f"{mid}.json").read_text(encoding="utf-8"))
+            self.assertEqual(int(m.group(1)), len(prof["bindings"]), mid)
+
+
 if __name__ == "__main__":
     unittest.main()

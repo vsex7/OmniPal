@@ -144,8 +144,8 @@ OmniPal/
 │   └── snap_layouts.json     # 吸附分区与布局模板编目（布局几何单一事实源）
 ├── profiles/
 │   ├── omarchy.json          # 原生模式（0 覆盖）
-│   ├── windows.json          # Windows 11 习惯模式（14 覆盖）
-│   └── mac.json              # macOS 习惯模式（19 覆盖）
+│   ├── windows.json          # Windows 11 习惯模式（18 覆盖）
+│   └── mac.json              # macOS 习惯模式（21 覆盖）
 ├── engine/
 │   └── engine.py             # 核心运行时引擎（Lua 批量求值、信号捕获与 tmpfs 广播）
 ├── bin/

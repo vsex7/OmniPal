@@ -78,6 +78,26 @@
       "action": "snap_layouts",
       "mod": "SUPER",
       "key": "Z"
+    },
+    {
+      "action": "workspace_prev",
+      "mod": "SUPER CTRL",
+      "key": "Left"
+    },
+    {
+      "action": "workspace_next",
+      "mod": "SUPER CTRL",
+      "key": "Right"
+    },
+    {
+      "action": "app_launcher",
+      "mod": "SUPER",
+      "key": "S"
+    },
+    {
+      "action": "screenshot_fullscreen",
+      "mod": "",
+      "key": "Print"
     }
   ]
 }
