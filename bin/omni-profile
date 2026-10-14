@@ -7,13 +7,14 @@ Direct controller for OmniPal runtime engine.
 import argparse
 import json
 import sys
+import os
 from pathlib import Path
 
 # Add project root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from engine.engine import OmniPalEngine, run_daemon, stats_file_path, LUA_DISPATCHERS
+from engine.engine import OmniPalEngine, run_daemon, LUA_DISPATCHERS
 
 def cmd_status(engine: OmniPalEngine, args):
     state = engine.get_state()
@@ -27,43 +28,66 @@ def cmd_status(engine: OmniPalEngine, args):
         if auto:
             ret = engine.mode_display_name(auto.get("return_to"))
             print(f"  自动切换: 因为聚焦了 {auto.get('app')}，离开后回到 {ret}")
-        print(f"  窗口策略: {state.get('window_policy', 'tiled')} (生效: {state.get('effective_window_mode', 'tiled')})")
+        wm = state.get('effective_window_mode', 'tiled')
+        pol = state.get('window_policy', 'follow-profile')
+        over = "（已覆盖）" if pol != "follow-profile" else ""
+        print(f"  窗口策略: {WINDOW_POLICY_NAMES.get(pol, pol)}{over}（生效: {WINDOW_MODE_NAMES.get(wm, wm)}）")
         print(f"  Compositor: {'已连通' if state.get('compositor_connected') else '未连通'}")
         print(f"  引擎状态: {state.get('status', 'idle')}")
         if "updated_at" in state:
             print(f"  更新时间: {state.get('updated_at')}")
 
-def cmd_window_policy(engine: OmniPalEngine, args):
-    action = getattr(args, "policy_action", None)
-    target_policy = getattr(args, "target_policy", None) or getattr(args, "policy", None)
+WINDOW_MODE_NAMES = {"tiled": "平铺", "floating": "浮动"}
+WINDOW_POLICY_NAMES = {"follow-profile": "跟随模式", "tiled": "平铺", "floating": "浮动"}
+WINDOW_POLICY_CHOICES = ["follow-profile", "tiled", "floating"]
 
-    if action == "set" or target_policy or (action and action not in ["status"] and not getattr(args, "json", False)):
-        policy = (target_policy or action).lower().strip()
+
+def cmd_window_policy(engine: OmniPalEngine, args):
+    """window-policy：查看全局窗口策略；window-policy set <follow-profile|tiled|floating>：设置。"""
+    as_json = getattr(args, "json", False)
+    if getattr(args, "policy_action", None) == "set":
+        policy = args.policy
         if not engine.set_window_policy(policy):
-            print(f"❌ 无效的窗口策略: {policy}。可用策略: tiled（平铺）, floating（浮动）, follow-profile（跟随模式）；别名: tile, float, follow", file=sys.stderr)
+            print(f"❌ 设置窗口策略失败: {policy}（Compositor 拒绝或未连通，已恢复原策略）", file=sys.stderr)
             sys.exit(1)
         state = engine.get_state()
-        if getattr(args, "json", False):
+        if as_json:
             print(json.dumps({
                 "success": True,
                 "window_policy": state.get("window_policy"),
-                "effective_window_mode": state.get("effective_window_mode")
+                "effective_window_mode": state.get("effective_window_mode"),
             }, indent=2, ensure_ascii=False))
         else:
-            print(f"✅ 窗口策略已更新为: {state.get('window_policy')} (生效模式: {state.get('effective_window_mode')})")
+            pol = state.get("window_policy")
+            wm = state.get("effective_window_mode", "tiled")
+            print(f"✅ 窗口策略已更新为: {WINDOW_POLICY_NAMES.get(pol, pol)}（生效: {WINDOW_MODE_NAMES.get(wm, wm)}）")
         return
 
     state = engine.get_state()
-    if getattr(args, "json", False):
+    current = state.get("mode", "omarchy")
+    policy = state.get("window_policy", "follow-profile")
+    overridden = policy != "follow-profile"
+    modes = engine.window_modes_by_profile()
+    if as_json:
         print(json.dumps({
-            "window_policy": state.get("window_policy", "tiled"),
-            "effective_window_mode": state.get("effective_window_mode", "tiled")
+            "window_policy": policy,
+            "overridden": overridden,
+            "current_mode": current,
+            "effective_window_mode": state.get("effective_window_mode", "tiled"),
+            "window_modes": modes,
         }, indent=2, ensure_ascii=False))
         return
 
-    print("📐 OmniPal 窗口策略:")
-    print(f"  • 当前策略: {state.get('window_policy', 'tiled')}")
-    print(f"  • 实际生效: {state.get('effective_window_mode', 'tiled')}")
+    wm = state.get("effective_window_mode", "tiled")
+    print(f"📐 OmniPal 窗口策略: {WINDOW_POLICY_NAMES.get(policy, policy)}（生效: {WINDOW_MODE_NAMES.get(wm, wm)}）")
+    if overridden:
+        print(f"  ⚠️ 已覆盖：全局{WINDOW_POLICY_NAMES[policy]}覆盖了各模式自带的平铺/浮动设置；"
+              "恢复请运行 omni-profile window-policy set follow-profile")
+    print("  各模式自带的平铺/浮动：")
+    for pid in sorted(modes):
+        mark = " ← 当前" if pid == current else ""
+        name = engine.mode_display_name(pid)
+        print(f"  • {name} ({pid}): {WINDOW_MODE_NAMES.get(modes[pid], modes[pid])}{mark}")
 
 def cmd_switch(engine: OmniPalEngine, args):
     mode = args.mode.lower().strip()
@@ -95,6 +119,12 @@ def cmd_cycle(engine: OmniPalEngine, args):
         sys.exit(1)
 
 def cmd_restore(engine: OmniPalEngine, args):
+    # Legacy units ran `omni-profile restore` as ExecStop while the daemon's SIGTERM handler
+    # restores too: two concurrent restores (and a persistence rewrite to omarchy on every stop).
+    # systemd sets SERVICE_RESULT only for ExecStop/ExecStopPost, so leave it to the daemon.
+    if os.environ.get("SERVICE_RESULT") and os.environ.get("INVOCATION_ID"):
+        print("ℹ️ systemd stop: the daemon restores keybindings on SIGTERM; skipping duplicate restore")
+        return
     try:
         prev_auto = engine.cancel_auto()
         success = engine.restore()
@@ -174,6 +204,108 @@ def cmd_benchmark(engine: OmniPalEngine, args):
     if res.get("mode_restored"):
         print("ℹ️ 基准测试非破坏性执行：已自动恢复测试前的活动模式（未计入统计）")
 
+def cmd_diff(engine: OmniPalEngine, args):
+    try:
+        d = engine.mode_diff(args.mode)
+    except ValueError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(2)
+    if args.json:
+        print(json.dumps(d, indent=2, ensure_ascii=False))
+        return
+    if d["source"] == "none":
+        print("⚠️ 读不到 Hyprland 当前的快捷键，也没有快照，无法对比。", file=sys.stderr)
+    print(f"模式 {d['mode']} 会接管 {d['count']} 个 Omarchy 原生快捷键（来源: {d['source']}）")
+    for e in d["takeovers"]:
+        was = "；".join(n["description"] or f"{n['dispatcher']} {n['arg']}".strip() for n in e["native"])
+        tag = "（固定入口）" if e["fixed"] else ""
+        print(f"  {e['combo']}: {was or '未命名'} → {e['name']}{tag}")
+
+
+def _menu_cli_path() -> str:
+    link = Path.home() / ".local" / "bin" / "omni-profile"
+    return str(link) if link.exists() else str(Path(__file__).resolve())
+
+
+def _resync_menu():
+    """模式列表变化后刷新 Omarchy 菜单里的「快捷键模式」（仅当已注册）。"""
+    from engine import onboarding
+    if not onboarding.menu_installed():
+        return
+    try:
+        onboarding.menu_install(OmniPalEngine(PROJECT_ROOT).list_profiles(), _menu_cli_path())
+    except (OSError, ValueError) as e:
+        print(f"⚠️ 菜单未更新: {e}", file=sys.stderr)
+
+
+def _drop_retired_menu_entries():
+    """已注册的 Omarchy 菜单若仍含已移除模式（kde）的子项，按当前模式列表重写一次。"""
+    from engine import onboarding
+    from engine.engine import RETIRED_MODES
+    try:
+        raw = onboarding.menu_extension_path().read_text(encoding="utf-8")
+    except OSError:
+        return
+    if onboarding.BLOCK_BEGIN in raw and any(f"switch {m}\"" in raw for m in RETIRED_MODES):
+        _resync_menu()
+        _refresh_omarchy_menu()
+        print("📦 已从 Omarchy 菜单移除已下线的模式", file=sys.stderr)
+
+
+def _refresh_omarchy_menu():
+    import shutil, subprocess
+    if shutil.which("omarchy-menu"):
+        subprocess.run(["omarchy-menu", "refresh"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=5, check=False)
+
+
+def cmd_menu(engine: OmniPalEngine, args):
+    from engine import onboarding
+    try:
+        if args.menu_action == "install":
+            r = onboarding.menu_install(engine.list_profiles(), _menu_cli_path())
+            _refresh_omarchy_menu()
+        elif args.menu_action == "uninstall":
+            r = onboarding.menu_uninstall()
+            _refresh_omarchy_menu()
+        else:
+            r = {"path": str(onboarding.menu_extension_path()), "installed": onboarding.menu_installed()}
+    except (OSError, ValueError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(1)
+    if args.json:
+        print(json.dumps(r, ensure_ascii=False))
+    elif args.menu_action == "install":
+        print(f"✅ 已在 Omarchy 菜单 Setup 下添加「快捷键模式」（{len(r['modes'])} 个模式）: {r['path']}")
+    elif args.menu_action == "uninstall":
+        print(f"✅ 已从 {r['path']} 移除 OmniPal 菜单" if r["removed_block"] else "ℹ️ 菜单里没有 OmniPal 条目")
+    else:
+        print(f"{'已注册' if r['installed'] else '未注册'}: {r['path']}")
+
+
+def cmd_onboarding(engine: OmniPalEngine, args):
+    from engine import onboarding
+    act = args.onboarding_action
+    try:
+        if act == "claim":
+            r = {"show": onboarding.onboarding_claim()}
+        elif act == "reset":
+            r = {"reset": onboarding.onboarding_reset()}
+        else:
+            r = onboarding.onboarding_status()
+    except OSError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(1)
+    if args.json:
+        print(json.dumps(r, ensure_ascii=False))
+    elif act == "status":
+        print("上手指南已显示过" if r["shown"] else "上手指南还没显示过（下次打开速查表插件时自动弹出）")
+    elif act == "reset":
+        print("已重置，下次登录会再显示一次上手指南")
+    else:
+        print("show" if r["show"] else "skip")
+
+
 def cmd_doctor(engine: OmniPalEngine, args):
     diag = engine.doctor()
     if args.json:
@@ -231,7 +363,7 @@ def cmd_doctor(engine: OmniPalEngine, args):
     if wp.get("overridden"):
         name = {"tiled": "平铺", "floating": "浮动"}.get(wp.get("policy"), wp.get("policy"))
         print(f"  • 窗口策略: ⚠️ 已覆盖：全局{name}覆盖了各模式自带的平铺/浮动设置；"
-              f"恢复跟随模式请运行 omni-profile window-policy follow-profile")
+              f"恢复跟随模式请运行 omni-profile window-policy set follow-profile")
     else:
         print("  • 窗口策略: ✅ 跟随模式")
     fixed = diag.get("fixed_bindings", [])
@@ -285,7 +417,11 @@ def cmd_export(engine: OmniPalEngine, args):
     if out.exists() and not args.force:
         print(f"❌ {out} 已存在，加 --force 覆盖", file=sys.stderr)
         sys.exit(1)
-    out.write_text(text, encoding="utf-8")
+    try:
+        out.write_text(text, encoding="utf-8")
+    except OSError as e:
+        print(f"❌ 写入 {out} 失败: {e.strerror or e}", file=sys.stderr)
+        sys.exit(1)
     print(f"✅ 已导出 '{p_id}' 到 {out}")
 
 def cmd_import(engine: OmniPalEngine, args):
@@ -350,6 +486,7 @@ def cmd_import(engine: OmniPalEngine, args):
     os.replace(tmp_path, dest)
     print(f"✅ 已导入 '{p_id}'（{len(p_data.get('bindings', []))} 个快捷键）到 {dest}")
     print(f"   切换: omni-profile switch {p_id}")
+    _resync_menu()
 
 def cmd_persist(engine: OmniPalEngine, args):
     action = getattr(args, "persist_action", None)
@@ -362,41 +499,31 @@ def cmd_persist(engine: OmniPalEngine, args):
         if status["enabled"]:
             print("💾 OmniPal 配置持久化: ✅ 已启用（关机/重启自动记住上次配置）")
             print(f"  • 持久化模式: {status.get('profile') or '跟随当前'}")
-            print(f"  • 窗口策略: {status.get('window_policy') or '跟随当前'}")
+            print(f"  • 窗口策略: {WINDOW_POLICY_NAMES.get(status.get('window_policy'), '跟随当前')}")
             print(f"  • 最近更新: {status.get('updated_at') or '未知'}")
         else:
-            print("💾 OmniPal 配置持久化: ⏸ 已禁用（重启不恢复上次配置；本地统计仍独立记录）")
+            print("💾 OmniPal 配置持久化: ⏸ 已禁用（重启不恢复上次配置）")
         print(f"  • 配置文件: {status['path']}")
         return
 
     if action == "enable":
-        policy = getattr(args, "policy", None)
-        if not engine.set_persistence(True, profile=args.profile, window_policy=policy):
-            print("❌ 启用持久化被拒绝：模式或策略无效，或配置写入失败", file=sys.stderr)
+        if not engine.set_persistence(True, profile=args.profile, window_policy=getattr(args, "policy", None)):
+            print("❌ 启用持久化被拒绝：模式或窗口策略无效，或配置写入失败", file=sys.stderr)
             sys.exit(1)
         status = engine.get_persistence_status()
-        print(f"✅ 已启用配置持久化: 模式 '{status['profile']}', 策略 '{status.get('window_policy')}' 记录于 {status['path']}")
-        print("   后续 switch / cycle / 策略调整后将自动同步持久化（可随时执行 persist disable 关闭）。")
+        print(f"✅ 已启用配置持久化: 模式 '{status['profile']}', 窗口策略 '{status.get('window_policy')}' 记录于 {status['path']}")
+        print("   后续 switch / cycle / restore / 窗口策略调整后将自动同步持久化（可随时执行 persist disable 关闭）。")
         return
 
     if action == "disable":
         if not engine.set_persistence(False):
             print("❌ 关闭持久化失败，请检查配置文件权限", file=sys.stderr)
             sys.exit(1)
-        print("✅ 已关闭配置持久化（重启后不恢复；本地统计仍由 stats.json 独立记录）")
+        print("✅ 已关闭配置持久化（重启后不恢复）")
         return
 
     print("用法: omni-profile persist <status|enable|disable>", file=sys.stderr)
     sys.exit(1)
-
-def _print_stat_rank(title: str, counts: dict, top: int = 10):
-    print(f"\n{title}")
-    if not counts:
-        print("  （暂无记录）")
-        return
-    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], str(kv[0])))[:top]
-    for i, (name, cnt) in enumerate(ranked, 1):
-        print(f"  {i}. {str(name).ljust(22)}{cnt} 次")
 
 def _resolve_current_class(engine: OmniPalEngine, args):
     """For --current: count down so the user can focus the target app, then read its window class."""
@@ -466,7 +593,10 @@ def cmd_rules(engine: OmniPalEngine, args):
         out = Path(args.output).expanduser()
         if out.exists() and not args.force:
             print(f"❌ {out} 已存在，加 --force 覆盖", file=sys.stderr); sys.exit(1)
-        out.write_text(text, encoding="utf-8")
+        try:
+            out.write_text(text, encoding="utf-8")
+        except OSError as e:
+            print(f"❌ 写入 {out} 失败: {e.strerror or e}", file=sys.stderr); sys.exit(1)
         print(f"✅ 已导出 {len(data['rules'])} 条应用规则到 {out}")
         return
     elif act == "import":
@@ -510,30 +640,12 @@ def cmd_rules(engine: OmniPalEngine, args):
         print(f"❌ {e}"); sys.exit(1)
     print("✅ 应用规则已保存，守护进程会在下次切换焦点时生效")
 
-def cmd_stats(engine: OmniPalEngine, args):
-    if args.reset:
-        if not engine.reset_stats():
-            print("❌ 重置本地使用统计失败", file=sys.stderr)
-            sys.exit(1)
-        print("✅ 已重置本地使用统计（stats.json 计数已全部清空）")
-
-    stats = engine.get_stats()
-    if args.json:
-        print(json.dumps(stats, indent=2, ensure_ascii=False))
-        return
-
-    total = sum(stats["switches"].values()) + sum(stats["snaps"].values()) + sum(stats["actions"].values())
-    print("📊 OmniPal 本地使用统计（纯本地聚合计数，零按键内容记录，零网络上传）")
-    print(f"  • 统计文件: {stats_file_path()}")
-    print(f"  • 累计事件: {total}")
-    print(f"  • 最近更新: {stats.get('last_updated') or '无'}")
-    print(f"  • 上次重置: {stats.get('last_reset') or '从未'}")
-    _print_stat_rank("🔁 模式切换频次排行:", stats["switches"])
-    _print_stat_rank("🧲 贴靠区域使用 Top 榜:", stats["snaps"])
-    _print_stat_rank("⚡ 动作触发统计排行:", stats["actions"])
-
 def main():
     engine = OmniPalEngine(PROJECT_ROOT)
+    # Retired modes (kde) fall back to windows; rules targeting them are dropped.
+    for line in engine.migrate_retired_modes():
+        print(f"📦 已迁移已移除的模式 (fallback windows): {line}", file=sys.stderr)
+    _drop_retired_menu_entries()
 
     parser = argparse.ArgumentParser(
         prog="omni-profile",
@@ -612,6 +724,24 @@ def main():
     p_doc.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_doc.set_defaults(func=cmd_doctor)
 
+    # diff
+    p_diff = subparsers.add_parser("diff", help="列出某个模式会接管哪些 Omarchy 原生快捷键")
+    p_diff.add_argument("mode", help="模式 id，如 windows / mac / omarchy")
+    p_diff.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_diff.set_defaults(func=cmd_diff)
+
+    # menu
+    p_menu = subparsers.add_parser("menu", help="在 Omarchy 菜单（Super+Alt+Space）Setup 下注册/移除「快捷键模式」")
+    p_menu.add_argument("menu_action", choices=["install", "uninstall", "status"])
+    p_menu.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_menu.set_defaults(func=cmd_menu)
+
+    # onboarding
+    p_onb = subparsers.add_parser("onboarding", help="首次上手指南：status 查看 / reset 下次登录再显示 / claim 供插件调用")
+    p_onb.add_argument("onboarding_action", choices=["status", "claim", "reset"], nargs="?", default="status")
+    p_onb.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_onb.set_defaults(func=cmd_onboarding)
+
     # daemon
     p_daemon = subparsers.add_parser("daemon", help="前台运行守护进程（带自动退出恢复）")
     p_daemon.set_defaults(func=lambda eng, args: run_daemon())
@@ -622,14 +752,14 @@ def main():
     p_p_status = persist_sub.add_parser("status", help="查看持久化状态与配置文件路径")
     p_p_status.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_p_status.set_defaults(func=cmd_persist)
-    p_p_enable = persist_sub.add_parser("enable", help="启用持久化并记录目标模式与策略（默认当前模式）")
+    p_p_enable = persist_sub.add_parser("enable", help="启用持久化并记录目标模式与窗口策略（默认当前）")
     p_p_enable.add_argument("profile", nargs="?", default=None, help="要持久化的模式（默认当前已激活模式；非法模式将被拒绝）")
-    p_p_enable.add_argument("--policy", choices=["tiled", "floating"], default=None, help="要持久化的窗口策略（默认当前策略）")
+    p_p_enable.add_argument("--policy", choices=WINDOW_POLICY_CHOICES, default=None, help="要持久化的窗口策略（默认当前策略）")
     p_p_enable.set_defaults(func=cmd_persist)
-    p_p_disable = persist_sub.add_parser("disable", help="关闭重启恢复（本地统计仍独立记录）")
+    p_p_disable = persist_sub.add_parser("disable", help="关闭重启恢复")
     p_p_disable.set_defaults(func=cmd_persist)
 
-    # stats
+    # rules
     p_rules = subparsers.add_parser("rules", help="按应用自动切换模式的规则（需运行守护进程）")
     rules_sub = p_rules.add_subparsers(dest="rules_action")
     r_list = rules_sub.add_parser("list", help="列出规则")
@@ -660,31 +790,17 @@ def main():
     r_test.add_argument("--delay", type=int, default=3, help="--current 的倒计时秒数")
     p_rules.set_defaults(func=cmd_rules)
 
-    p_stats = subparsers.add_parser("stats", help="查看本地使用统计（切换/贴靠/动作排行，完全本地零上传；--reset 清空）")
-    p_stats.add_argument("--json", action="store_true", help="以 JSON 格式输出")
-    p_stats.add_argument("--reset", action="store_true", help="清空并重置全部本地统计")
-    p_stats.set_defaults(func=cmd_stats)
-
-    # window-policy / window-mode
-    for cmd_name in ["window-policy", "window-mode"]:
-        p_wp = subparsers.add_parser(cmd_name, help="查看或设置窗口策略：tiled 平铺 / floating 浮动 / follow-profile 跟随模式")
-        p_wp.add_argument("--json", action="store_true", help="以 JSON 格式输出状态")
-        p_wp.set_defaults(func=cmd_window_policy, policy_action="status")
-        wp_sub = p_wp.add_subparsers(dest="policy_action", help="策略操作")
-
-        wp_status = wp_sub.add_parser("status", help="查看当前窗口策略状态")
-        wp_status.add_argument("--json", action="store_true", help="以 JSON 格式输出")
-        wp_status.set_defaults(func=cmd_window_policy)
-
-        wp_set = wp_sub.add_parser("set", help="设置窗口策略")
-        wp_set.add_argument("policy", help="目标策略：tiled 平铺 / floating 浮动 / follow-profile 跟随模式（或别名 tile / float / follow）")
-        wp_set.add_argument("--json", action="store_true", help="以 JSON 格式输出结果")
-        wp_set.set_defaults(func=cmd_window_policy)
-
-        for direct_p in ["tiled", "tile", "floating", "float", "follow-profile", "follow", "follow_profile"]:
-            wp_direct = wp_sub.add_parser(direct_p, help=f"快速切换至策略: {direct_p}")
-            wp_direct.add_argument("--json", action="store_true", help="以 JSON 格式输出结果")
-            wp_direct.set_defaults(func=cmd_window_policy, policy_action="set", target_policy=direct_p)
+    # window-policy：查看 / set <follow-profile|tiled|floating>（无简写别名）
+    p_wp = subparsers.add_parser("window-policy", help="查看或设置窗口策略：跟随模式 / 平铺 / 浮动")
+    p_wp.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_wp.set_defaults(func=cmd_window_policy, policy_action=None)
+    wp_sub = p_wp.add_subparsers(dest="policy_action")
+    wp_set = wp_sub.add_parser("set", help="设置全局窗口策略（非跟随模式时会覆盖各模式自带的平铺/浮动）")
+    wp_set.add_argument("policy", choices=WINDOW_POLICY_CHOICES, help="follow-profile 跟随模式 / tiled 平铺 / floating 浮动")
+    # SUPPRESS: `window-policy --json set X` must keep the parent's --json instead of
+    # the subparser resetting it to False.
+    wp_set.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="以 JSON 格式输出结果")
+    wp_set.set_defaults(func=cmd_window_policy)
 
     args = parser.parse_args()
     if not args.command:

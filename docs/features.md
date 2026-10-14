@@ -52,8 +52,8 @@
 | 空间多工作区任务视图 | 16:9 画布卡片平铺全部工作区，窗口按矢量元数据映射真实相对位置，零截图、跨桌面键盘瞬移 | v1.3.0 已交付 |
 | 吸附布局一致性校验 | `check_consistency.py` 全面校验 `snap_layouts.json`：分区几何越界、图标/标签、模板唯一性与槽位合法性 | v1.3.0 已交付 |
 | 快捷键搜索 | 在 HUD (omni.cheat-sheet) 中支持全分类实时模糊检索 | v1.0.0 已交付 |
-| 配置持久化 | 默认记录最后使用的 Profile 与 Window Policy，仅写 `~/.config/omnipal/persistence.json`；`persist disable` 关闭重启恢复，卸载会清理该文件，本地统计仍由 `stats.json` 独立管理 | v1.4.0 引入，当前默认开启 |
-| 本地使用统计 | 纯本地聚合计数（模式切换 / 吸附区域 / 动作触发），仅写 `~/.config/omnipal/stats.json`，零按键内容、零网络上传，静默容错不影响切换延迟；CLI `stats [--json|--reset]` | v1.5.0 已交付 |
+| 配置持久化 | 默认记录最后使用的 Profile 与 Window Policy，仅写 `~/.config/omnipal/persistence.json`；`persist disable` 关闭重启恢复，卸载会清理该文件 | v1.4.0 引入，当前默认开启 |
+| 本地使用统计 | 已移除（v1.9.0）：不再收集或存储任何使用统计，`stats` 子命令已删除 | v1.5.0 引入，v1.9.0 移除 |
 
 ---
 
@@ -102,7 +102,6 @@
 - 托盘指示器与右键快捷控制面板（显示元数据 SSOT）
 - 可视化吸附布局选择器（Snap Layouts Picker）与空间多工作区任务视图
 - 配置持久化（默认开启、可显式关闭、可完全卸载）
-- 本地使用统计（纯本地、零上传、零开销容错）
 
 ---
 

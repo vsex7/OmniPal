@@ -17,7 +17,7 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
   - **Windows 11 习惯模式 (`windows`)**：Alt+F4 关闭窗口、Win+方向键智能吸附、Win+E 文件管理器、Win+Tab 任务视图、Win+V 剪贴板、Win+I 设置中心等。
   - **macOS 习惯模式 (`mac`)**：Super+Q 退出程序、Super+空格启动器、Super+Shift+3/4 截图、Super+Up 调度中心、Super+Opt+D 呼出 Dock、Super+, 偏好设置等。
   - **Omarchy 原生模式 (`omarchy`)**：零拦截、零覆盖，纯粹的 Hyprland 原生平铺体验。
-  - **用户自定义与覆盖模式**：支持 `~/.config/omnipal/profiles/*.json`，可任意添加专属模式（如 KDE Plasma、Vim 风格）或按 `id` 覆盖内置预设，支持自动无缝轮转。
+  - **用户自定义与覆盖模式**：支持 `~/.config/omnipal/profiles/*.json`，可任意添加专属模式（如 Vim 风格）或按 `id` 覆盖内置预设，支持自动无缝轮转。
 - **丰富窗口吸附布局（Rich Snap Layouts）**：
   - 提供 `left`、`right`、`up`、`down`、`center`（60%x70% 居中展示）、`third-left` / `third-right`（1/3 屏幕分屏）、`two-thirds-left` / `two-thirds-right`（2/3 屏幕分屏）。
   - 基于 Compositor 级 Lua 几何运算，自动扣除 Omarchy 顶栏 `reserved` 区域，执行延迟低于 1ms。
@@ -29,10 +29,7 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
   - Quickshell 插件通过 `Quickshell.Io.FileView` 响应更新，无需后台密集轮询。
 - **可选配置持久化（Opt-in Persistence，默认关闭）**：
   - 仅在用户显式执行 `omni-profile persist enable` 后，才将目标模式写入唯一文件 `~/.config/omnipal/persistence.json`（支持 `OMNIPAL_CONFIG_DIR` 重定向）；默认仍是纯内存零文件写入模式。
-  - `switch` / `cycle` 成功后自动同步持久化模式；`persist disable` 或卸载脚本即可彻底清理，零残留。
-- **本地使用统计（Local Usage Statistics，纯本地零上传）**：
-  - 仅记录模式切换、吸附区域与动作触发的聚合计数，写入 `~/.config/omnipal/stats.json`，零按键内容、零网络通信。
-  - 统计读写全程静默容错，任何异常都不影响热切换与吸附执行（延迟指标 < 10ms 不回归）。
+  - `switch` / `cycle` / `restore` 成功后自动同步持久化模式；`persist disable` 或卸载脚本即可彻底清理，零残留。
 - **全套 Quickshell 专属插件**：
   1. `omni.mode-indicator`：Omarchy Top Bar 托盘模式指示器与右键快捷控制面板。左键循环轮转模式、右键弹出精致快捷面板（模式一键切换、快捷入口、系统诊断与控制）、中键设置，深度集成 `PopupCard` 与焦点自动收起。
   2. `omni.cheat-sheet`：快捷键 HUD 速查层，根据单一事实源动态渲染当前有效键位，支持按分类检索与按键说明。
@@ -97,15 +94,14 @@ omni-profile persist status
 
 # 显式启用持久化（缺省记录当前模式，可指定模式名；非法模式将被拒绝）
 omni-profile persist enable mac
+omni-profile persist enable mac --policy floating   # 同时记住窗口策略（follow-profile / tiled / floating）
+
+# 窗口策略：查看；设置为 跟随模式 / 平铺 / 浮动（平铺或浮动会覆盖各模式自带的设置，UI 标注「已覆盖」）
+omni-profile window-policy
+omni-profile window-policy set follow-profile
 
 # 关闭持久化并清理 persistence.json
 omni-profile persist disable
-
-# 查看本地使用统计（模式切换频次排行、吸附区域 Top 榜，完全本地零上传）
-omni-profile stats
-
-# 一键清空并重置本地统计
-omni-profile stats --reset
 
 # 瞬间还原至 Omarchy 原生快捷键
 omni-profile restore
@@ -171,7 +167,7 @@ OmniPal/
 ## 🛡️ 严格设计约束与安全保证
 
 根据 Omarchy 架构规范与 Hard Stop 铁律：
-1. **[H-1] 零配置篡改**：运行态绝不向 `~/.config/hypr/` 写入任何配置文件；持久化仅限用户显式开启（`persist enable`），且与本地使用统计一样只写 `~/.config/omnipal/` 下的 `persistence.json` / `stats.json`（纯本地，零上传）。
+1. **[H-1] 零配置篡改**：运行态绝不向 `~/.config/hypr/` 写入任何配置文件；持久化仅限用户显式开启（`persist enable`），且只写 `~/.config/omnipal/persistence.json`（纯本地，零上传）。
 2. **[H-5] 零像素截图**：`omni.overview` 与所有插件均通过 `hyprctl` 元数据渲染，避免截屏权限与 GPU 显存浪费。
 3. **[H-3] 单一事实源**：键位逻辑全部收敛于 `schema/actions.json`，QML 插件内绝无按键硬编码。
 4. **[H-7] Shell 配置文件隔离**：绝不篡改 `~/.config/omarchy/shell.json`，插件仅以标准符号链接安装在 `~/.config/omarchy/plugins/` 供 shell 动态挂载。
@@ -193,6 +189,6 @@ bash scripts/uninstall.sh
 3. 移除 `~/.local/bin/omni-profile`
 4. 移除 `~/.config/omarchy/plugins/` 下的所有软链接
 5. 清理 `/run/user/$UID/omnipal` 运行时临时目录
-6. 清理可选持久化与本地使用统计配置 `~/.config/omnipal/persistence.json` / `stats.json`（配置目录为空时一并移除）
+6. 清理可选持久化配置 `~/.config/omnipal/persistence.json`（以及旧版本遗留的 `stats.json`）（配置目录为空时一并移除）
 
 保证系统零文件残留，还原至完全初始状态。

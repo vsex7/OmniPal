@@ -11,7 +11,6 @@ Strictly adheres to AGENTS.md rules:
 5. Instant rollback on injection failure
 6. User custom profiles support via ~/.config/omnipal/profiles/
 7. Opt-in profile persistence ONLY to ~/.config/omnipal/persistence.json (default disabled, zero writes)
-8. Fully local usage statistics in ~/.config/omnipal/stats.json (aggregate counters only, no keylogging, no network I/O)
 """
 
 import atexit
@@ -296,6 +295,9 @@ def _debug(msg) -> None:
         print(f"[omnipal debug] {caller.name}:{caller.lineno}: {msg!r}", file=sys.stderr)
 
 
+RETIRED_MODES = ("kde",)  # removed built-in modes; saved references migrate to MIGRATION_FALLBACK_MODE
+MIGRATION_FALLBACK_MODE = "windows"
+
 VALID_WINDOW_POLICIES = {"tiled", "floating", "follow-profile"}
 WINDOW_POLICY_ALIASES = {
     "tile": "tiled",
@@ -480,10 +482,6 @@ def app_rules_file_path() -> Path:
     """Per-app auto-switch rules. Only written when the user adds a rule."""
     return resolve_config_dir() / "app_rules.json"
 
-def stats_file_path() -> Path:
-    """The fully local usage statistics file: aggregate counters only, never leaves the machine."""
-    return resolve_config_dir() / "stats.json"
-
 def find_socket2_path() -> Optional[Path]:
     """Dynamically resolves Hyprland socket2 path without assuming fixed instance signature."""
     xdg_runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -579,16 +577,105 @@ def _native_stash_lua(combo: str, natives: List[Dict[str, Any]], expected: int) 
         entries.append(f'{{ h = R[{int(nb["arg"])}], o = {{ {", ".join(opts)} }} }}')
     c = lua_str(combo)
     return (f'do local R = debug.getregistry(); R.omnipal_stash = R.omnipal_stash or {{}}; '
-            f'if R.omnipal_stash[{c}] == nil then R.omnipal_stash[{c}] = {{ {", ".join(entries)} }} end end')
+            f'R.omnipal_stash[{c}] = {{ {", ".join(entries)} }} end')
 
 
-def _native_unstash_lua(combo: str) -> str:
-    """Lua that rebinds a combo's stashed native handlers; raises if the stash is gone."""
+def _native_unstash_lua(combo: str, present: Optional[int] = 0) -> str:
+    """Lua that rebinds a combo's stashed native handlers; raises if the stash is gone.
+
+    Idempotent: `present` binds still live on the combo (None = unknown, assume at most one) are
+    unbound first, so the result is exactly the stashed natives and never a duplicate."""
     c = lua_str(combo)
+    n = 1 if present is None else max(0, int(present))
+    pre = "".join(f'hl.unbind({c}); ' for _ in range(n))
     return (f'do local R = debug.getregistry(); local S = R.omnipal_stash and R.omnipal_stash[{c}]; '
             f'if not S then error("omnipal: no stashed native for " .. {c}) end; '
+            f'for _, e in ipairs(S) do if e.h == nil then error("omnipal: lost native handler") end end; '
+            f'{pre}'
             f'for _, e in ipairs(S) do if e.h == nil then error("omnipal: lost native handler") end; '
             f'hl.bind({c}, e.h, e.o) end; R.omnipal_stash[{c}] = nil end')
+
+
+def bind_key_name(b: Dict[str, Any]) -> str:
+    """Key of a `hyprctl binds -j` entry as a combo key: the keysym, else `code:N`, else ""
+    (Omarchy's code:NN binds can show key "" with keycode 0: such binds can't be identified)."""
+    key = str(b.get("key", "") or "")
+    if key:
+        return key
+    try:
+        code = int(b.get("keycode", 0) or 0)
+    except (TypeError, ValueError):
+        code = 0
+    return f"code:{code}" if code > 0 else ""
+
+
+def bind_signature(b: Dict[str, Any]) -> Optional[Tuple[int, str]]:
+    """(modmask, KEY) comparable with combo_signature(); None for binds we can't identify."""
+    key = bind_key_name(b)
+    if not key:
+        return None
+    return (int(b.get("modmask", 0) or 0), key.upper())
+
+
+_MODMASK_NAMES = ((64, "SUPER"), (4, "CTRL"), (8, "ALT"), (1, "SHIFT"))
+
+
+def _sig_combo(sig: Tuple[int, str]) -> str:
+    mask, key = sig
+    mods = [n for bit, n in _MODMASK_NAMES if mask & bit]
+    return " + ".join(mods + [key])
+
+
+def find_duplicate_binds(binds: List[Dict[str, Any]]) -> Dict[Tuple[int, str], int]:
+    """(modmask, KEY) -> extra copies of an identical bind (same handler description/dispatcher/flags).
+
+    Distinct binds sharing a key (e.g. Omarchy's two ALT + TAB entries) are not duplicates."""
+    groups: Dict[Tuple[Any, ...], int] = {}
+    for b in binds:
+        if not isinstance(b, dict) or b.get("mouse") or b.get("release") or b.get("submap"):
+            continue
+        sig = bind_signature(b)
+        if sig is None:  # key "" and keycode 0: never assume two of these are the same combo
+            continue
+        k = (sig, b.get("description") or "", b.get("dispatcher") or "",
+             "" if b.get("dispatcher") == "__lua" else str(b.get("arg", "")),
+             tuple(bool(b.get(f)) for f, _ in _FLAG_OPTS))
+        groups[k] = groups.get(k, 0) + 1
+    out: Dict[Tuple[int, str], int] = {}
+    for k, n in groups.items():
+        if n > 1:
+            out[k[0]] = out.get(k[0], 0) + n - 1
+    return out
+
+
+def _dedupe_binds_lua(details: Dict[Tuple[int, str], List[Dict[str, Any]]]) -> List[str]:
+    """Lua that collapses identical duplicate `__lua` binds to one per handler (self-heal)."""
+    ops = []
+    for sig, lst in details.items():
+        if not find_duplicate_binds(lst):
+            continue
+        if any(b.get("dispatcher") != "__lua" or not str(b.get("arg", "")).isdigit() for b in lst):
+            continue
+        keep, seen = [], set()
+        for b in lst:
+            k = (b.get("description") or "", tuple(bool(b.get(f)) for f, _ in _FLAG_OPTS))
+            if k not in seen:
+                seen.add(k)
+                keep.append(b)
+        key = bind_key_name(lst[0])
+        if not key or any(bind_key_name(b) != key for b in lst):
+            continue
+        c = lua_str(_sig_combo((sig[0], key)))
+        locs = "; ".join(f'local h{i} = R[{int(b["arg"])}]' for i, b in enumerate(keep))
+        check = " and ".join(f'type(h{i}) == "function"' for i in range(len(keep)))
+        unb = " ".join(f'hl.unbind({c});' for _ in lst)
+        binds = []
+        for i, b in enumerate(keep):
+            opts = [f'description = {lua_str(b.get("description") or "")}']
+            opts += [f"{lua} = true" for js, lua in _FLAG_OPTS if b.get(js)]
+            binds.append(f'hl.bind({c}, h{i}, {{ {", ".join(opts)} }})')
+        ops.append(f'do local R = debug.getregistry(); {locs}; if {check} then {unb} {"; ".join(binds)} end end')
+    return ops
 
 
 class OmniPalEngine:
@@ -778,7 +865,7 @@ class OmniPalEngine:
         """Returns the enabled persisted window policy for daemon/startup use, or None."""
         status = self.get_persistence_status()
         policy = status.get("window_policy")
-        if status["enabled"] and policy in ("tiled", "floating"):
+        if status["enabled"] and policy in ("follow-profile", "tiled", "floating"):
             return policy
         return None
 
@@ -807,12 +894,12 @@ class OmniPalEngine:
 
         cur_persisted = self.get_persistence_status()
 
-        # Resolve target profile:
-        # passed profile -> existing persisted profile -> active mode in state -> "windows"
+        # Resolve target profile (persist enable snapshots current mode by default):
+        # passed profile -> active mode in state -> existing persisted profile -> "windows"
         target_profile = (
             profile
-            or cur_persisted.get("profile")
             or self.get_state().get("mode")
+            or cur_persisted.get("profile")
             or "windows"
         ).lower().strip()
 
@@ -821,12 +908,12 @@ class OmniPalEngine:
             print(f"Error: Unknown profile '{target_profile}' for persistence. Available profiles: {valid}", file=sys.stderr)
             return False
 
-        # Resolve target window policy:
-        # passed policy -> existing persisted policy -> current window policy -> "tiled"
+        # Resolve target window policy (same preference: explicit -> current -> persisted):
+        # passed policy -> current window policy -> existing persisted policy -> "tiled"
         raw_policy = (
             window_policy
-            or cur_persisted.get("window_policy")
             or self.get_window_policy()
+            or cur_persisted.get("window_policy")
             or "tiled"
         )
         target_policy = normalize_window_policy(raw_policy) or "tiled"
@@ -845,74 +932,73 @@ class OmniPalEngine:
 
         return atomic_write_json(path, data)
 
-    # --- Fully local usage statistics (zero-overhead, silently fault-tolerant) ---
+    def migrate_retired_modes(self) -> List[str]:
+        """Retired built-in modes (kde) fall back to windows: rewrites state.json (mode / auto),
+        persistence.json (profile) and app_rules.json (default_mode; rules targeting a retired
+        mode are dropped). Returns human-readable log lines, one per rewritten file."""
+        fb = MIGRATION_FALLBACK_MODE
+        logs: List[str] = []
 
-    def get_stats(self) -> Dict[str, Any]:
-        """Returns the canonical local usage stats structure; empty buckets when file is missing or corrupt."""
-        path = stats_file_path()
-        stats: Dict[str, Any] = {"switches": {}, "snaps": {}, "actions": {}, "last_updated": None, "last_reset": None}
-        if not path.exists():
-            return stats
-        try:
+        def _load(path: Path) -> Any:
+            if not path.exists():
+                return None
             with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            return stats
-        if isinstance(data, dict):
-            for bucket in ("switches", "snaps", "actions"):
-                raw = data.get(bucket)
-                if isinstance(raw, dict):
-                    stats[bucket] = {
-                        str(k): int(v)
-                        for k, v in raw.items()
-                        if isinstance(v, (int, float)) and not isinstance(v, bool)
-                    }
-            stats["last_updated"] = data.get("last_updated")
-            stats["last_reset"] = data.get("last_reset")
-        return stats
+                return json.load(f)
 
-    def reset_stats(self) -> bool:
-        """Clears all local usage statistics and stamps the reset time."""
-        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        ok = self._write_stats({
-            "switches": {},
-            "snaps": {},
-            "actions": {},
-            "last_updated": None,
-            "last_reset": now
-        })
-        if not ok:
-            print(f"Warning: Failed to reset stats file {stats_file_path()}", file=sys.stderr)
-        return ok
-
-    def record_switch(self, mode_id: str) -> None:
-        """Counts a successful mode switch. Any stats failure stays silent: never affects live switching."""
-        self._record_stat("switches", mode_id)
-
-    def record_snap(self, zone: str) -> None:
-        """Counts a snap invocation (left, right, layouts, center, ...). Silent on any failure."""
-        self._record_stat("snaps", zone)
-
-    def record_action(self, action_id: str) -> None:
-        """Counts an action trigger. Silent on any failure."""
-        self._record_stat("actions", action_id)
-
-    def _record_stat(self, bucket: str, key: str) -> None:
         try:
-            key = (key or "").strip().lower()
-            if not key:
-                return
-            with engine_lock(timeout=0.5):
-                stats = self.get_stats()
-                stats[bucket][key] = stats[bucket].get(key, 0) + 1
-                stats["last_updated"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-                self._write_stats(stats)
-        except Exception:
-            pass
-
-    def _write_stats(self, data: Dict[str, Any]) -> bool:
-        path = stats_file_path()
-        return atomic_write_json(path, data)
+            data = _load(STATE_FILE)
+            if isinstance(data, dict):
+                changed = False
+                auto = data.get("auto")
+                if isinstance(auto, dict):
+                    if auto.get("mode") in RETIRED_MODES:
+                        data.pop("auto", None); changed = True
+                    elif auto.get("return_to") in RETIRED_MODES:
+                        auto["return_to"] = fb; changed = True
+                old = data.get("mode")
+                old_ret = auto.get("return_to") if isinstance(auto, dict) else None
+                if old in RETIRED_MODES:
+                    prof = self.profiles.get(fb, {})
+                    data["mode"] = fb
+                    data["name"] = prof.get("name", fb)
+                    data["display"] = prof.get("display", {})
+                    data.pop("auto", None)
+                    changed = True
+                if changed and write_state_json(STATE_FILE, data):
+                    retired = old if old in RETIRED_MODES else (auto.get("mode") if isinstance(auto, dict) and auto.get("mode") in RETIRED_MODES else old_ret)
+                    logs.append(f"{STATE_FILE}: retired mode '{retired}' -> '{fb}'")
+        except Exception as _e:
+            _debug(_e)
+        try:
+            path = persistence_file_path()
+            data = _load(path)
+            if isinstance(data, dict) and data.get("profile") in RETIRED_MODES:
+                old = data["profile"]
+                data["profile"] = fb
+                if atomic_write_json(path, data):
+                    logs.append(f"{path}: persisted profile '{old}' -> '{fb}'")
+        except Exception as _e:
+            _debug(_e)
+        try:
+            path = app_rules_file_path()
+            data = _load(path)
+            if isinstance(data, dict):
+                rules = data.get("rules") if isinstance(data.get("rules"), list) else []
+                kept = [r for r in rules if not (isinstance(r, dict) and r.get("mode") in RETIRED_MODES)]
+                dropped = len(rules) - len(kept)
+                dm_old = data.get("default_mode")
+                if dropped or dm_old in RETIRED_MODES:
+                    data["rules"] = kept
+                    if dm_old in RETIRED_MODES:
+                        data["default_mode"] = fb
+                    if atomic_write_json(path, data):
+                        msg = f"{path}: dropped {dropped} rule(s) targeting retired modes"
+                        if dm_old in RETIRED_MODES:
+                            msg += f", default_mode '{dm_old}' -> '{fb}'"
+                        logs.append(msg)
+        except Exception as _e:
+            _debug(_e)
+        return logs
 
     def _eval_lua(self, lua_code: str) -> bool:
         """Executes Lua expressions in Omarchy Hyprland compositor with strict error checking."""
@@ -1011,7 +1097,9 @@ class OmniPalEngine:
                     continue
                 if b.get("submap"):
                     continue
-                sig = (int(b.get("modmask", 0) or 0), str(b.get("key", "")).upper())
+                sig = bind_signature(b)
+                if sig is None:
+                    continue
                 counts[sig] = counts.get(sig, 0) + 1
         except Exception as e:
             _debug(f"binds query failed: {e}")
@@ -1029,7 +1117,9 @@ class OmniPalEngine:
             for b in json.loads(res.stdout or "[]"):
                 if not isinstance(b, dict) or b.get("mouse") or b.get("release") or b.get("submap"):
                     continue
-                sig = (int(b.get("modmask", 0) or 0), str(b.get("key", "")).upper())
+                sig = bind_signature(b)
+                if sig is None:
+                    continue
                 out.setdefault(sig, []).append(b)
         except Exception as e:
             _debug(f"binds detail query failed: {e}")
@@ -1129,6 +1219,66 @@ class OmniPalEngine:
         return lua_ops, records
 
     # ---------- fixed entry points (same keys in every mode) ----------
+    def mode_diff(self, mode: str, live: Optional[Dict[Tuple[int, str], List[Dict[str, Any]]]] = None) -> Dict[str, Any]:
+        """Which Omarchy native binds `mode` takes over, and what they did before.
+
+        Natives come from live `hyprctl binds` (minus OmniPal's own overlay); combos the active
+        overlay already replaced fall back to the baseline snapshot. `source` says which was used."""
+        if mode not in self.profiles:
+            raise ValueError(f"unknown mode: {mode}")
+        if live is None:
+            live = self._own_filtered_natives()
+        if not self.baseline_bindings:
+            self._load_baseline_cache()
+        baseline: Dict[Tuple[int, str], List[Dict[str, Any]]] = {}
+        for b in (self.baseline_bindings or {}).values():
+            baseline.setdefault(combo_signature(b.get("combo", "")), []).append(b)
+        source = "live" if live else ("baseline" if baseline else "none")
+        fixed = self.fixed_combos()
+        bindings = ([] if mode == "omarchy" else self._without_fixed(self.profiles[mode].get("bindings", [])))
+        entries = [(b, False) for b in bindings] + [(b, True) for b in self.fixed_bindings]
+        out, seen = [], set()
+        for b, is_fixed in entries:
+            combo = format_combo(b.get("mod", ""), b.get("key", ""))
+            if not combo or combo in seen:
+                continue
+            seen.add(combo)
+            sig = combo_signature(combo)
+            natives, keys = [], set()
+            for n in (live.get(sig) or baseline.get(sig) or []):
+                k = (n.get("description") or "", n.get("dispatcher") or "",
+                     "" if n.get("dispatcher") == "__lua" else str(n.get("arg", "")))
+                if k not in keys:
+                    keys.add(k)
+                    natives.append(n)
+            if not natives:
+                continue
+            meta = self.actions_catalog.get(b.get("action"), {})
+            out.append({
+                "combo": combo,
+                "action": b.get("action"),
+                "name": meta.get("name", b.get("action")),
+                "fixed": is_fixed,
+                "native": [{"description": n.get("description") or "",
+                            "dispatcher": n.get("dispatcher") or "",
+                            "arg": "" if n.get("dispatcher") == "__lua" else str(n.get("arg", ""))}
+                           for n in natives],
+            })
+        out.sort(key=lambda e: e["combo"])
+        return {"mode": mode, "source": source, "count": len(out), "takeovers": out}
+
+    def _own_filtered_natives(self) -> Dict[Tuple[int, str], List[Dict[str, Any]]]:
+        """Live binds minus everything OmniPal injected: the active overlay and the fixed entries,
+        plus any bind whose description is one of OmniPal's action names."""
+        live = self._native_details(self._get_active_overlay())
+        own = {m.get("name") for m in self.actions_catalog.values() if m.get("name")}
+        out = {}
+        for sig, lst in live.items():
+            keep = [n for n in lst if (n.get("description") or "") not in own]
+            if keep:
+                out[sig] = keep
+        return out
+
     def fixed_combos(self) -> Dict[str, str]:
         return {format_combo(b.get("mod", ""), b["key"]): b["action"] for b in self.fixed_bindings}
 
@@ -1144,7 +1294,22 @@ class OmniPalEngine:
     def apply_fixed_bindings(self) -> bool:
         """(Re-)injects the fixed entry points, e.g. in omarchy mode or after a config reload."""
         ops = self._fixed_bind_ops()
-        return self._eval_lua("; ".join(ops)) if ops else True
+        ok = self._eval_lua("; ".join(ops)) if ops else True
+        if ok:
+            self.dedupe_binds()
+        return ok
+
+    def dedupe_binds(self) -> int:
+        """Self-heal: collapse identical duplicate native binds (one Super+Enter must open one
+        terminal). Returns how many duplicate copies were found."""
+        details = self._live_bind_details()
+        dups = sum(find_duplicate_binds([b for lst in details.values() for b in lst]).values())
+        if dups:
+            ops = _dedupe_binds_lua(details)
+            if ops:
+                print(f"⚠️ Collapsing {dups} duplicate key binds", file=sys.stderr, flush=True)
+                self._eval_lua("; ".join(ops))
+        return dups
 
     def _reinject_active_bindings(self, target_mode: str) -> bool:
         """Re-applies the active overlay bindings into Hyprland (e.g. after a config reload)."""
@@ -1527,6 +1692,19 @@ end
                 _debug(_e)
         return normalize_window_policy(getattr(self, "window_policy", None)) or "follow-profile"
 
+    def profile_window_mode(self, mode_id: Any) -> str:
+        """The mode's own window_mode (tiled/floating), ignoring the global policy."""
+        m = str(mode_id).lower().strip()
+        prof = getattr(self, "profiles", {}).get(m) or {}
+        wm = prof.get("window_mode")
+        if wm in ("floating", "tiled"):
+            return wm
+        return "floating" if m == "mac" else "tiled"
+
+    def window_modes_by_profile(self) -> Dict[str, str]:
+        """Each mode's own window_mode (tiled/floating), before any global override."""
+        return {pid: self.profile_window_mode(pid) for pid in self.profiles}
+
     def set_window_policy(self, policy: str) -> bool:
         with engine_lock():
             norm = normalize_window_policy(policy)
@@ -1755,10 +1933,8 @@ end
             if not isinstance(b, dict):
                 continue
             modmask = b.get("modmask", 0)
-            key = b.get("key", "")
-            if not key and b.get("keycode", 0) > 0:
-                key = f"code:{b.get('keycode')}"
-            if not key:
+            key = bind_key_name(b)
+            if not key or b.get("submap") or b.get("mouse") or b.get("release"):
                 continue
 
             mods = []
@@ -1802,9 +1978,16 @@ end
 
         return self.baseline_bindings
 
-    def _build_dynamic_restore_lua(self, filter_combos: Optional[Set[str]] = None) -> Optional[str]:
+    def _build_dynamic_restore_lua(self, filter_combos: Optional[Set[str]] = None,
+                                   native_counts: Optional[Dict[Tuple[int, str], int]] = None) -> Optional[str]:
         """Builds Lua statements to restore the exact captured baseline bindings.
-        If filter_combos is specified, only restores bindings for those combos."""
+        If filter_combos is specified, only restores bindings for those combos.
+
+        Idempotent: a combo whose native is still live (per native_counts, i.e. live binds minus
+        OmniPal's overlay) is skipped; with no live bind table every rebind is unbind-then-bind,
+        so re-running restore never stacks a second copy of a native bind."""
+        counts_known = bool(native_counts)
+        native_counts = native_counts or {}
         if not self.baseline_bindings:
             return None
 
@@ -1818,6 +2001,11 @@ end
             arg = str(b.get("arg", "")).strip()
             desc = _escape_lua_string(b.get("description", ""))
             esc_combo = _escape_lua_string(combo)
+            if counts_known:
+                if native_counts.get(combo_signature(combo), 0) > 0:
+                    continue
+            else:
+                lua_ops.append(f'hl.unbind("{esc_combo}")')
 
             if disp == "__lua" and arg.isdigit():
                 arg_num = int(arg)
@@ -1847,8 +2035,13 @@ end
 
         return "; ".join(lua_ops)
 
-    def restore(self, auto: Any = _KEEP) -> bool:
-        """Restores Hyprland keybindings by unbinding all currently injected overlays and re-registering baseline."""
+    def restore(self, auto: Any = _KEEP, *, sync_persistence: bool = True) -> bool:
+        """Restores Hyprland keybindings by unbinding all currently injected overlays and re-registering baseline.
+
+        When persistence is enabled, a successful user-facing restore mirrors profile "omarchy"
+        into persistence.json (same as switch/cycle). Pass sync_persistence=False for daemon
+        shutdown cleanup so exiting does not overwrite the last chosen profile.
+        """
         with engine_lock():
             auto = self._resolve_auto("omarchy", auto)
             active_overlay = self._get_active_overlay()
@@ -1866,14 +2059,18 @@ end
             # (their baseline registry refs were freed by the unbind and must not be reused).
             stashed = {b.get("combo") for b in active_overlay
                        if b.get("native_unbound") and b.get("native_count", 0) > 0}
-            filt = None
-            if stashed and self.baseline_bindings:
-                filt = set(self.baseline_bindings) - stashed
-            dynamic_lua = self._build_dynamic_restore_lua(filter_combos=filt)
-            if dynamic_lua:
-                lua_lines.append(dynamic_lua)
-            elif not stashed:
-                lua_lines.append(LUA_RESTORE_BASELINE)
+            # Only natives our overlay displaced were ever unbound: replay exactly those. Natives
+            # we never touched are still bound (code:NN binds even show key ""/keycode 0 in
+            # hyprctl, so a live check can't vouch for them) and replaying them stacks copies.
+            displaced = {b.get("combo") for b in active_overlay if b.get("native_unbound") and b.get("combo")}
+            replay = displaced - stashed
+            native_counts = self._native_counts(active_overlay)
+            if replay:
+                dynamic_lua = self._build_dynamic_restore_lua(filter_combos=replay, native_counts=native_counts)
+                if dynamic_lua:
+                    lua_lines.append(dynamic_lua)
+                elif not self.baseline_bindings:
+                    lua_lines.append(LUA_RESTORE_BASELINE)
 
             lua_lines.extend(self._fixed_bind_ops())
             success = self._eval_lua("; ".join(lua_lines))
@@ -1907,20 +2104,36 @@ end
             # State is already "omarchy", so the reload watcher won't re-apply an overlay.
             # Natives we unbound are rebound from the Lua stash; reload only if that isn't possible.
             unbound = [b for b in active_overlay if b.get("native_unbound")]
+            ok = True
             if not unbound:
-                return True
-            # A config reload above rebuilt the Lua state: natives are back and the stash is gone.
-            if config_reloaded:
-                return self.apply_fixed_bindings()
-            if all(b.get("native_restorable", False) for b in unbound):
-                restore_ops = [_native_unstash_lua(b["combo"]) for b in unbound
+                ok = True
+            elif config_reloaded:
+                # A config reload above rebuilt the Lua state: natives are back and the stash is gone.
+                ok = self.apply_fixed_bindings()
+            elif all(b.get("native_restorable", False) for b in unbound):
+                restore_ops = [_native_unstash_lua(
+                                   b["combo"],
+                                   native_counts.get(combo_signature(b["combo"]), 0) if native_counts else None)
+                               for b in unbound
                                if b.get("native_count", 0) > 0]
                 if not restore_ops or self._eval_lua_strict("; ".join(restore_ops)):
-                    return True
-                print("Native rebind from stash failed; falling back to hyprctl reload", file=sys.stderr)
-            if not self._reload_hyprland():
-                return False
-            return self.apply_fixed_bindings()
+                    ok = True
+                else:
+                    print("Native rebind from stash failed; falling back to hyprctl reload", file=sys.stderr)
+                    ok = self._reload_hyprland() and self.apply_fixed_bindings()
+            else:
+                if not self._reload_hyprland():
+                    ok = False
+                else:
+                    ok = self.apply_fixed_bindings()
+
+            # CLI / bar / settings / IPC restore paths share this method; keep persistence.json
+            # aligned with the live mode the same way switch_mode and cycle_mode do.
+            if ok:
+                self.dedupe_binds()
+            if ok and sync_persistence and self.get_persistence_status()["enabled"]:
+                self.set_persistence(True, profile="omarchy")
+            return ok
 
     def _reload_hyprland(self) -> bool:
         if compositor_mutation_disabled():
@@ -1953,13 +2166,13 @@ end
         res = subprocess.run(["hyprctl", "dispatch", "sendshortcut", arg], capture_output=True, text=True, check=False)
         return res.returncode == 0 and "error" not in (res.stdout or "").lower()
 
-    def switch_mode(self, target_mode: str, record: bool = True, _rollback: bool = False, auto: Any = _KEEP) -> bool:
-        """Atomically switches the in-memory keybindings to target_mode with rollback on error.
-
-        record=False skips the local-usage-stats increment (used by the non-destructive
-        benchmark, which measures switches without changing the user's real session)."""
+    def switch_mode(self, target_mode: str, _rollback: bool = False, auto: Any = _KEEP) -> bool:
+        """Atomically switches the in-memory keybindings to target_mode with rollback on error."""
         with engine_lock():
             target_mode = target_mode.lower().strip()
+            if target_mode in RETIRED_MODES and target_mode not in self.profiles:
+                valid_modes = ", ".join(self.profiles.keys())
+                raise ValueError(f"Mode '{target_mode}' has been removed. Valid modes: {valid_modes}")
             if target_mode not in self.profiles:
                 valid_modes = ", ".join(self.profiles.keys())
                 raise ValueError(f"Unknown mode '{target_mode}'. Available modes: {valid_modes}")
@@ -1967,8 +2180,6 @@ end
             # Switching to omarchy mode means clearing all overlays and restoring system baseline
             if target_mode == "omarchy":
                 ok = self.restore(auto=auto)
-                if ok and record:
-                    self.record_switch("omarchy")
                 if ok and self.get_persistence_status()["enabled"]:
                     self.set_persistence(True, profile="omarchy")
                 return ok
@@ -1990,6 +2201,9 @@ end
 
             # Stage 1: Unbind previous overlay
             current_overlay = self._get_active_overlay()
+            # Native binds = live binds minus those our current overlay injected.
+            native_counts = self._native_counts(current_overlay)
+            native_details = self._native_details(current_overlay)
             lua_ops = []
             if current_overlay:
                 current_combos = set()
@@ -2007,15 +2221,13 @@ end
                 }
                 released_combos = current_combos - target_combos
                 if released_combos:
-                    dynamic_lua = self._build_dynamic_restore_lua(filter_combos=released_combos)
+                    dynamic_lua = self._build_dynamic_restore_lua(filter_combos=released_combos,
+                                                                  native_counts=native_counts)
                     if dynamic_lua:
                         lua_ops.append(dynamic_lua)
 
 
             # Stage 3: Unbind-before-bind for every target combo (incl. forwarded shortcuts)
-            # Native binds = live binds minus those our current overlay injected.
-            native_counts = self._native_counts(current_overlay)
-            native_details = self._native_details(current_overlay)
             bind_ops, new_overlay_records = self._build_bind_ops(target_bindings, native_counts, native_details)
             lua_ops.extend(bind_ops)
             lua_ops.extend(self._fixed_bind_ops())
@@ -2024,10 +2236,9 @@ end
             success = self._eval_lua("; ".join(lua_ops))
 
             if success:
+                self.dedupe_binds()
                 self._write_active_overlay(new_overlay_records)
                 self._write_state(target_mode, len(new_overlay_records), auto=auto)
-                if record:
-                    self.record_switch(target_mode)
                 # Configuration persistence: mirror the successful switch when persistence is enabled.
                 if self.get_persistence_status()["enabled"]:
                     self.set_persistence(True, profile=target_mode)
@@ -2045,7 +2256,7 @@ end
                 self.restore()
                 # Re-apply the mode the user had before, instead of dropping to baseline.
                 if not _rollback and previous_mode != "omarchy" and previous_mode != target_mode and previous_mode in self.profiles:
-                    if not self.switch_mode(previous_mode, record=False, _rollback=True):
+                    if not self.switch_mode(previous_mode, _rollback=True):
                         print(f"Warning: Could not re-apply previous mode '{previous_mode}'.", file=sys.stderr)
 
             return success
@@ -2075,8 +2286,8 @@ end
             return False
 
     def cycle_mode(self, reverse: bool = False) -> str:
-        """Cycles to the next mode in sequence: omarchy -> windows -> mac -> kde -> user profiles -> omarchy."""
-        curated = ["omarchy", "windows", "mac", "kde"]
+        """Cycles to the next mode in sequence: omarchy -> windows -> mac -> user profiles -> omarchy."""
+        curated = ["omarchy", "windows", "mac"]
         user_modes = sorted([m for m in self.profiles if m not in curated])
         modes = [m for m in curated if m in self.profiles] + user_modes
         if not modes:
@@ -2338,7 +2549,6 @@ end
             if re.match(r"^0x[0-9a-fA-F]+$", stripped):
                 clean_target_address = stripped
 
-        self.record_snap(zone)
         self._ensure_run_dir()
         gap = self._get_hypr_gap()
 
@@ -2498,8 +2708,7 @@ end"""
     def benchmark(self) -> Dict[str, Any]:
         """Measures millisecond latency for schema loading, profile switching, and restore.
 
-        Non-destructive: the session's active mode is restored at the end (unmeasured)
-        and the benchmark switches never count toward local usage statistics."""
+        Non-destructive: the session's active mode is restored at the end (unmeasured)."""
         results: Dict[str, Any] = {}
         initial_state = self.get_state()
         prev_mode = initial_state.get("mode", "omarchy")
@@ -2514,12 +2723,12 @@ end"""
 
             # 2. Windows profile switch latency
             t0 = time.perf_counter()
-            self.switch_mode("windows", record=False)
+            self.switch_mode("windows")
             results["switch_windows_ms"] = round((time.perf_counter() - t0) * 1000, 3)
 
             # 3. macOS profile switch latency
             t0 = time.perf_counter()
-            self.switch_mode("mac", record=False)
+            self.switch_mode("mac")
             results["switch_mac_ms"] = round((time.perf_counter() - t0) * 1000, 3)
 
             # 4. Restore latency
@@ -2535,7 +2744,7 @@ end"""
             # Restore both pieces of session state, even when a benchmark step fails.
             results["mode_restored"] = False
             if prev_mode != "omarchy" and prev_mode in self.profiles:
-                results["mode_restored"] = self.switch_mode(prev_mode, record=False)
+                results["mode_restored"] = self.switch_mode(prev_mode)
             elif prev_mode == "omarchy":
                 self._write_state("omarchy", 0, policy=prev_policy)
 
@@ -2639,6 +2848,7 @@ end"""
             "window_policy": {"policy": self.get_window_policy(),
                               "overridden": self.get_window_policy() != "follow-profile"},
             "fixed_bindings": sorted(self.fixed_combos()),
+            "takeovers": {},
             "issues": [],
             "fixes": []
         }
@@ -2706,6 +2916,20 @@ end"""
                     + ", ".join(report["conflicts"]))
                 report["fixes"].append("omni-profile switch <当前模式>（会自动解绑冲突的原生快捷键）")
 
+        # 3.6 Duplicate binds: the same (key, modmask) bound twice with the same handler fires N times
+        report["duplicate_binds"] = {"count": 0, "combos": []}
+        try:
+            dups = find_duplicate_binds([b for lst in self._live_bind_details().values() for b in lst])
+        except Exception:
+            dups = {}
+        if dups:
+            total = sum(dups.values())
+            report["duplicate_binds"] = {"count": total,
+                                         "combos": sorted(f"{_sig_combo(s)} x{n + 1}" for s, n in dups.items())}
+            report["issues"].append(f"❌ Duplicate binds: {total} extra copies on {len(dups)} key combos ("
+                                    + ", ".join(report["duplicate_binds"]["combos"][:8]) + ")")
+            report["fixes"].append("omni-profile restore（会自动合并重复绑定）或 hyprctl reload")
+
         # 4. Installation self-check (CLI link, plugin links, systemd unit, token copies)
         install = self.check_installation()
         report["install"] = install
@@ -2750,6 +2974,18 @@ end"""
 
         if report["issues"]:
             report["healthy"] = False
+
+        try:
+            live_natives = self._own_filtered_natives()
+        except Exception:
+            live_natives = {}
+        for m in self.profiles:
+            if m == "omarchy":
+                continue
+            try:
+                report["takeovers"][m] = self.mode_diff(m, live_natives)
+            except Exception as e:
+                report["takeovers"][m] = {"mode": m, "error": str(e)}
 
         return report
 
@@ -2932,12 +3168,17 @@ def run_daemon():
 
     print(f"🚀 OmniPal Engine daemon started (PID: {os.getpid()}). Watching for signals & Hyprland events...", flush=True)
 
+    # Retired modes (kde) fall back to windows; rules targeting them are dropped.
+    for line in engine.migrate_retired_modes():
+        print(f"📦 Migrated retired mode: {line}", flush=True)
+
     # Check and restore persisted window policy and profile on startup
     persisted_status = engine.get_persistence_status()
     persisted_policy = engine.get_persisted_window_policy()
     persisted_mode = engine.get_persisted_profile()
 
-    if persisted_policy:
+    if persisted_policy and (persisted_policy != "follow-profile"
+                             or engine.get_window_policy() != "follow-profile"):
         print(f"📦 Restoring persisted window policy on startup: {persisted_policy}", flush=True)
         engine.set_window_policy(persisted_policy)
     elif persisted_status.get("enabled"):
@@ -2976,7 +3217,8 @@ def run_daemon():
             curr = engine.get_state().get("mode", "omarchy")
             cur_app = engine._get_applied_window_mode()
             if curr != "omarchy" or cur_app == "floating" or engine._get_active_overlay():
-                engine.restore()
+                # Do not sync persistence on shutdown: exit must not rewrite the last chosen profile.
+                engine.restore(sync_persistence=False)
 
     def sig_handler(signum, frame):
         print(f"\n🛑 Received signal {signum}. Restoring Hyprland keybindings...", flush=True)

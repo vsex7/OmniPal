@@ -21,7 +21,8 @@ import "Safety.js" as Safety
 //    右键：呼出/收起快捷控制面板 (原生 KeyboardPanel)
 //    中键：呼出设置面板 (omarchy-shell shell toggle omni.settings)
 // 4. 面板全部使用原生组件：PanelHero / PanelSectionHeader / PanelSeparator /
-//    Button（列表行，selected + hasCursor）/ ButtonGroup（窗口策略），无 ✕ 关闭（Esc / 点击外部收起），包含肌肉记忆模式与窗口策略（平铺/浮动/跟随模式）控制
+//    Button（列表行，selected + hasCursor），无 ✕ 关闭（Esc / 点击外部收起）。
+//    分组：模式 / 窗口策略 / 快捷入口 / 系统 / 打开设置。设置面板同样提供完整控制，两处都可用。
 // 5. 外部点击收起、bar 弹窗互斥均由 KeyboardPanel/bar 协调器负责
 // 6. 模式与策略数据 100% 来源单一事实源 (omni-profile / state.json)
 Panel {
@@ -46,11 +47,10 @@ Panel {
   property string engineStatus: "native"
   // Mirrors Panel.opened (PanelController); kept as a name for IPC/tests.
   readonly property bool panelOpen: root.opened
-  // Keyboard cursor over the panel rows: profiles, then the policy group, then actions.
+  // Keyboard cursor over the panel rows: profiles, policies, actions, system, then 打开设置.
   property bool cursorActive: false
   property int cursorIndex: 0
-  property int policyCursor: -1
-  property string windowPolicy: "tiled"
+  property string windowPolicy: "follow-profile"
   property string effectiveWindowMode: "tiled"
   property bool compositorConnected: false
   property var actionHints: ({})
@@ -63,7 +63,13 @@ Panel {
     : ""
 
   property var profiles: Model.fallbackProfiles()
-  property var policyOptions: Model.windowPolicies()
+  // 菜单顺序与术语表一致：跟随模式（默认）/ 平铺 / 浮动；图标取自 Model.windowPolicies()
+  readonly property var policyOptions: ["follow-profile", "tiled", "floating"].map(function(id) {
+    var all = Model.windowPolicies()
+    var icon = ""
+    for (var i = 0; i < all.length; i++) if (all[i].id === id) icon = all[i].icon || ""
+    return { id: id, name: id === "follow-profile" ? "跟随模式" : (id === "tiled" ? "平铺" : "浮动"), icon: icon }
+  })
 
   function loadActionHints(rawText) {
     try {
@@ -93,8 +99,8 @@ Panel {
       root.activeBindingsCount = data.active_bindings_count || 0
       root.engineStatus = data.status || (root.currentMode !== "omarchy" ? "active" : "native")
       root.currentBrief = (data.display && data.display.brief) || Model.defaultBrief(root.currentMode)
-      root.windowPolicy = Model.normalizePolicy(data.window_policy) || "tiled"
-      root.effectiveWindowMode = data.effective_window_mode || Model.computeEffectiveMode(root.windowPolicy, root.currentMode)
+      root.windowPolicy = Model.normalizePolicy(data.window_policy)
+      root.effectiveWindowMode = data.effective_window_mode || Model.computeEffectiveMode(root.windowPolicy, root.currentMode, root.profiles)
       root.compositorConnected = (data.compositor_connected !== undefined)
         ? Boolean(data.compositor_connected)
         : (Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") !== "" && Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") !== undefined)
@@ -190,65 +196,52 @@ Panel {
       if (!hintsProcess.running) hintsProcess.running = true
       root.cursorActive = false
       root.cursorIndex = 0
-      root.policyCursor = -1
     }
   }
 
   // ---- keyboard cursor (PanelKeyCatcher) ------------------------------------
   readonly property var actionRows: [
-    { icon: Icons.glyph.cheat, label: "快捷键速查表", hintKey: "cheat_sheet", run: "cheat", closes: true },
-    { icon: Icons.glyph.settings, label: "控制中心", hintKey: "omni_settings", run: "settings", closes: true },
-    { icon: Icons.glyph.snap, label: "布局吸附", hintKey: "snap_layouts", run: "snap", closes: true },
-    { icon: Icons.glyph.overview, label: "多任务概览", hintKey: "task_view", run: "overview", closes: true }
+    { icon: Icons.glyph.cheat, label: "速查表", hintKey: "cheat_sheet", run: "cheat", closes: true },
+    { icon: Icons.glyph.cheat, label: "首次使用引导", hintKey: "", run: "guide", closes: true },
+    { icon: Icons.glyph.snap, label: "贴靠布局", hintKey: "snap_layouts", run: "snap", closes: true },
+    { icon: Icons.glyph.overview, label: "概览", hintKey: "task_view", run: "overview", closes: true }
   ]
   readonly property var systemRows: [
-    { icon: Icons.glyph.cycle, label: "切换下一模式", hint: "", run: "cycle", closes: false },
-    { icon: Icons.glyph.restore, label: "还原原生快捷键", hint: "", run: "restore", closes: true },
-    { icon: Icons.glyph.doctor, label: "健康诊断", hint: "", run: "doctor", closes: true }
+    { icon: Icons.glyph.restore, label: "还原 Omarchy 原生模式", hintKey: "", run: "restore", closes: false },
+    { icon: Icons.glyph.doctor, label: "健康诊断", hintKey: "", run: "doctor", closes: true }
   ]
-  readonly property int policyRowIndex: root.profiles.length
-  readonly property int actionBase: root.profiles.length + 1
+  readonly property var settingsRow: ({ icon: Icons.glyph.settings, label: "打开设置", hintKey: "omni_settings", run: "settings", closes: true })
+  readonly property int policyBase: root.profiles.length
+  readonly property int actionBase: root.policyBase + root.policyOptions.length
   readonly property int systemBase: root.actionBase + root.actionRows.length
-  readonly property int cursorCount: root.systemBase + root.systemRows.length
+  readonly property int settingsRowIndex: root.systemBase + root.systemRows.length
+  readonly property int cursorCount: root.settingsRowIndex + 1
 
   function runAction(row) {
     if (!row) return
     if (row.run === "cheat") root.openCheatSheet()
-    else if (row.run === "settings") root.openSettings()
+    else if (row.run === "guide") root.openGuide()
     else if (row.run === "snap") root.triggerSnap()
     else if (row.run === "overview") root.openOverview()
-    else if (row.run === "cycle") root.cycleMode(false)
-    else if (row.run === "restore") root.restoreBaseline()
+    else if (row.run === "restore") root.requestRestore()
     else if (row.run === "doctor") root.runDoctor()
+    else if (row.run === "settings") root.openSettings()
     if (row.closes) root.closePanel()
   }
 
   function moveCursor(dx, dy) {
     if (!root.cursorActive) { root.cursorActive = true; return }
-    if (dy !== 0) {
-      root.cursorIndex = Math.max(0, Math.min(root.cursorCount - 1, root.cursorIndex + dy))
-      root.policyCursor = -1
-    } else if (dx !== 0 && root.cursorIndex === root.policyRowIndex) {
-      var n = root.policyOptions.length
-      var cur = root.policyCursor >= 0 ? root.policyCursor : Math.max(0, root.policySelectedIndex())
-      root.policyCursor = Math.max(0, Math.min(n - 1, cur + dx))
-    }
-  }
-
-  function policySelectedIndex() {
-    for (var i = 0; i < root.policyOptions.length; i++)
-      if (root.policyOptions[i].id === Model.normalizePolicy(root.windowPolicy)) return i
-    return -1
+    if (dy !== 0) root.cursorIndex = Math.max(0, Math.min(root.cursorCount - 1, root.cursorIndex + dy))
   }
 
   function activateCursor() {
     if (!root.cursorActive) return
     var i = root.cursorIndex
-    if (i < root.profiles.length) root.switchModeWithUndo(root.profiles[i].id)
-    else if (i === root.policyRowIndex) {
-      if (root.policyCursor >= 0) root.setPolicy(root.policyOptions[root.policyCursor].id)
-    } else if (i < root.systemBase) root.runAction(root.actionRows[i - root.actionBase])
-    else root.runAction(root.systemRows[i - root.systemBase])
+    if (i < root.policyBase) root.switchModeWithUndo(root.profiles[i].id)
+    else if (i < root.actionBase) root.setPolicy(root.policyOptions[i - root.policyBase].id)
+    else if (i < root.systemBase) root.runAction(root.actionRows[i - root.actionBase])
+    else if (i < root.settingsRowIndex) root.runAction(root.systemRows[i - root.systemBase])
+    else root.runAction(root.settingsRow)
   }
 
   function hoverRow(i, on) {
@@ -289,6 +282,38 @@ Panel {
     root.switchMode(m)
   }
 
+  // 还原 Omarchy 原生模式：第一次点击先确认（CONFIRM_MS 内再点一次执行），执行后 ~5s 可按 U 撤销
+  property bool restoreArmed: false
+  Timer {
+    id: restoreArmTimer
+    interval: Safety.CONFIRM_MS
+    onTriggered: root.restoreArmed = false
+  }
+
+  function requestRestore() {
+    if (root.currentMode === "omarchy") return
+    if (!root.restoreArmed) {
+      root.restoreArmed = true
+      restoreArmTimer.restart()
+      return
+    }
+    root.restoreArmed = false
+    restoreArmTimer.stop()
+    root.restoreBaseline()
+  }
+
+  function restoreBaseline() {
+    root.undoMode = root.currentMode
+    root.toastText = Safety.switchedText("Omarchy 原生模式")
+    toastTimer.restart()
+    root.currentMode = "omarchy"
+    root.currentName = "Omarchy 原生模式"
+    root.currentBrief = "OMA"
+    root.activeBindingsCount = 0
+    root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, "omarchy", root.profiles)
+    runCmd("omni-profile restore")
+  }
+
   Timer {
     id: toastTimer
     interval: Safety.UNDO_MS
@@ -301,7 +326,7 @@ Panel {
     var cleanMode = String(modeId).trim()
     if (!safePattern.test(cleanMode)) return
     root.currentMode = cleanMode
-    root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, cleanMode)
+    root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, cleanMode, root.profiles)
     for (var i = 0; i < root.profiles.length; i++) {
       if (root.profiles[i].id === cleanMode) {
         var p = root.profiles[i]
@@ -318,25 +343,21 @@ Panel {
     if (!policyId) return
     var norm = Model.normalizePolicy(policyId)
     root.windowPolicy = norm
-    root.effectiveWindowMode = Model.computeEffectiveMode(norm, root.currentMode)
+    root.effectiveWindowMode = Model.computeEffectiveMode(norm, root.currentMode, root.profiles)
     runCmd("omni-profile window-policy set " + norm)
   }
 
-  function restoreBaseline() {
-    root.currentMode = "omarchy"
-    root.currentName = "Omarchy 原生模式"
-    root.currentBrief = "OMA"
-    root.activeBindingsCount = 0
-    root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, "omarchy")
-    runCmd("omni-profile restore")
+  function openSettings() {
+    runCmd("omarchy-shell shell toggle omni.settings")
   }
 
   function openCheatSheet() {
     runCmd("omarchy-shell shell toggle omni.cheat-sheet")
   }
 
-  function openSettings() {
-    runCmd("omarchy-shell shell toggle omni.settings")
+  // 重新打开首次使用引导（速查表的 guide 载荷，与速查表内按 G 相同）
+  function openGuide() {
+    runCmd("omarchy-shell shell summon omni.cheat-sheet '{\"guide\":true}'")
   }
 
   function triggerSnap() {
@@ -523,7 +544,7 @@ Panel {
 
         PanelSeparator { foreground: Commons.Color.popups.text }
 
-        // 3. 窗口策略控制区 (WINDOW POLICY)
+        // 3. 窗口策略 (WINDOW POLICY)：当前项选中；非「跟随模式」时标注「已覆盖」
         Item {
           width: parent.width
           implicitHeight: Math.max(wpHeader.implicitHeight, effPolicyBadge.implicitHeight)
@@ -551,71 +572,94 @@ Panel {
           }
         }
 
-        ButtonGroup {
-          id: policyGroup
+        Column {
           width: parent.width
-          focusable: false
-          options: root.policyOptions.map(function(p) { return { value: p.id, label: p.name, icon: p.icon } })
-          value: Model.normalizePolicy(root.windowPolicy)
-          cursorIndex: (root.cursorActive && root.cursorIndex === root.policyRowIndex)
-            ? (root.policyCursor >= 0 ? root.policyCursor : Math.max(0, root.policySelectedIndex())) : -1
-          foreground: Commons.Color.popups.text
-          background: "transparent"
-          fontSize: Style.font.body
-          onChanged: function(v) { root.setPolicy(v) }
-          onHovered: function(i, on) {
-            if (!on) return
-            root.hoverRow(root.policyRowIndex, true)
-            root.policyCursor = i
-          }
-        }
+          spacing: Style.spacing.xxs
 
-        Text {
-          width: parent.width
-          textFormat: Text.PlainText
-          text: Model.resolvePolicyDesc(root.windowPolicy, root.currentMode)
-          color: Qt.darker(Commons.Color.popups.text, 1.4)
-          font.family: Style.font.family
-          font.pixelSize: Style.font.body
-          elide: Text.ElideRight
+          Repeater {
+            model: root.policyOptions
+            delegate: Button {
+              id: policyRow
+              required property var modelData
+              required property int index
+              readonly property bool isCurrent: Model.normalizePolicy(root.windowPolicy) === modelData.id
+
+              width: parent.width
+              leftAlign: true
+              iconText: modelData.icon || ""
+              text: modelData.name
+              selected: isCurrent
+              hasCursor: root.cursorActive && root.cursorIndex === root.policyBase + index
+              foreground: Commons.Color.popups.text
+              onHovered: function(on) { root.hoverRow(root.policyBase + policyRow.index, on) }
+              onClicked: root.setPolicy(policyRow.modelData.id)
+
+              RowHint {
+                visible: policyRow.isCurrent
+                text: "当前"
+                color: Commons.Color.accent
+              }
+            }
+          }
         }
 
         PanelSeparator { foreground: Commons.Color.popups.text }
 
-        // 4. 快捷功能入口 (ACTIONS)
+        // 4. 快捷入口 (ACTIONS)
         PanelSectionHeader {
           text: "快捷入口"
           foreground: Commons.Color.popups.text
         }
 
-        Repeater {
-          model: root.actionRows
-          delegate: ActionRow {
-            required property var modelData
-            required property int index
-            row: modelData
-            rowIndex: root.actionBase + index
-            hint: root.actionHints[modelData.hintKey] || ""
+        Column {
+          width: parent.width
+          spacing: Style.spacing.xxs
+
+          Repeater {
+            model: root.actionRows
+            delegate: ActionRow {
+              required property var modelData
+              required property int index
+              row: modelData
+              rowIndex: root.actionBase + index
+              hint: modelData.hintKey ? (root.actionHints[modelData.hintKey] || "") : ""
+            }
           }
         }
 
         PanelSeparator { foreground: Commons.Color.popups.text }
 
-        // 5. 系统与控制 (SYSTEM)
+        // 5. 系统 (SYSTEM)
         PanelSectionHeader {
           text: "系统"
           foreground: Commons.Color.popups.text
         }
 
-        Repeater {
-          model: root.systemRows
-          delegate: ActionRow {
-            required property var modelData
-            required property int index
-            row: modelData
-            rowIndex: root.systemBase + index
-            hint: modelData.hint || ""
+        Column {
+          width: parent.width
+          spacing: Style.spacing.xxs
+
+          Repeater {
+            model: root.systemRows
+            delegate: ActionRow {
+              required property var modelData
+              required property int index
+              row: modelData
+              rowIndex: root.systemBase + index
+              hint: modelData.run === "restore"
+                ? (root.currentMode === "omarchy" ? "当前" : (root.restoreArmed ? "再按一次还原" : ""))
+                : ""
+            }
           }
+        }
+
+        PanelSeparator { foreground: Commons.Color.popups.text }
+
+        // 6. 打开设置（完整控制；与本菜单功能互通）
+        ActionRow {
+          row: root.settingsRow
+          rowIndex: root.settingsRowIndex
+          hint: root.actionHints[root.settingsRow.hintKey] || ""
         }
       }
     }

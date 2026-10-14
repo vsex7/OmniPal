@@ -119,7 +119,7 @@ var DEFAULT_POLICIES = [
   },
   {
     "id": "follow-profile",
-    "name": "跟随",
+    "name": "跟随模式",
     "english": "Follow",
     "icon": "⇄",
     "desc": "随快捷键模式决定平铺/浮动"
@@ -135,7 +135,7 @@ function normalizePolicy(id) {
   if (key === "follow" || key === "follow_profile" || key === "follow-profile") return "follow-profile";
   if (key === "float" || key === "floating") return "floating";
   if (key === "tile" || key === "tiled") return "tiled";
-  return "tiled";
+  return "follow-profile";
 }
 
 function resolvePolicyName(id) {
@@ -167,11 +167,24 @@ function resolvePolicyDesc(id, currentMode) {
   return "新常规窗口自动平铺分屏";
 }
 
-function computeEffectiveMode(policy, currentMode) {
-  var p = normalizePolicy(policy);
-  if (p === "follow-profile") {
-    return String(currentMode || "").toLowerCase().trim() === "mac" ? "floating" : "tiled";
+// 模式自带的 window_mode（跟随模式时生效）。profiles 为 omni-profile list --json 的结果；
+// 缺省时 mac 为浮动，其余平铺。
+function effectiveWindowMode(currentMode, profiles) {
+  var key = String(currentMode || "").toLowerCase().trim();
+  var list = profiles || [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] && list[i].id === key) {
+      var wm = list[i].window_mode;
+      if (wm === "floating" || wm === "tiled") return wm;
+    }
   }
+  return key === "mac" ? "floating" : "tiled";
+}
+
+// 全局窗口策略：跟随模式时由模式自带的 window_mode 决定；平铺/浮动时全局覆盖。
+function computeEffectiveMode(policy, currentMode, profiles) {
+  var p = normalizePolicy(policy);
+  if (p === "follow-profile") return effectiveWindowMode(currentMode, profiles);
   if (p === "floating") return "floating";
   return "tiled";
 }

@@ -16,16 +16,11 @@ OmniPal 状态栏托盘模式指示器与右键快捷控制面板。
 - **右键快捷控制面板 (Context Menu / Panel)**：
   1. **Hero 概览区**：当前模式图标、模式全名、模式缩写胶囊、生效绑定计数与 Compositor 连通状态，带关闭按钮
   2. **模式快速切换 (PROFILES)**：动态列出所有可用预设与自定义模式，当前活动模式带有 `✓` 标识与左侧颜色条，点击即切
-  3. **窗口策略控制 (WINDOW POLICY)**：分段选择器快速切换平铺（Tiled）、浮动（Floating）或跟随模式（Follow-Profile），并动态呈现生效说明
-  4. **快捷功能入口 (ACTIONS)**：
-     - 📖 快捷键速查表 (Cheat Sheet)
-     - ⚙️ OmniPal 控制中心 (Settings)
-     - 🗂️ 任务视图 (Task View)
-     - 🪟 触发布局吸附 (Snap Layout)
-  5. **系统与控制 (SYSTEM)**：
-     - ↻ 轮转切换下一模式
-     - ↺ 还原原生快捷键（零残留热恢复）
-     - 🩺 运行系统健康诊断 (Doctor)
+  2. **模式快速切换**（续）：应用规则自动切换时当前模式标注「自动」，原模式标注「离开后回到」
+  3. **窗口策略**：跟随模式 / 平铺 / 浮动 三行，当前项选中并标注「当前」；非跟随模式时标题右侧标注「已覆盖 · 生效: 平铺/浮动」
+  4. **快捷入口**：速查表、首次使用引导（重新打开）、贴靠布局、概览
+  5. **系统**：还原 Omarchy 原生模式（先确认：2 秒内再点一次；执行后约 5 秒内按 U 或点击提示撤销）、健康诊断
+  6. **打开设置**：OmniPal 设置提供同样的完整控制（以及配置持久化、使用洞察等），两处都可用
 - **优雅降级**：
   - Engine 未运行时显示 `⊘`，颜色置灰
   - 右键面板支持点击外部区域通过 `HyprlandFocusGrab` 自动平滑关闭
@@ -35,7 +30,7 @@ OmniPal 状态栏托盘模式指示器与右键快捷控制面板。
 
 - **单一事实源 (SSOT)**：
   - 模式列表 100% 来源于 `omni-profile list --json`
-  - 窗口策略来源于 `state.json` tmpfs 广播，支持 CLI 与轻量 IPC 同步
+  - 窗口策略来源于 `state.json` tmpfs 广播（`window_policy` / `effective_window_mode`），支持 CLI 与轻量 IPC 同步
   - 模式外观（`display.icon`, `display.brief`, `display.color`）由 Profile 声明定义
 - **IPC 调用接口 (`omni.mode-indicator`)**：
   ```bash
@@ -46,9 +41,9 @@ OmniPal 状态栏托盘模式指示器与右键快捷控制面板。
   omarchy-shell omni.mode-indicator closePanel             # 关闭右键面板
   omarchy-shell omni.mode-indicator getMode                # 获取当前模式标识
   omarchy-shell omni.mode-indicator switchMode mac         # 切换至指定模式
-  omarchy-shell omni.mode-indicator getWindowPolicy        # 获取当前窗口策略 (tiled / floating / follow-profile)
+  omarchy-shell omni.mode-indicator getWindowPolicy        # 获取当前窗口策略 (follow-profile / tiled / floating)
   omarchy-shell omni.mode-indicator getEffectiveWindowMode # 获取实际生效窗口模式
-  omarchy-shell omni.mode-indicator setWindowPolicy floating # 切换窗口策略
+  omarchy-shell omni.mode-indicator setWindowPolicy floating # 设置窗口策略
   ```
 
 ## 铁律遵守 (Hard Stops)

@@ -7,15 +7,28 @@
 ## [v1.9.0] - 未发布（草稿）
 
 ### ✨ 新功能
+- **上手指南**：安装后第一次登录自动打开一次速查表，显示三步指南（选模式 / 记住三个固定快捷键 / 在设置里调窗口策略或按应用自动切换）。只显示一次（`~/.config/omnipal/onboarding.json`），之后在速查表按 G 或菜单里重新打开；`omni-profile onboarding reset` 可让它下次登录再出现。安装脚本结束时列出三个固定快捷键。
+- **Omarchy 菜单「快捷键模式」**：Super+Alt+Space → Setup → 快捷键模式，可切换模式、打开设置、速查表、上手指南。通过 Omarchy 官方用户扩展 `~/.config/omarchy/extensions/omarchy-menu.jsonc` 注册，只写一个带标记的区块；`omni-profile menu install|uninstall|status`，安装/卸载脚本自动调用，导入模式后自动刷新。
+- **接管的原生快捷键**：设置的模式卡片和速查表列出该模式接管的 Omarchy 原生快捷键与「原来的功能」，固定入口单独标注；读不到 Hyprland 快捷键时显示灰色提示（数据来自 `omni-profile doctor --json` 的 `takeovers`）。
 - **mac 模式快捷键转发**：Super+W、T、Shift+T、F、Z、Shift+Z、A、S、L、R 和 1–9 会转成对应的 Ctrl 组合发给当前应用，比如 Cmd+W 在浏览器里只关标签页，Cmd+1 切到第一个标签。终端里改发 Ctrl+Shift，Ctrl+W 删单词、Ctrl+C 中断不受影响。
 - **mac 模式应用切换**：Super+Tab 和 Super+Shift+Tab 在当前工作区的窗口之间切换，不切走工作区。
 - 转发完全在 Hyprland 的 Lua 里完成，不启动外部进程，连按不发黏。
 - 可在 `~/.config/omnipal/terminals.json` 自定义终端名单，末尾 `*` 表示前缀匹配。
 - 新命令 `omni-profile send <MOD> <KEY> [--class <类名>]`，手动把快捷键发给当前窗口。
 
+### 🐛 修复
+- **持久化与 restore**：`omni-profile restore`（以及状态栏/设置等同路径）在持久化启用时会把 `persistence.json` 的 profile 同步为 `omarchy`，与 `switch`/`cycle` 一致；守护进程退出时的 cleanup restore 不会改写持久化，以免重启后丢上次模式。`persist enable` 未指定模式时优先快照当前模式，不再沿用过期的已持久化 profile。
+
 ### 🔧 变更
+- 全局窗口策略保留：跟随模式（默认）/ 平铺 / 浮动，`omni-profile window-policy` 查看、`window-policy set <follow-profile|tiled|floating>` 设置；状态栏右键菜单「窗口策略」三行（标注「当前」）、设置模式页选择器、模式卡片「已覆盖：全局平铺/浮动」、doctor「⚠️ 已覆盖」提示；IPC `setWindowPolicy` / `getWindowPolicy`；随配置持久化记住（`persist enable --policy`）。不再在启动时清除已保存的 `window_policy`。
 - mac 模式开启时会暂时停用 Omarchy 原生的 Super+W、Super+数字绑定；还原或切到别的模式时会执行 `hyprctl reload` 把它们找回来。
 - mac 模式不再用 Super+数字切换工作区，改用 Super+Ctrl+←/→。
+
+### 🗑️ 移除
+- CLI：删除已弃用的 `window-mode` 子命令与 `window-policy tiled|tile|floating|float|follow-profile|follow|follow_profile` 简写；规范写法 `window-policy set <follow-profile|tiled|floating>` 保留。
+- 本地使用统计：删除 `stats` 子命令、引擎中的统计收集与 `stats.json` 读写、设置中的「统计」页与「重置统计数据」确认。
+- 状态栏右键菜单删除「切换下一模式」（左键单击即轮转）。
+- **KDE 模式**：删除内置 `profiles/kde.json`，只保留 Windows、macOS、Omarchy 原生模式三种；设置模式卡片、状态栏菜单、Omarchy 菜单「快捷键模式」、速查表、上手指南、图标与配色同步移除。迁移：守护进程启动或执行任意 `omni-profile` 命令时，若 `state.json` / `persistence.json` 中的模式为 kde，回退到 windows；`app_rules.json` 中指向 kde 的规则被删除（`default_mode` 为 kde 时改为 windows），并输出一行日志；已注册的 Omarchy 菜单若仍有 kde 子项会自动重写。`omni-profile switch kde` 报错并列出可用模式。
 
 ### 🪟 窗口策略与稳定性（合并自 backup/local-main-0914）
 - 动态窗口策略（tiled / floating / follow-profile，PiP、对话框、scratchpad 等特殊窗口单独处理），随持久化记忆。

@@ -14,7 +14,7 @@ The file is watched, so `omarchy-theme-set` re-skins OmniPal live. Missing keys 
 
 `root.theme` = `Tokens.build(Color, palette)` → semantic roles:
 `bg surface surfaceAlt sunken scrim shadow line lineStrong text textStrong textMuted accent onAccent selection selectionFill hoverFill chipFill chipBorder ok warn danger info special highlight`.
-`root.modeColors` = profile identity colours derived from the palette (windows=blue, mac=light_foreground, omarchy=green, kde=cyan).
+`root.modeColors` = profile identity colours derived from the palette (windows=blue, mac=light_foreground, omarchy=green).
 Child components (`OverviewCard`, `BlackHole`) take a `theme` property.
 
 ## Scales
