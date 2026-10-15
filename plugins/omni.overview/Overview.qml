@@ -163,7 +163,8 @@ Item {
       var addrStr = (address.indexOf("address:") === 0) ? address : ("address:" + address)
       var luaCmd = "hl.dsp.focus({ window = \"" + addrStr + "\" })"
       Quickshell.execDetached(["hyprctl", "dispatch", luaCmd])
-      Quickshell.execDetached(["hyprctl", "dispatch", "focuswindow", addrStr])
+      // floating windows don't rise on focus; raise explicitly
+      Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.window.bring_to_top()"])
     }
     root.dismiss()
   }
