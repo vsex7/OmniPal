@@ -314,6 +314,9 @@ def normalize_window_policy(policy: Optional[str]) -> Optional[str]:
         return None
     return WINDOW_POLICY_ALIASES.get(str(policy).lower().strip())
 
+# Apps that choose their own window size / aspect ratio: never resized by the floating policy.
+OWN_SIZE_CLASSES = ("scrcpy", "mpv", "imv", "vlc", "org.gnome.loupe", "feh")
+
 DIALOG_KEYWORDS = (
     "polkit",
     "pinentry",
@@ -477,6 +480,36 @@ def resolve_config_dir() -> Path:
 def persistence_file_path() -> Path:
     """The single explicit opt-in persistence file. Never touched unless the user enables it."""
     return resolve_config_dir() / "persistence.json"
+
+def policy_audit_log_path() -> Path:
+    return resolve_config_dir() / "policy-audit.log"
+
+
+def _policy_caller() -> str:
+    """Who asked: $OMNIPAL_SOURCE (set by the bar menu / settings panel), else parent process."""
+    src = os.environ.get("OMNIPAL_SOURCE", "").strip()
+    try:
+        parent = Path(f"/proc/{os.getppid()}/comm").read_text(encoding="utf-8").strip()
+    except Exception:
+        parent = "?"
+    return f"{src or 'unknown'} (pid {os.getpid()}, parent {parent})"
+
+
+def log_policy_write(what: str, old: Any, new: Any, source: str) -> None:
+    """Audit trail for every global window-policy write (journal + policy-audit.log)."""
+    line = (f"{datetime.datetime.now().astimezone().isoformat(timespec='seconds')} {what}: "
+            f"{old} -> {new} source={source} caller={_policy_caller()}")
+    print(f"🪟 window policy {line}", file=sys.stderr, flush=True)
+    try:
+        path = policy_audit_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > 256 * 1024:
+            path.replace(path.with_suffix(".log.1"))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        _debug(f"policy audit log failed: {e}")
+
 
 def app_rules_file_path() -> Path:
     """Per-app auto-switch rules. Only written when the user adds a rule."""
@@ -873,7 +906,8 @@ class OmniPalEngine:
         self,
         enabled: bool,
         profile: Optional[str] = None,
-        window_policy: Optional[str] = None
+        window_policy: Optional[str] = None,
+        source: str = "unspecified",
     ) -> bool:
         """Enables/disables profile and window policy persistence. Writes ONLY ~/.config/omnipal/persistence.json (H-1)."""
         path = persistence_file_path()
@@ -908,15 +942,20 @@ class OmniPalEngine:
             print(f"Error: Unknown profile '{target_profile}' for persistence. Available profiles: {valid}", file=sys.stderr)
             return False
 
-        # Resolve target window policy (same preference: explicit -> current -> persisted):
-        # passed policy -> current window policy -> existing persisted policy -> "tiled"
+        # Window policy: only an explicit choice changes it. Profile syncs (switch / cycle /
+        # restore / startup) pass none and must keep the persisted policy; the runtime policy is
+        # used only when persistence holds none yet (first enable).
         raw_policy = (
             window_policy
-            or self.get_window_policy()
             or cur_persisted.get("window_policy")
-            or "tiled"
+            or self.get_window_policy()
+            or "follow-profile"
         )
-        target_policy = normalize_window_policy(raw_policy) or "tiled"
+        target_policy = normalize_window_policy(raw_policy) or "follow-profile"
+        old_policy = cur_persisted.get("window_policy")
+        if window_policy or old_policy != target_policy:
+            log_policy_write("persistence.json", old_policy, target_policy,
+                             source if window_policy else f"{source} (implicit)")
 
         data = {
             "enabled": True,
@@ -1336,9 +1375,22 @@ class OmniPalEngine:
         addr: str,
         step: int = 0,
         is_dialog: bool = False,
-        monitor: Optional[Union[int, str, Dict[str, Any]]] = None
+        monitor: Optional[Union[int, str, Dict[str, Any]]] = None,
+        keep_size: bool = False,
+        orig_size: Optional[List[int]] = None,
     ):
-        """Applies mature golden dimensions (0.618 x 0.70) and terraced cascading placement to a floating window."""
+        """Applies mature golden dimensions (0.618 x 0.70) and terraced cascading placement to a floating window.
+
+        keep_size=True only floats + centers the window at its own size (new windows, windows that
+        were already floating, and apps that size themselves such as scrcpy)."""
+        if keep_size:
+            # Float only: never resize or move (the app or the user's script sized/placed it).
+            self._eval_lua(f'hl.dispatch(hl.dsp.window.float({{ action = "enable", window = "address:{_escape_lua_string(addr)}" }}))')
+            return
+        try:
+            ow, oh = int(orig_size[0]), int(orig_size[1])  # type: ignore[index]
+        except Exception:
+            ow, oh = 0, 0
         clean_addr = _escape_lua_string(addr)
 
         target_mon_lua = "nil"
@@ -1374,6 +1426,7 @@ local addr = "{clean_addr}"
 local step = {int(step)}
 local is_dialog = {1 if is_dialog else 0}
 local target_mon = {target_mon_lua}
+local orig_w, orig_h = {ow}, {oh}
 
 local m = nil
 if type(target_mon) == "table" and target_mon.width and target_mon.height then
@@ -1441,6 +1494,9 @@ if type(hl) == "table" and type(hl.dispatch) == "function" and type(hl.dsp) == "
     if gw > rw - 40 then gw = rw - 40 end
     if gh < 550 and rh >= 550 then gh = 550 end
     if gh > rh - 40 then gh = rh - 40 end
+    -- Never grow a window beyond the size it already had
+    if orig_w > 0 and orig_w < gw then gw = orig_w end
+    if orig_h > 0 and orig_h < gh then gh = orig_h end
 
     -- Base centered origin
     local cx = rx + math.floor((rw - gw) / 2)
@@ -1468,6 +1524,15 @@ if type(hl) == "table" and type(hl.dispatch) == "function" and type(hl.dsp) == "
 end
 """
         self._eval_lua(lua_code)
+
+    @staticmethod
+    def keeps_own_size(cls_name: str, floating: bool = False) -> bool:
+        """Windows the floating policy must not resize: already floating, or apps that pick their
+        own size/aspect ratio (scrcpy phone mirrors, video/image viewers)."""
+        if floating:
+            return True
+        c = str(cls_name or "").lower()
+        return any(c == k or c.startswith(k) for k in OWN_SIZE_CLASSES)
 
     def _float_existing_windows(self):
         """Floats existing non-floating client windows and arranges them in golden terraced cascade."""
@@ -1501,7 +1566,11 @@ end
                 if skip:
                     continue
 
-                self._apply_golden_cascade_geometry(addr, step=step, is_dialog=is_dlg, monitor=mon)
+                if self.keeps_own_size(cls_name, bool(c.get("floating"))):
+                    if not c.get("floating"):
+                        self._apply_golden_cascade_geometry(addr, is_dialog=is_dlg, monitor=mon, keep_size=True)
+                    continue
+                self._apply_golden_cascade_geometry(addr, step=step, is_dialog=is_dlg, monitor=mon, orig_size=size)
                 if not is_dlg:
                     step = (step + 1) % 6
         except Exception:
@@ -1705,12 +1774,15 @@ end
         """Each mode's own window_mode (tiled/floating), before any global override."""
         return {pid: self.profile_window_mode(pid) for pid in self.profiles}
 
-    def set_window_policy(self, policy: str) -> bool:
+    def set_window_policy(self, policy: str, source: str = "unspecified") -> bool:
+        """Sets the global window policy. Only explicit user choices may call this (CLI
+        `window-policy set`, bar menu, settings panel) or the startup restore of that choice."""
         with engine_lock():
             norm = normalize_window_policy(policy)
             if not norm:
                 return False
             previous_policy = self.get_window_policy()
+            log_policy_write("state", previous_policy, norm, source)
             self.window_policy = norm
             cur_state = self.get_state()
             cur_mode = cur_state.get("mode", "omarchy")
@@ -1727,7 +1799,7 @@ end
                 print(f"Warning: Compositor rejected window policy '{norm}'; previous policy restored", file=sys.stderr)
                 return False
             if self.get_persistence_status()["enabled"]:
-                self.set_persistence(True, window_policy=norm)
+                self.set_persistence(True, window_policy=norm, source=source)
             return True
 
     def get_state(self) -> Dict[str, Any]:
@@ -2751,9 +2823,9 @@ end"""
             current_policy = self.get_window_policy()
             results["policy_restored"] = True
             if prev_mode == "omarchy" and prev_policy == "floating":
-                results["policy_restored"] = self.set_window_policy(prev_policy)
+                results["policy_restored"] = self.set_window_policy(prev_policy, source="benchmark-restore")
             elif prev_policy != current_policy:
-                results["policy_restored"] = self.set_window_policy(prev_policy)
+                results["policy_restored"] = self.set_window_policy(prev_policy, source="benchmark-restore")
 
         return results
 
@@ -3124,9 +3196,9 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                                         )
                                         if skip:
                                             continue
-                                        engine._apply_golden_cascade_geometry(addr, step=cascade_counter, is_dialog=is_dlg)
-                                        if not is_dlg:
-                                            cascade_counter = (cascade_counter + 1) % 6
+                                        # New windows keep the size they asked for (scrcpy picks the
+                                        # phone's aspect ratio); the float rule already centers them.
+                                        engine._apply_golden_cascade_geometry(addr, keep_size=True)
                 except socket.timeout:
                     continue
                 except Exception:
@@ -3180,9 +3252,9 @@ def run_daemon():
     if persisted_policy and (persisted_policy != "follow-profile"
                              or engine.get_window_policy() != "follow-profile"):
         print(f"📦 Restoring persisted window policy on startup: {persisted_policy}", flush=True)
-        engine.set_window_policy(persisted_policy)
+        engine.set_window_policy(persisted_policy, source="daemon-startup (persisted choice)")
     elif persisted_status.get("enabled"):
-        engine.set_persistence(True, window_policy=engine.get_window_policy())
+        engine.set_persistence(True, source="daemon-startup")
 
     if persisted_mode and persisted_mode != "omarchy":
         restore_persisted_profile(engine)

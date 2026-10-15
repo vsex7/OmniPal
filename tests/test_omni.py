@@ -1088,19 +1088,24 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
 
         calls = []
         e.get_windows = lambda: fake_clients
-        e._apply_golden_cascade_geometry = lambda addr, step=0, is_dialog=False, monitor=None: calls.append({
+        e._apply_golden_cascade_geometry = lambda addr, step=0, is_dialog=False, monitor=None, **kw: calls.append({
             "addr": addr, "step": step, "is_dialog": is_dialog, "monitor": monitor
         })
 
         e._float_existing_windows()
 
-        # Only 0x111 and 0x555 should be processed!
-        self.assertEqual(len(calls), 2)
+        # Only the tiled 0x111 is processed; already-floating windows (incl. the dialog) keep
+        # their own size and position.
+        self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["addr"], "0x111")
         self.assertFalse(calls[0]["is_dialog"])
         self.assertEqual(calls[0]["step"], 0)
 
-        self.assertEqual(calls[1]["addr"], "0x555")
+        # A tiled dialog is still floated + centered
+        fake_clients[4]["floating"] = False
+        calls.clear()
+        e._float_existing_windows()
+        self.assertEqual([c["addr"] for c in calls], ["0x111", "0x555"])
         self.assertTrue(calls[1]["is_dialog"])
 
     def test_unfloat_existing_windows(self):
@@ -2187,7 +2192,7 @@ class TestSettingsSingleEntry(unittest.TestCase):
         self.st = (PROJECT_ROOT / "plugins/omni.settings/SettingsPanel.qml").read_text(encoding="utf-8")
 
     def test_settings_window_policy_selector(self):
-        for present in ('["omni-profile", "window-policy", "set", policy]', "policyOptions", "policyGroup",
+        for present in ('"omni-profile", "window-policy", "set", policy]', "policyOptions", "policyGroup",
                         "policyOverridden", "已覆盖", '"follow-profile"', '"tiled"', '"floating"'):
             self.assertIn(present, self.st, present)
         for gone in ('"stats"', "statsProc", "resetStats", "askResetStats", "重置统计数据", "analyticsTab", "RankRow"):
@@ -2532,7 +2537,7 @@ class TestWindowPolicyPersistsFollowProfile(unittest.TestCase):
         written = {}
         e.get_persistence_status = lambda: {"enabled": True, "profile": "windows",
                                             "window_policy": written.get("window_policy", "floating")}
-        e.set_persistence = lambda enabled, profile=None, window_policy=None: written.update(window_policy=window_policy) or True
+        e.set_persistence = lambda enabled, profile=None, window_policy=None, **kw: written.update(window_policy=window_policy) or True
         e._apply_window_policy = lambda *a, **k: True
         e._write_state = lambda *a, **k: None
         self.assertEqual(e.get_persisted_window_policy(), "floating")
@@ -2540,3 +2545,121 @@ class TestWindowPolicyPersistsFollowProfile(unittest.TestCase):
         self.assertEqual(written["window_policy"], "follow-profile")
         # startup must see follow-profile (previously ignored, so a stale state 'floating' won)
         self.assertEqual(e.get_persisted_window_policy(), "follow-profile")
+
+
+class TestGlobalPolicyOnlyChangesOnExplicitChoice(TestPersistenceManager):
+    """persistence.json window_policy must survive mode switches even if the runtime state drifts."""
+
+    def setUp(self):
+        super().setUp()
+        from engine.engine import STATE_FILE
+        self.state_file = STATE_FILE
+        e = self.engine
+        e._apply_window_policy = lambda *a, **k: True
+        e._live_bind_counts = lambda: {}
+        e._live_bind_details = lambda: {}
+
+    def tearDown(self):
+        for f in (self.state_file,):
+            try:
+                f.unlink()
+            except FileNotFoundError:
+                pass
+        super().tearDown()
+
+    def _persisted(self):
+        return json.loads(self.persist_path.read_text(encoding="utf-8"))["window_policy"]
+
+    def test_switching_modes_keeps_follow_profile(self):
+        e = self.engine
+        self.assertTrue(e.set_window_policy("follow-profile", source="test"))
+        self.assertEqual(self._persisted(), "follow-profile")
+        # runtime state drifts to floating (stale state / effective value leaking into it)
+        st = json.loads(self.state_file.read_text(encoding="utf-8"))
+        st["window_policy"] = "floating"
+        self.state_file.write_text(json.dumps(st), encoding="utf-8")
+        for m in ("windows", "mac", "windows"):
+            self.assertTrue(e.switch_mode(m))
+            self.assertEqual(self._persisted(), "follow-profile", m)
+        self.assertTrue(e.restore())
+        self.assertEqual(self._persisted(), "follow-profile")
+        self.assertTrue(e.set_persistence(True, profile="windows", source="test"))
+        self.assertEqual(self._persisted(), "follow-profile")
+
+    def test_explicit_choice_changes_it_and_is_logged(self):
+        from engine.engine import policy_audit_log_path
+        e = self.engine
+        self.assertTrue(e.set_window_policy("tiled", source="test-explicit"))
+        self.assertEqual(self._persisted(), "tiled")
+        self.assertTrue(e.set_window_policy("follow-profile", source="test-explicit"))
+        self.assertEqual(self._persisted(), "follow-profile")
+        log = policy_audit_log_path().read_text(encoding="utf-8")
+        self.assertIn("-> tiled source=test-explicit", log)
+        self.assertIn("persistence.json: tiled -> follow-profile source=test-explicit", log)
+
+    def test_mac_effective_floating_never_persisted(self):
+        e = self.engine
+        self.assertTrue(e.set_window_policy("follow-profile", source="test"))
+        self.assertTrue(e.switch_mode("mac"))  # mac's own window_mode is floating
+        self.assertEqual(e.get_state()["effective_window_mode"], "floating")
+        self.assertEqual(self._persisted(), "follow-profile")
+        self.assertEqual(e.get_window_policy(), "follow-profile")
+
+
+class TestFloatingKeepsOwnSize(unittest.TestCase):
+    def setUp(self):
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+        self.evals = []
+        self.engine._eval_lua = lambda code: self.evals.append(code) or True
+
+    def _clients(self, *wins):
+        self.engine.get_windows = lambda: [dict({"mapped": True, "workspace": {"id": 1, "name": "1"},
+                                                 "size": [600, 1300], "monitor": 0}, **w) for w in wins]
+
+    def test_scrcpy_is_floated_without_resize(self):
+        self._clients({"address": "0xa", "class": "scrcpy", "title": "Pixel"},
+                      {"address": "0xb", "class": "scrcpy", "title": "Pixel 2"})
+        self.engine._float_existing_windows()
+        self.assertEqual(len(self.evals), 2)
+        for code in self.evals:
+            self.assertNotIn("resize", code)
+            self.assertNotIn("move", code)
+            self.assertNotIn("center", code)
+
+    def test_already_floating_windows_untouched(self):
+        self._clients({"address": "0xc", "class": "foot", "title": "t", "floating": True})
+        self.engine._float_existing_windows()
+        self.assertEqual(self.evals, [])
+
+    def test_tiled_regular_window_still_gets_golden_geometry(self):
+        self._clients({"address": "0xd", "class": "foot", "title": "t", "size": [1200, 800]})
+        self.engine._float_existing_windows()
+        self.assertEqual(len(self.evals), 1)
+        self.assertIn("local is_dialog = 0", self.evals[0])
+        self.assertIn("local orig_w, orig_h = 1200, 800", self.evals[0])
+
+    def test_keep_size_never_resizes(self):
+        self.engine._apply_golden_cascade_geometry("0xe", keep_size=True)
+        self.assertNotIn("resize", self.evals[-1])
+        self.assertNotIn("move", self.evals[-1])
+
+    def test_daemon_openwindow_uses_keep_size(self):
+        src = (PROJECT_ROOT / "engine" / "engine.py").read_text(encoding="utf-8")
+        block = src[src.index('line.startswith("openwindow>>")'):][:2500]
+        self.assertIn("keep_size=True", block)
+        self.assertNotIn("step=cascade_counter", block)
+
+    def test_keeps_own_size(self):
+        from engine.engine import OmniPalEngine as E
+        self.assertTrue(E.keeps_own_size("scrcpy"))
+        self.assertTrue(E.keeps_own_size("foot", floating=True))
+        self.assertFalse(E.keeps_own_size("foot"))
+
+
+class TestBarMenuPolicyNotHoverActivated(unittest.TestCase):
+    def test_enter_on_hovered_policy_row_is_ignored(self):
+        qml = (PROJECT_ROOT / "plugins" / "omni.mode-indicator" / "BarWidget.qml").read_text(encoding="utf-8")
+        self.assertIn('if (root.cursorFromKeyboard) root.setPolicy(', qml)
+        hover = qml[qml.index("function hoverRow"):][:200]
+        self.assertIn("root.cursorFromKeyboard = false", hover)
+        self.assertIn("OMNIPAL_SOURCE=", qml)
