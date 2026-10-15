@@ -1129,6 +1129,8 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         e.get_windows = lambda: fake_clients
         captured_lua = []
         e._eval_lua_strict = lambda code: captured_lua.append(code) or True
+        # OmniPal only unfloats windows it floated itself
+        e._save_floated_addrs(["0xaaa", "0xbbb", "0xccc"])
 
         e._unfloat_existing_windows()
 
@@ -2643,17 +2645,40 @@ class TestFloatingKeepsOwnSize(unittest.TestCase):
         self.assertNotIn("resize", self.evals[-1])
         self.assertNotIn("move", self.evals[-1])
 
-    def test_daemon_openwindow_uses_keep_size(self):
+    def test_daemon_openwindow_cascades_ordinary_keeps_own_size(self):
         src = (PROJECT_ROOT / "engine" / "engine.py").read_text(encoding="utf-8")
-        block = src[src.index('line.startswith("openwindow>>")'):][:2500]
+        block = src[src.index('line.startswith("openwindow>>")'):][:3500]
+        self.assertIn("step=cascade_counter", block)
+        self.assertIn("keeps_own_size(cls_name)", block)
         self.assertIn("keep_size=True", block)
-        self.assertNotIn("step=cascade_counter", block)
+        self.assertIn("_remember_floated(addr)", block)
+        # New windows: no orig_size (golden size uncapped)
+        self.assertNotIn("orig_size", block)
+
+    def test_new_window_cascade_has_no_size_cap(self):
+        self.engine._apply_golden_cascade_geometry("0xf", step=2)
+        code = self.evals[-1]
+        self.assertIn("local is_dialog = 0", code)
+        self.assertIn("local orig_w, orig_h = 0, 0", code)
+        self.assertIn("local step = 2", code)
+        self.assertIn("window.resize", code)
 
     def test_keeps_own_size(self):
         from engine.engine import OmniPalEngine as E
         self.assertTrue(E.keeps_own_size("scrcpy"))
         self.assertTrue(E.keeps_own_size("foot", floating=True))
         self.assertFalse(E.keeps_own_size("foot"))
+
+    def test_chatgpt_is_not_a_dialog(self):
+        """Regression: 'calc' must not match inside 'chatgpt'."""
+        from engine.engine import is_dialog_window, is_special_window
+        self.assertFalse(is_dialog_window("chatgpt", "ChatGPT"))
+        skip, is_dlg = is_special_window(cls_name="chatgpt", title="ChatGPT", size=[1300, 900])
+        self.assertFalse(skip)
+        self.assertFalse(is_dlg)
+        self.assertTrue(is_dialog_window("gnome-calculator", "Calculator"))
+        self.assertTrue(is_dialog_window("calc", "Calc"))
+        self.assertTrue(is_dialog_window("polkit-gnome", "Authentication"))
 
 
 class TestBarMenuPolicyNotHoverActivated(unittest.TestCase):
@@ -2663,3 +2688,57 @@ class TestBarMenuPolicyNotHoverActivated(unittest.TestCase):
         hover = qml[qml.index("function hoverRow"):][:200]
         self.assertIn("root.cursorFromKeyboard = false", hover)
         self.assertIn("OMNIPAL_SOURCE=", qml)
+
+
+class TestOmniPalFloatedTracking(unittest.TestCase):
+    """On return to tiled: only windows OmniPal floated are tiled; pre-existing floaters stay."""
+
+    def setUp(self):
+        self.engine = e = OmniPalEngine(PROJECT_ROOT)
+        e._clear_floated()
+        self.captured = []
+        e._eval_lua_strict = lambda code: self.captured.append(code) or True
+        e._eval_lua = lambda code: True
+
+    def tearDown(self):
+        self.engine._clear_floated()
+
+    def test_preexisting_floater_stays_chatgpt_gets_tiled(self):
+        e = self.engine
+        # Simulate: chrome was already floating; foot was tiled then OmniPal cascaded it;
+        # chatgpt opened under floating and was cascaded (tracked).
+        e._save_floated_addrs(["0xfoot", "0xchatgpt"])
+        e.get_windows = lambda: [
+            {"address": "0xchrome", "mapped": True, "class": "google-chrome", "title": "Tab",
+             "workspace": {"id": 1, "name": "1"}, "floating": True, "size": [1300, 900]},
+            {"address": "0xchatgpt", "mapped": True, "class": "chatgpt", "title": "ChatGPT",
+             "workspace": {"id": 1, "name": "1"}, "floating": True, "size": [1300, 900]},
+            {"address": "0xfoot", "mapped": True, "class": "foot", "title": "term",
+             "workspace": {"id": 1, "name": "1"}, "floating": True, "size": [1567, 972]},
+            {"address": "0xscrcpy", "mapped": True, "class": "scrcpy", "title": "Pixel",
+             "workspace": {"id": 1, "name": "1"}, "floating": True, "size": [420, 933]},
+        ]
+        # Even if scrcpy were wrongly tracked, OWN_SIZE keeps it floating
+        e._save_floated_addrs(["0xfoot", "0xchatgpt", "0xscrcpy"])
+        e._unfloat_existing_windows()
+        self.assertEqual(len(self.captured), 1)
+        code = self.captured[0]
+        self.assertIn("0xfoot", code)
+        self.assertIn("0xchatgpt", code)
+        self.assertNotIn("0xchrome", code)
+        self.assertNotIn("0xscrcpy", code)
+        self.assertEqual(e._load_floated_addrs(), set())
+
+    def test_float_existing_tracks_only_tiled_cascaded(self):
+        e = self.engine
+        e.get_windows = lambda: [
+            {"address": "0xtiled", "mapped": True, "class": "foot", "title": "t",
+             "workspace": {"id": 1, "name": "1"}, "floating": False, "size": [1000, 700], "monitor": 0},
+            {"address": "0xpre", "mapped": True, "class": "google-chrome", "title": "Tab",
+             "workspace": {"id": 1, "name": "1"}, "floating": True, "size": [1300, 900], "monitor": 0},
+            {"address": "0xscr", "mapped": True, "class": "scrcpy", "title": "P",
+             "workspace": {"id": 1, "name": "1"}, "floating": False, "size": [420, 933], "monitor": 0},
+        ]
+        e._float_existing_windows()
+        owned = e._load_floated_addrs()
+        self.assertEqual(owned, {"0xtiled"})

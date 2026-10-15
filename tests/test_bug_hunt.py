@@ -87,12 +87,9 @@ if __name__ == "__main__":
 
 class TestUnfloatKeepsOwnSizeApps(unittest.TestCase):
     def test_scrcpy_not_unfloated(self):
-        import importlib, sys as _s, os as _o
-        _s.path.insert(0, _o.path.join(_o.path.dirname(__file__), "..", "engine"))
-        eng = importlib.import_module("engine")
-        cls = [v for v in vars(eng).values() if isinstance(v, type) and hasattr(v, "keeps_own_size")][0]
-        self.assertTrue(cls.keeps_own_size("scrcpy"))
-        src = open(_o.path.join(_o.path.dirname(__file__), "..", "engine", "engine.py")).read()
+        from engine.engine import OmniPalEngine
+        self.assertTrue(OmniPalEngine.keeps_own_size("scrcpy"))
+        src = (PROJECT_ROOT / "engine" / "engine.py").read_text(encoding="utf-8")
         body = src[src.index("def _unfloat_existing_windows"):]
         body = body[:body.index("to_unfloat.append")]
         self.assertIn("keeps_own_size", body)

@@ -49,7 +49,7 @@ def _resolve_run_dir() -> Path:
             d = Path(xdg) / "omnipal"
         else:
             d = Path(f"/run/user/{os.getuid()}/omnipal")
-    global RUN_DIR, STATE_FILE, OVERLAY_FILE, SNAP_FILE, SNAP_LAYOUTS_FILE, PID_FILE, LOCK_FILE, APPLIED_WINDOW_MODE_FILE, BASELINE_FILE, APP_RULE_STATE_FILE
+    global RUN_DIR, STATE_FILE, OVERLAY_FILE, SNAP_FILE, SNAP_LAYOUTS_FILE, PID_FILE, LOCK_FILE, APPLIED_WINDOW_MODE_FILE, BASELINE_FILE, APP_RULE_STATE_FILE, FLOATED_BY_OMNIPAL_FILE
     RUN_DIR = d
     STATE_FILE = d / "state.json"
     OVERLAY_FILE = d / "active_overlay.json"
@@ -60,6 +60,7 @@ def _resolve_run_dir() -> Path:
     APPLIED_WINDOW_MODE_FILE = d / "applied_window_mode"
     BASELINE_FILE = d / "baseline_bindings.json"
     APP_RULE_STATE_FILE = d / "app_rule.json"
+    FLOATED_BY_OMNIPAL_FILE = d / "floated_by_omnipal.json"
     return d
 
 RUN_DIR = _resolve_run_dir()
@@ -94,6 +95,7 @@ def lua_str(value: Any) -> str:
 LOCK_FILE = RUN_DIR / "engine.lock"
 APPLIED_WINDOW_MODE_FILE = RUN_DIR / "applied_window_mode"
 BASELINE_FILE = RUN_DIR / "baseline_bindings.json"
+FLOATED_BY_OMNIPAL_FILE = RUN_DIR / "floated_by_omnipal.json"
 
 _lock_local = threading.local()
 
@@ -363,10 +365,28 @@ def is_scratchpad_workspace(ws_name: str = "", ws_id: Optional[Union[int, str]] 
     return False
 
 def is_dialog_window(cls_name: str = "", title: str = "") -> bool:
-    """Checks if a window is a dialog, prompt, or popup based on class or title."""
+    """Checks if a window is a dialog, prompt, or popup based on class or title.
+
+    Short keywords (<=4 chars) match whole tokens only: "calc" matches class/title
+    token "calc" but not the substring inside "chatgpt"."""
     c = str(cls_name or "").lower()
     t = str(title or "").lower()
-    return any(k in c or k in t for k in DIALOG_KEYWORDS)
+    parts_c = re.split(r"[-_.\s]+", c)
+    parts_t = re.split(r"[-_.\s]+", t)
+    for k in DIALOG_KEYWORDS:
+        if k == "calc":
+            # calculator apps: token "calc", or "calculator"/"galculator" substring
+            if "calc" in parts_c or "calc" in parts_t:
+                return True
+            if "calculator" in c or "calculator" in t or "galculator" in c or "galculator" in t:
+                return True
+            continue
+        if len(k) <= 4:
+            if k in parts_c or k in parts_t:
+                return True
+        elif k in c or k in t:
+            return True
+    return False
 
 def is_micro_window(size: Optional[Union[List[int], Tuple[int, ...]]]) -> bool:
     """Checks if window size is unusually small (micro-window / tooltip / transient element)."""
@@ -1381,8 +1401,9 @@ class OmniPalEngine:
     ):
         """Applies mature golden dimensions (0.618 x 0.70) and terraced cascading placement to a floating window.
 
-        keep_size=True only floats + centers the window at its own size (new windows, windows that
-        were already floating, and apps that size themselves such as scrcpy)."""
+        keep_size=True only floats the window (no resize/move/center): used for OWN_SIZE_CLASSES
+        (scrcpy etc.). New ordinary windows get the full golden cascade (no orig_size). Existing
+        tiled windows being floated pass orig_size so they never grow beyond their previous size."""
         if keep_size:
             # Float only: never resize or move (the app or the user's script sized/placed it).
             self._eval_lua(f'hl.dispatch(hl.dsp.window.float({{ action = "enable", window = "address:{_escape_lua_string(addr)}" }}))')
@@ -1494,7 +1515,7 @@ if type(hl) == "table" and type(hl.dispatch) == "function" and type(hl.dsp) == "
     if gw > rw - 40 then gw = rw - 40 end
     if gh < 550 and rh >= 550 then gh = 550 end
     if gh > rh - 40 then gh = rh - 40 end
-    -- Never grow a window beyond the size it already had
+    -- Cap only for existing tiled windows being floated (orig_* set); new windows get golden size
     if orig_w > 0 and orig_w < gw then gw = orig_w end
     if orig_h > 0 and orig_h < gh then gh = orig_h end
 
@@ -1524,6 +1545,34 @@ if type(hl) == "table" and type(hl.dispatch) == "function" and type(hl.dsp) == "
 end
 """
         self._eval_lua(lua_code)
+
+    def _load_floated_addrs(self) -> set:
+        try:
+            if FLOATED_BY_OMNIPAL_FILE.exists():
+                data = json.loads(FLOATED_BY_OMNIPAL_FILE.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    return {str(a) for a in data if a}
+        except Exception as e:
+            _debug(e)
+        return set()
+
+    def _save_floated_addrs(self, addrs) -> None:
+        self._ensure_run_dir()
+        try:
+            atomic_write_json(FLOATED_BY_OMNIPAL_FILE, sorted(str(a) for a in addrs if a))
+        except Exception as e:
+            _debug(e)
+
+    def _remember_floated(self, addr: str) -> None:
+        if not addr:
+            return
+        addrs = self._load_floated_addrs()
+        if addr not in addrs:
+            addrs.add(addr)
+            self._save_floated_addrs(addrs)
+
+    def _clear_floated(self) -> None:
+        self._save_floated_addrs([])
 
     @staticmethod
     def keeps_own_size(cls_name: str, floating: bool = False) -> bool:
@@ -1567,11 +1616,14 @@ end
                     continue
 
                 if self.keeps_own_size(cls_name, bool(c.get("floating"))):
+                    # Already floating: leave alone (was floating before OmniPal). OWN_SIZE tiled:
+                    # float without resize; don't track so returning to tiled leaves them alone.
                     if not c.get("floating"):
                         self._apply_golden_cascade_geometry(addr, is_dialog=is_dlg, monitor=mon, keep_size=True)
                     continue
                 self._apply_golden_cascade_geometry(addr, step=step, is_dialog=is_dlg, monitor=mon, orig_size=size)
                 if not is_dlg:
+                    self._remember_floated(addr)
                     step = (step + 1) % 6
         except Exception:
             pass
@@ -1605,6 +1657,9 @@ end
                 except Exception:
                     pass
 
+            # Only windows OmniPal floated (tracked when we cascaded them). Windows that were
+            # already floating before the policy, OWN_SIZE apps, dialogs and specials stay floating.
+            owned = self._load_floated_addrs()
             to_unfloat = []
             for c in clients:
                 if not c.get("mapped", True) or c.get("hidden", False):
@@ -1618,8 +1673,11 @@ end
                 ws_id = ws.get("id")
                 ws_name = str(ws.get("name", ""))
 
-                # All workspaces: the float rule also caught windows opened on inactive ones.
                 if ws_name.startswith("special") or (isinstance(ws_id, int) and ws_id < 0):
+                    continue
+
+                addr = c.get("address")
+                if not addr or addr not in owned:
                     continue
 
                 cls_name = str(c.get("class", ""))
@@ -1633,21 +1691,17 @@ end
                     ws_id=ws_id,
                     size=size
                 )
-                # Do not unfloat special windows (PiP, scratchpad, micro-windows) or dialogs
-                # Apps that size themselves (scrcpy phone mirrors etc.) usually float via the
-                # user's own window rule; tiling them back adds black bars.
                 if self.keeps_own_size(cls_name):
-                    print(f"unfloat skip {c.get('address')} {cls_name!r} own-size app", file=sys.stderr)
+                    print(f"unfloat skip {addr} {cls_name!r} own-size app", file=sys.stderr)
                     continue
                 if skip or is_dlg:
-                    print(f"unfloat skip {c.get('address')} {cls_name!r} special={skip} dialog={is_dlg}", file=sys.stderr)
+                    print(f"unfloat skip {addr} {cls_name!r} special={skip} dialog={is_dlg}", file=sys.stderr)
                     continue
 
-                addr = c.get("address")
-                if addr:
-                    to_unfloat.append(addr)
+                to_unfloat.append(addr)
 
             if not to_unfloat:
+                self._clear_floated()
                 return
 
             lua_ops = []
@@ -1670,6 +1724,9 @@ end
                         )
                     except Exception:
                         pass
+            # Drop the ones we tiled; leave any remaining owned addresses (gone windows)
+            # cleared so a later floating session starts clean.
+            self._clear_floated()
         except Exception as e:
             print(f"unfloat failed: {e}", file=sys.stderr)
 
@@ -1705,6 +1762,8 @@ end
             )
             ok = self._eval_lua(lua_code)
             if ok:
+                if cur_applied != "floating":
+                    self._clear_floated()
                 self._set_applied_window_mode("floating")
                 self._float_existing_windows()
             return ok
@@ -3201,9 +3260,17 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                                         )
                                         if skip:
                                             continue
-                                        # New windows keep the size they asked for (scrcpy picks the
-                                        # phone's aspect ratio); the float rule already centers them.
-                                        engine._apply_golden_cascade_geometry(addr, keep_size=True)
+                                        if OmniPalEngine.keeps_own_size(cls_name):
+                                            # scrcpy etc.: float only; user's own size/move rules win
+                                            engine._apply_golden_cascade_geometry(addr, keep_size=True)
+                                        elif is_dlg:
+                                            engine._apply_golden_cascade_geometry(addr, is_dialog=True)
+                                        else:
+                                            # Golden terraced cascade (like f0adc4f); no size cap for new windows
+                                            engine._apply_golden_cascade_geometry(
+                                                addr, step=cascade_counter, is_dialog=False)
+                                            engine._remember_floated(addr)
+                                            cascade_counter = (cascade_counter + 1) % 6
                 except socket.timeout:
                     continue
                 except Exception:
