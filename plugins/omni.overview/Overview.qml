@@ -159,14 +159,16 @@ Item {
   }
 
   function focusWindow(address) {
-    if (address) {
-      var addrStr = (address.indexOf("address:") === 0) ? address : ("address:" + address)
-      var luaCmd = "hl.dsp.focus({ window = \"" + addrStr + "\" })"
-      Quickshell.execDetached(["hyprctl", "dispatch", luaCmd])
-      // floating windows don't rise on focus; raise explicitly
-      Quickshell.execDetached(["hyprctl", "dispatch", "hl.dsp.window.bring_to_top()"])
-    }
+    // Dismiss first: while the overlay holds exclusive keyboard focus Hyprland
+    // ignores/undoes focus changes. Then focus + raise once the layer is gone
+    // (floating windows don't rise on focus by themselves).
     root.dismiss()
+    if (!address) return
+    var addrStr = (address.indexOf("address:") === 0) ? address : ("address:" + address)
+    var focusCmd = "hl.dsp.focus({ window = \"" + addrStr + "\" })"
+    Quickshell.execDetached(["sh", "-c",
+      "sleep 0.15; hyprctl dispatch \"$1\"; hyprctl dispatch 'hl.dsp.window.bring_to_top()'",
+      "omni-focus", focusCmd])
   }
 
   // ---- close confirmation: no undo, so arm first, close on second press within Safety.CONFIRM_MS
