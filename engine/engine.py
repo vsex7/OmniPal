@@ -1634,6 +1634,11 @@ end
                     size=size
                 )
                 # Do not unfloat special windows (PiP, scratchpad, micro-windows) or dialogs
+                # Apps that size themselves (scrcpy phone mirrors etc.) usually float via the
+                # user's own window rule; tiling them back adds black bars.
+                if self.keeps_own_size(cls_name):
+                    print(f"unfloat skip {c.get('address')} {cls_name!r} own-size app", file=sys.stderr)
+                    continue
                 if skip or is_dlg:
                     print(f"unfloat skip {c.get('address')} {cls_name!r} special={skip} dialog={is_dlg}", file=sys.stderr)
                     continue
