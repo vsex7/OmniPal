@@ -83,3 +83,13 @@ class CliErrorPathTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUnfloatKeepsOwnSizeApps(unittest.TestCase):
+    def test_scrcpy_not_unfloated(self):
+        from engine.engine import OmniPalEngine
+        self.assertTrue(OmniPalEngine.keeps_own_size("scrcpy"))
+        src = (PROJECT_ROOT / "engine" / "engine.py").read_text(encoding="utf-8")
+        body = src[src.index("def _unfloat_existing_windows"):]
+        body = body[:body.index("to_unfloat.append")]
+        self.assertIn("keeps_own_size", body)

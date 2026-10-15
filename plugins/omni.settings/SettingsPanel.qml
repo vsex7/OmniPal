@@ -207,7 +207,7 @@ Item {
   function setWindowPolicy(policy) {
     if (!policy || policy === root.windowPolicy) return
     root.windowPolicy = policy
-    policyProc.command = ["omni-profile", "window-policy", "set", policy]
+    policyProc.command = ["env", "OMNIPAL_SOURCE=settings-panel", "omni-profile", "window-policy", "set", policy]
     policyProc.running = true
   }
 

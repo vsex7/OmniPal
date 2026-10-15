@@ -49,7 +49,7 @@ def _resolve_run_dir() -> Path:
             d = Path(xdg) / "omnipal"
         else:
             d = Path(f"/run/user/{os.getuid()}/omnipal")
-    global RUN_DIR, STATE_FILE, OVERLAY_FILE, SNAP_FILE, SNAP_LAYOUTS_FILE, PID_FILE, LOCK_FILE, APPLIED_WINDOW_MODE_FILE, BASELINE_FILE, APP_RULE_STATE_FILE
+    global RUN_DIR, STATE_FILE, OVERLAY_FILE, SNAP_FILE, SNAP_LAYOUTS_FILE, PID_FILE, LOCK_FILE, APPLIED_WINDOW_MODE_FILE, BASELINE_FILE, APP_RULE_STATE_FILE, FLOATED_BY_OMNIPAL_FILE
     RUN_DIR = d
     STATE_FILE = d / "state.json"
     OVERLAY_FILE = d / "active_overlay.json"
@@ -60,6 +60,7 @@ def _resolve_run_dir() -> Path:
     APPLIED_WINDOW_MODE_FILE = d / "applied_window_mode"
     BASELINE_FILE = d / "baseline_bindings.json"
     APP_RULE_STATE_FILE = d / "app_rule.json"
+    FLOATED_BY_OMNIPAL_FILE = d / "floated_by_omnipal.json"
     return d
 
 RUN_DIR = _resolve_run_dir()
@@ -94,6 +95,7 @@ def lua_str(value: Any) -> str:
 LOCK_FILE = RUN_DIR / "engine.lock"
 APPLIED_WINDOW_MODE_FILE = RUN_DIR / "applied_window_mode"
 BASELINE_FILE = RUN_DIR / "baseline_bindings.json"
+FLOATED_BY_OMNIPAL_FILE = RUN_DIR / "floated_by_omnipal.json"
 
 _lock_local = threading.local()
 
@@ -314,6 +316,9 @@ def normalize_window_policy(policy: Optional[str]) -> Optional[str]:
         return None
     return WINDOW_POLICY_ALIASES.get(str(policy).lower().strip())
 
+# Apps that choose their own window size / aspect ratio: never resized by the floating policy.
+OWN_SIZE_CLASSES = ("scrcpy", "mpv", "imv", "vlc", "org.gnome.loupe", "feh")
+
 DIALOG_KEYWORDS = (
     "polkit",
     "pinentry",
@@ -360,10 +365,28 @@ def is_scratchpad_workspace(ws_name: str = "", ws_id: Optional[Union[int, str]] 
     return False
 
 def is_dialog_window(cls_name: str = "", title: str = "") -> bool:
-    """Checks if a window is a dialog, prompt, or popup based on class or title."""
+    """Checks if a window is a dialog, prompt, or popup based on class or title.
+
+    Short keywords (<=4 chars) match whole tokens only: "calc" matches class/title
+    token "calc" but not the substring inside "chatgpt"."""
     c = str(cls_name or "").lower()
     t = str(title or "").lower()
-    return any(k in c or k in t for k in DIALOG_KEYWORDS)
+    parts_c = re.split(r"[-_.\s]+", c)
+    parts_t = re.split(r"[-_.\s]+", t)
+    for k in DIALOG_KEYWORDS:
+        if k == "calc":
+            # calculator apps: token "calc", or "calculator"/"galculator" substring
+            if "calc" in parts_c or "calc" in parts_t:
+                return True
+            if "calculator" in c or "calculator" in t or "galculator" in c or "galculator" in t:
+                return True
+            continue
+        if len(k) <= 4:
+            if k in parts_c or k in parts_t:
+                return True
+        elif k in c or k in t:
+            return True
+    return False
 
 def is_micro_window(size: Optional[Union[List[int], Tuple[int, ...]]]) -> bool:
     """Checks if window size is unusually small (micro-window / tooltip / transient element)."""
@@ -477,6 +500,36 @@ def resolve_config_dir() -> Path:
 def persistence_file_path() -> Path:
     """The single explicit opt-in persistence file. Never touched unless the user enables it."""
     return resolve_config_dir() / "persistence.json"
+
+def policy_audit_log_path() -> Path:
+    return resolve_config_dir() / "policy-audit.log"
+
+
+def _policy_caller() -> str:
+    """Who asked: $OMNIPAL_SOURCE (set by the bar menu / settings panel), else parent process."""
+    src = os.environ.get("OMNIPAL_SOURCE", "").strip()
+    try:
+        parent = Path(f"/proc/{os.getppid()}/comm").read_text(encoding="utf-8").strip()
+    except Exception:
+        parent = "?"
+    return f"{src or 'unknown'} (pid {os.getpid()}, parent {parent})"
+
+
+def log_policy_write(what: str, old: Any, new: Any, source: str) -> None:
+    """Audit trail for every global window-policy write (journal + policy-audit.log)."""
+    line = (f"{datetime.datetime.now().astimezone().isoformat(timespec='seconds')} {what}: "
+            f"{old} -> {new} source={source} caller={_policy_caller()}")
+    print(f"🪟 window policy {line}", file=sys.stderr, flush=True)
+    try:
+        path = policy_audit_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > 256 * 1024:
+            path.replace(path.with_suffix(".log.1"))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        _debug(f"policy audit log failed: {e}")
+
 
 def app_rules_file_path() -> Path:
     """Per-app auto-switch rules. Only written when the user adds a rule."""
@@ -873,7 +926,8 @@ class OmniPalEngine:
         self,
         enabled: bool,
         profile: Optional[str] = None,
-        window_policy: Optional[str] = None
+        window_policy: Optional[str] = None,
+        source: str = "unspecified",
     ) -> bool:
         """Enables/disables profile and window policy persistence. Writes ONLY ~/.config/omnipal/persistence.json (H-1)."""
         path = persistence_file_path()
@@ -908,15 +962,20 @@ class OmniPalEngine:
             print(f"Error: Unknown profile '{target_profile}' for persistence. Available profiles: {valid}", file=sys.stderr)
             return False
 
-        # Resolve target window policy (same preference: explicit -> current -> persisted):
-        # passed policy -> current window policy -> existing persisted policy -> "tiled"
+        # Window policy: only an explicit choice changes it. Profile syncs (switch / cycle /
+        # restore / startup) pass none and must keep the persisted policy; the runtime policy is
+        # used only when persistence holds none yet (first enable).
         raw_policy = (
             window_policy
-            or self.get_window_policy()
             or cur_persisted.get("window_policy")
-            or "tiled"
+            or self.get_window_policy()
+            or "follow-profile"
         )
-        target_policy = normalize_window_policy(raw_policy) or "tiled"
+        target_policy = normalize_window_policy(raw_policy) or "follow-profile"
+        old_policy = cur_persisted.get("window_policy")
+        if window_policy or old_policy != target_policy:
+            log_policy_write("persistence.json", old_policy, target_policy,
+                             source if window_policy else f"{source} (implicit)")
 
         data = {
             "enabled": True,
@@ -1336,9 +1395,23 @@ class OmniPalEngine:
         addr: str,
         step: int = 0,
         is_dialog: bool = False,
-        monitor: Optional[Union[int, str, Dict[str, Any]]] = None
+        monitor: Optional[Union[int, str, Dict[str, Any]]] = None,
+        keep_size: bool = False,
+        orig_size: Optional[List[int]] = None,
     ):
-        """Applies mature golden dimensions (0.618 x 0.70) and terraced cascading placement to a floating window."""
+        """Applies mature golden dimensions (0.618 x 0.70) and terraced cascading placement to a floating window.
+
+        keep_size=True only floats the window (no resize/move/center): used for OWN_SIZE_CLASSES
+        (scrcpy etc.). New ordinary windows get the full golden cascade (no orig_size). Existing
+        tiled windows being floated pass orig_size so they never grow beyond their previous size."""
+        if keep_size:
+            # Float only: never resize or move (the app or the user's script sized/placed it).
+            self._eval_lua(f'hl.dispatch(hl.dsp.window.float({{ action = "enable", window = "address:{_escape_lua_string(addr)}" }}))')
+            return
+        try:
+            ow, oh = int(orig_size[0]), int(orig_size[1])  # type: ignore[index]
+        except Exception:
+            ow, oh = 0, 0
         clean_addr = _escape_lua_string(addr)
 
         target_mon_lua = "nil"
@@ -1374,6 +1447,7 @@ local addr = "{clean_addr}"
 local step = {int(step)}
 local is_dialog = {1 if is_dialog else 0}
 local target_mon = {target_mon_lua}
+local orig_w, orig_h = {ow}, {oh}
 
 local m = nil
 if type(target_mon) == "table" and target_mon.width and target_mon.height then
@@ -1441,6 +1515,9 @@ if type(hl) == "table" and type(hl.dispatch) == "function" and type(hl.dsp) == "
     if gw > rw - 40 then gw = rw - 40 end
     if gh < 550 and rh >= 550 then gh = 550 end
     if gh > rh - 40 then gh = rh - 40 end
+    -- Cap only for existing tiled windows being floated (orig_* set); new windows get golden size
+    if orig_w > 0 and orig_w < gw then gw = orig_w end
+    if orig_h > 0 and orig_h < gh then gh = orig_h end
 
     -- Base centered origin
     local cx = rx + math.floor((rw - gw) / 2)
@@ -1468,6 +1545,43 @@ if type(hl) == "table" and type(hl.dispatch) == "function" and type(hl.dsp) == "
 end
 """
         self._eval_lua(lua_code)
+
+    def _load_floated_addrs(self) -> set:
+        try:
+            if FLOATED_BY_OMNIPAL_FILE.exists():
+                data = json.loads(FLOATED_BY_OMNIPAL_FILE.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    return {str(a) for a in data if a}
+        except Exception as e:
+            _debug(e)
+        return set()
+
+    def _save_floated_addrs(self, addrs) -> None:
+        self._ensure_run_dir()
+        try:
+            atomic_write_json(FLOATED_BY_OMNIPAL_FILE, sorted(str(a) for a in addrs if a))
+        except Exception as e:
+            _debug(e)
+
+    def _remember_floated(self, addr: str) -> None:
+        if not addr:
+            return
+        addrs = self._load_floated_addrs()
+        if addr not in addrs:
+            addrs.add(addr)
+            self._save_floated_addrs(addrs)
+
+    def _clear_floated(self) -> None:
+        self._save_floated_addrs([])
+
+    @staticmethod
+    def keeps_own_size(cls_name: str, floating: bool = False) -> bool:
+        """Windows the floating policy must not resize: already floating, or apps that pick their
+        own size/aspect ratio (scrcpy phone mirrors, video/image viewers)."""
+        if floating:
+            return True
+        c = str(cls_name or "").lower()
+        return any(c == k or c.startswith(k) for k in OWN_SIZE_CLASSES)
 
     def _float_existing_windows(self):
         """Floats existing non-floating client windows and arranges them in golden terraced cascade."""
@@ -1501,8 +1615,15 @@ end
                 if skip:
                     continue
 
-                self._apply_golden_cascade_geometry(addr, step=step, is_dialog=is_dlg, monitor=mon)
+                if self.keeps_own_size(cls_name, bool(c.get("floating"))):
+                    # Already floating: leave alone (was floating before OmniPal). OWN_SIZE tiled:
+                    # float without resize; don't track so returning to tiled leaves them alone.
+                    if not c.get("floating"):
+                        self._apply_golden_cascade_geometry(addr, is_dialog=is_dlg, monitor=mon, keep_size=True)
+                    continue
+                self._apply_golden_cascade_geometry(addr, step=step, is_dialog=is_dlg, monitor=mon, orig_size=size)
                 if not is_dlg:
+                    self._remember_floated(addr)
                     step = (step + 1) % 6
         except Exception:
             pass
@@ -1536,6 +1657,9 @@ end
                 except Exception:
                     pass
 
+            # Only windows OmniPal floated (tracked when we cascaded them). Windows that were
+            # already floating before the policy, OWN_SIZE apps, dialogs and specials stay floating.
+            owned = self._load_floated_addrs()
             to_unfloat = []
             for c in clients:
                 if not c.get("mapped", True) or c.get("hidden", False):
@@ -1549,8 +1673,11 @@ end
                 ws_id = ws.get("id")
                 ws_name = str(ws.get("name", ""))
 
-                # All workspaces: the float rule also caught windows opened on inactive ones.
                 if ws_name.startswith("special") or (isinstance(ws_id, int) and ws_id < 0):
+                    continue
+
+                addr = c.get("address")
+                if not addr or addr not in owned:
                     continue
 
                 cls_name = str(c.get("class", ""))
@@ -1564,16 +1691,17 @@ end
                     ws_id=ws_id,
                     size=size
                 )
-                # Do not unfloat special windows (PiP, scratchpad, micro-windows) or dialogs
+                if self.keeps_own_size(cls_name):
+                    print(f"unfloat skip {addr} {cls_name!r} own-size app", file=sys.stderr)
+                    continue
                 if skip or is_dlg:
-                    print(f"unfloat skip {c.get('address')} {cls_name!r} special={skip} dialog={is_dlg}", file=sys.stderr)
+                    print(f"unfloat skip {addr} {cls_name!r} special={skip} dialog={is_dlg}", file=sys.stderr)
                     continue
 
-                addr = c.get("address")
-                if addr:
-                    to_unfloat.append(addr)
+                to_unfloat.append(addr)
 
             if not to_unfloat:
+                self._clear_floated()
                 return
 
             lua_ops = []
@@ -1596,6 +1724,9 @@ end
                         )
                     except Exception:
                         pass
+            # Drop the ones we tiled; leave any remaining owned addresses (gone windows)
+            # cleared so a later floating session starts clean.
+            self._clear_floated()
         except Exception as e:
             print(f"unfloat failed: {e}", file=sys.stderr)
 
@@ -1619,18 +1750,20 @@ end
                 'for _, r in ipairs(R.omnipal_float_rules) do r:set_enabled(true) end '
                 'elseif type(hl) == "table" and type(hl.window_rule) == "function" then '
                 'R.omnipal_float_rules = { '
-                'hl.window_rule({ match = {}, float = true, center = true }), '
-                'hl.window_rule({ match = { class = ".*" }, float = true, center = true }), '
-                'hl.window_rule({ match = { tag = "chromium-based-browser" }, float = true, center = true }), '
-                'hl.window_rule({ match = { tag = "terminal" }, float = true, center = true }) } '
+                'hl.window_rule({ match = {}, float = true }), '
+                'hl.window_rule({ match = { class = ".*" }, float = true }), '
+                'hl.window_rule({ match = { tag = "chromium-based-browser" }, float = true }), '
+                'hl.window_rule({ match = { tag = "terminal" }, float = true }) } '
                 'elseif type(o) == "table" and type(o.window) == "function" then '
-                'o.window(".*", { float = true, center = true }); '
-                'o.window({ tag = "chromium-based-browser" }, { float = true, center = true }); '
-                'o.window({ tag = "terminal" }, { float = true, center = true }) '
+                'o.window(".*", { float = true }); '
+                'o.window({ tag = "chromium-based-browser" }, { float = true }); '
+                'o.window({ tag = "terminal" }, { float = true }) '
                 'end'
             )
             ok = self._eval_lua(lua_code)
             if ok:
+                if cur_applied != "floating":
+                    self._clear_floated()
                 self._set_applied_window_mode("floating")
                 self._float_existing_windows()
             return ok
@@ -1705,12 +1838,15 @@ end
         """Each mode's own window_mode (tiled/floating), before any global override."""
         return {pid: self.profile_window_mode(pid) for pid in self.profiles}
 
-    def set_window_policy(self, policy: str) -> bool:
+    def set_window_policy(self, policy: str, source: str = "unspecified") -> bool:
+        """Sets the global window policy. Only explicit user choices may call this (CLI
+        `window-policy set`, bar menu, settings panel) or the startup restore of that choice."""
         with engine_lock():
             norm = normalize_window_policy(policy)
             if not norm:
                 return False
             previous_policy = self.get_window_policy()
+            log_policy_write("state", previous_policy, norm, source)
             self.window_policy = norm
             cur_state = self.get_state()
             cur_mode = cur_state.get("mode", "omarchy")
@@ -1727,7 +1863,7 @@ end
                 print(f"Warning: Compositor rejected window policy '{norm}'; previous policy restored", file=sys.stderr)
                 return False
             if self.get_persistence_status()["enabled"]:
-                self.set_persistence(True, window_policy=norm)
+                self.set_persistence(True, window_policy=norm, source=source)
             return True
 
     def get_state(self) -> Dict[str, Any]:
@@ -2751,9 +2887,9 @@ end"""
             current_policy = self.get_window_policy()
             results["policy_restored"] = True
             if prev_mode == "omarchy" and prev_policy == "floating":
-                results["policy_restored"] = self.set_window_policy(prev_policy)
+                results["policy_restored"] = self.set_window_policy(prev_policy, source="benchmark-restore")
             elif prev_policy != current_policy:
-                results["policy_restored"] = self.set_window_policy(prev_policy)
+                results["policy_restored"] = self.set_window_policy(prev_policy, source="benchmark-restore")
 
         return results
 
@@ -3124,8 +3260,16 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                                         )
                                         if skip:
                                             continue
-                                        engine._apply_golden_cascade_geometry(addr, step=cascade_counter, is_dialog=is_dlg)
-                                        if not is_dlg:
+                                        if OmniPalEngine.keeps_own_size(cls_name):
+                                            # scrcpy etc.: float only; user's own size/move rules win
+                                            engine._apply_golden_cascade_geometry(addr, keep_size=True)
+                                        elif is_dlg:
+                                            engine._apply_golden_cascade_geometry(addr, is_dialog=True)
+                                        else:
+                                            # Golden terraced cascade (like f0adc4f); no size cap for new windows
+                                            engine._apply_golden_cascade_geometry(
+                                                addr, step=cascade_counter, is_dialog=False)
+                                            engine._remember_floated(addr)
                                             cascade_counter = (cascade_counter + 1) % 6
                 except socket.timeout:
                     continue
@@ -3180,9 +3324,9 @@ def run_daemon():
     if persisted_policy and (persisted_policy != "follow-profile"
                              or engine.get_window_policy() != "follow-profile"):
         print(f"📦 Restoring persisted window policy on startup: {persisted_policy}", flush=True)
-        engine.set_window_policy(persisted_policy)
+        engine.set_window_policy(persisted_policy, source="daemon-startup (persisted choice)")
     elif persisted_status.get("enabled"):
-        engine.set_persistence(True, window_policy=engine.get_window_policy())
+        engine.set_persistence(True, source="daemon-startup")
 
     if persisted_mode and persisted_mode != "omarchy":
         restore_persisted_profile(engine)
