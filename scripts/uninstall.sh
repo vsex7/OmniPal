@@ -62,6 +62,10 @@ if [ -d "${OMARCHY_PLUGINS_DIR}" ]; then
             echo "⚠️ 跳过非软链接目录（请确认归属后手动处理）: ${p_link}"
         fi
     done
+    if [ -L "${OMARCHY_PLUGINS_DIR}/shared" ]; then
+        rm -f "${OMARCHY_PLUGINS_DIR}/shared"
+        echo "🗑️ 已移除共享目录软链接: shared"
+    fi
 fi
 
 # 5. 清理内存运行时临时目录

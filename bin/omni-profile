@@ -6,6 +6,7 @@ Direct controller for OmniPal runtime engine.
 
 import argparse
 import json
+import re
 import sys
 import os
 from pathlib import Path
@@ -15,6 +16,34 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from engine.engine import OmniPalEngine, run_daemon, LUA_DISPATCHERS
+
+# Untrusted import files (profile JSON / app rules) are capped to stay well
+# above any legitimate size while blocking memory-exhaustion via huge inputs.
+MAX_IMPORT_BYTES = 1024 * 1024
+
+def _read_import_text(source: str, what: str) -> str:
+    """Reads an import payload from a file path or stdin ('-'), with a size cap."""
+    if source == "-":
+        chunks, total = [], 0
+        while True:
+            chunk = sys.stdin.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_IMPORT_BYTES:
+                print(f"❌ {what}超过 {MAX_IMPORT_BYTES // 1024}KB 上限", file=sys.stderr)
+                sys.exit(1)
+            chunks.append(chunk)
+        return "".join(chunks)
+    p = Path(source).expanduser()
+    try:
+        if p.stat().st_size > MAX_IMPORT_BYTES:
+            print(f"❌ {what}超过 {MAX_IMPORT_BYTES // 1024}KB 上限", file=sys.stderr)
+            sys.exit(1)
+    except OSError as e:
+        print(f"❌ 读取失败: {e}", file=sys.stderr)
+        sys.exit(1)
+    return p.read_text(encoding="utf-8")
 
 def cmd_status(engine: OmniPalEngine, args):
     state = engine.get_state()
@@ -428,7 +457,7 @@ def cmd_import(engine: OmniPalEngine, args):
     import tempfile, os
     from scripts.check_consistency import _validate_profile_file
     try:
-        raw = sys.stdin.read() if args.file == "-" else Path(args.file).expanduser().read_text(encoding="utf-8")
+        raw = _read_import_text(args.file, "模式文件")
         p_data = json.loads(raw)
     except Exception as e:
         print(f"❌ 读取失败: {e}", file=sys.stderr)
@@ -444,6 +473,10 @@ def cmd_import(engine: OmniPalEngine, args):
         print(f"❌ 模式 ID '{p_id}' 不合法：只能用小写字母、数字、- 和 _，最长 32 位。可用 --id 指定新 ID", file=sys.stderr)
         sys.exit(1)
     p_data["id"] = p_id
+    name = p_data.get("name", p_id)
+    if not isinstance(name, str):
+        print("❌ 模式 name 必须是字符串", file=sys.stderr)
+        sys.exit(1)
     p_data.setdefault("name", p_id)
 
     existing = engine.profiles.get(p_id)
@@ -601,7 +634,7 @@ def cmd_rules(engine: OmniPalEngine, args):
         return
     elif act == "import":
         try:
-            raw = sys.stdin.read() if args.file == "-" else Path(args.file).expanduser().read_text(encoding="utf-8")
+            raw = _read_import_text(args.file, "规则文件")
             incoming = json.loads(raw)
         except Exception as e:
             print(f"❌ 读取失败: {e}", file=sys.stderr); sys.exit(1)
@@ -609,16 +642,29 @@ def cmd_rules(engine: OmniPalEngine, args):
             print("❌ 不是有效的应用规则文件（缺少 rules 列表）", file=sys.stderr); sys.exit(1)
         new_rules, skipped = [], []
         for r in incoming["rules"]:
-            if not isinstance(r, dict) or not r.get("class") or not r.get("mode"):
-                skipped.append(str(r)); continue
+            if not isinstance(r, dict) or not isinstance(r.get("class"), str) or not r["class"].strip() \
+                    or not isinstance(r.get("mode"), str) or not r["mode"]:
+                skipped.append(str(r)[:120]); continue
+            cls = r["class"].strip()
+            if len(cls) > 256:
+                skipped.append(f"{cls[:60]}…（类名过长）"); continue
+            match = r.get("match", "exact")
+            if match not in ("exact", "prefix", "regex"):
+                skipped.append(f"{cls}（未知匹配方式 {match!r}）"); continue
+            if match == "regex":
+                try:
+                    re.compile(cls)
+                except re.error as e:
+                    skipped.append(f"{cls}（正则非法: {e}）"); continue
             if r["mode"] not in engine.profiles:
-                skipped.append(f"{r['class']} -> {r['mode']}（本机没有这个模式，可先用 import 导入对应 profile）"); continue
-            new_rules.append({"class": str(r["class"]), "match": r.get("match", "exact"),
+                skipped.append(f"{cls} -> {r['mode']}（本机没有这个模式，可先用 import 导入对应 profile）"); continue
+            new_rules.append({"class": cls, "match": match,
                               "mode": r["mode"], "enabled": bool(r.get("enabled", True))})
         if args.replace:
             data["rules"] = new_rules
-            if incoming.get("default_mode") in engine.profiles or incoming.get("default_mode") is None:
-                data["default_mode"] = incoming.get("default_mode")
+            dm = incoming.get("default_mode")
+            if dm is None or (isinstance(dm, str) and dm in engine.profiles):
+                data["default_mode"] = dm
         else:
             incoming_classes = {r["class"] for r in new_rules}
             data["rules"] = [r for r in data["rules"] if r["class"] not in incoming_classes] + new_rules

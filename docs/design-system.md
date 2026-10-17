@@ -1,6 +1,6 @@
 # OmniPal design system (Omarchy style)
 
-Single source of truth: `plugins/shared/Tokens.js` (copied into each plugin by `scripts/sync_tokens.py`).
+Single source of truth: `plugins/shared/*.js|*.qml`, symlinked into each plugin as `../shared/<name>` (enforced by `scripts/check_consistency.py`; `install.sh` links `plugins/shared` itself so the relative links resolve at runtime).
 No QML file may contain a hex colour, a literal `Qt.rgba(<number>…)`, or `"monospace"` — enforced by `tests/test_design_tokens.py`.
 
 ## Runtime theme

@@ -7,6 +7,7 @@ and ensures no duplicate keybindings exist within any profile.
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -22,18 +23,36 @@ def _validate_profile_file(p_file: Path, valid_action_ids: dict) -> bool:
     p_id = p_data.get("id")
     p_name = p_data.get("name", p_id)
     bindings = p_data.get("bindings", [])
+    for field in ("name", "description"):
+        if field in p_data and not isinstance(p_data[field], str):
+            print(f"  ❌ [{p_file.name}] '{field}' must be a string", file=sys.stderr)
+            return False
+    if not isinstance(bindings, list):
+        print(f"  ❌ [{p_file.name}] 'bindings' must be a list", file=sys.stderr)
+        return False
     print(f"🔍 Validating profile: {p_name} ({p_file.name}) [{len(bindings)} bindings]...")
 
     seen_keys = set()
     file_passed = True
     for i, b in enumerate(bindings):
+        if not isinstance(b, dict):
+            print(f"  ❌ [{p_file.name} #binding {i+1}] Binding must be an object", file=sys.stderr)
+            file_passed = False
+            continue
         action = b.get("action")
-        mod = b.get("mod", "").strip()
-        key = b.get("key", "").strip()
+        mod = b.get("mod", "")
+        key = b.get("key", "")
 
-        if not action or action not in valid_action_ids:
+        if not isinstance(action, str) or not action or action not in valid_action_ids:
             print(f"  ❌ [{p_file.name} #binding {i+1}] Invalid action ID: '{action}'", file=sys.stderr)
             file_passed = False
+
+        if not isinstance(mod, str) or not isinstance(key, str):
+            print(f"  ❌ [{p_file.name} #binding {i+1}] 'mod'/'key' must be strings", file=sys.stderr)
+            file_passed = False
+            continue
+        mod = mod.strip()
+        key = key.strip()
 
         if not key:
             print(f"  ❌ [{p_file.name} #binding {i+1}] Missing key definition", file=sys.stderr)
@@ -243,6 +262,57 @@ def _validate_fixed_bindings(project_root: Path, valid_action_ids: dict, profile
     return ok
 
 
+def _validate_version_consistency(project_root: Path) -> bool:
+    """All plugin manifest.json versions must equal the engine __version__.
+
+    Version rule (see w1 versions fix, 2026-10-17): the engine __version__
+    is the single source of truth for the OmniPal release version; every
+    Quickshell plugin manifest must carry exactly the same version string.
+    A mismatch means someone bumped one side without the other and must be
+    fixed before release.
+    """
+    # engine/omnipal/version.py is the single source of truth since the
+    # engine.py -> engine/omnipal/* split (2026-10-17, w2); engine/engine.py
+    # is only a PEP 562 shim and no longer carries the literal.
+    engine_version = None
+    for candidate in (project_root / "engine" / "omnipal" / "version.py",
+                      project_root / "engine" / "engine.py"):
+        if candidate.exists():
+            m = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']',
+                          candidate.read_text(encoding="utf-8"), re.MULTILINE)
+            if m:
+                engine_version = m.group(1)
+                break
+    if not engine_version:
+        print("❌ __version__ not found in engine/omnipal/version.py "
+              "nor engine/engine.py", file=sys.stderr)
+        return False
+    print(f"\n🔖 Engine version: {engine_version}")
+
+    ok = True
+    plugins_dir = project_root / "plugins"
+    for p_dir in sorted(p for p in plugins_dir.glob("omni.*") if p.is_dir()):
+        manifest_file = p_dir / "manifest.json"
+        if not manifest_file.exists():
+            # Missing manifest is already reported by plugin validation.
+            continue
+        try:
+            with open(manifest_file, "r", encoding="utf-8") as f:
+                manifest_version = json.load(f).get("version")
+        except Exception as e:
+            print(f"  ❌ [{p_dir.name}] cannot read manifest version: {e}",
+                  file=sys.stderr)
+            ok = False
+            continue
+        if manifest_version != engine_version:
+            print(f"  ❌ [{p_dir.name}] manifest version '{manifest_version}' "
+                  f"!= engine version '{engine_version}'", file=sys.stderr)
+            ok = False
+        else:
+            print(f"  ✅ [{p_dir.name}] version {manifest_version} matches engine")
+    return ok
+
+
 def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = None) -> bool:
     schema_file = project_root / "schema" / "actions.json"
     profiles_dir = project_root / "profiles"
@@ -344,17 +414,25 @@ def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = No
         print("\n🎉 All consistency and plugin validation checks passed cleanly!")
     else:
         print("\n💥 Consistency check failed.", file=sys.stderr)
-    # Shared design files: each plugin's copy must match plugins/shared/<name>
+    # Version gate: plugin manifest versions must equal engine __version__
+    if not _validate_version_consistency(project_root):
+        all_passed = False
+    # Shared design files: each plugin must carry a symlink to plugins/shared/<name>.
+    # A real copied file here means someone duplicated the source again instead
+    # of linking it; install.sh links plugins/shared itself so the relative
+    # links keep resolving after per-plugin symlinked installs.
     for shared_name in ("Tokens.js", "OmniTheme.qml", "Icons.js", "OverlayWindow.qml", "Safety.js", "Takeovers.js"):
-        shared_file = project_root / "plugins" / "shared" / shared_name
-        if not shared_file.exists():
-            continue
-        src = shared_file.read_bytes()
         for p in sorted((project_root / "plugins").glob("omni.*")):
             if p.is_dir():
-                copy = p / shared_name
-                if not copy.exists() or copy.read_bytes() != src:
-                    print(f"❌ {shared_name} out of sync in {p.name} (run scripts/sync_tokens.py)")
+                link = p / shared_name
+                if not link.is_symlink():
+                    print(f"❌ {shared_name} in {p.name} is not a symlink to ../shared/{shared_name}")
+                    all_passed = False
+                elif os.readlink(link) != f"../shared/{shared_name}":
+                    print(f"❌ {shared_name} in {p.name} points at {os.readlink(link)}, expected ../shared/{shared_name}")
+                    all_passed = False
+                elif not link.exists():
+                    print(f"❌ {shared_name} in {p.name} is a dangling symlink")
                     all_passed = False
     return all_passed
 

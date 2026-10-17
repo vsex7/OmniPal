@@ -33,6 +33,9 @@ os.environ["OMNIPAL_DRY_RUN"] = "1"
 
 import engine.engine as engine_module
 from engine.engine import OmniPalEngine, format_combo
+# NOTE(structure): engine internals moved to the engine.omnipal package;
+# monkeypatch seams now target the namespace where names are looked up.
+from engine.omnipal import core as _engine_core
 from scripts.check_consistency import check_consistency
 
 def _ensure_global_test_env():
@@ -733,7 +736,7 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         fd, sock_path = tempfile.mkstemp(prefix="omnipal-fake-socket2-")
         os.close(fd)
         self._fake_sock = Path(sock_path)
-        self._sock_patch = patch.object(engine_module, "find_socket2_path", return_value=self._fake_sock)
+        self._sock_patch = patch.object(_engine_core, "find_socket2_path", return_value=self._fake_sock)
         self._sock_patch.start()
         self.engine = OmniPalEngine(PROJECT_ROOT)
         # Neutralize live Hyprland eval side effects
@@ -794,17 +797,17 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         import engine.engine as E
         self.engine._write_state("windows", 1)
         APPLIED_WINDOW_MODE_FILE.write_text("floating", encoding="utf-8")
-        calls, orig = [], (self.engine._reload_config_only, E.find_socket2_path)
+        calls, orig = [], (self.engine._reload_config_only, _engine_core.find_socket2_path)
         try:
             self.engine._reload_config_only = lambda timeout=3.0: calls.append("reload") or True
             self.engine._eval_lua_strict = lambda code: calls.append(code) or True
             self.engine._unfloat_existing_windows = lambda: None
-            E.find_socket2_path = lambda: Path("/")
+            _engine_core.find_socket2_path = lambda: Path("/")
             self.assertTrue(self.engine._apply_window_policy(force=True))
             self.assertNotIn("reload", calls)
             self.assertTrue(any("set_enabled(false)" in c for c in calls))
         finally:
-            self.engine._reload_config_only, E.find_socket2_path = orig
+            self.engine._reload_config_only, _engine_core.find_socket2_path = orig
             self.engine._write_state("omarchy", 0)
             APPLIED_WINDOW_MODE_FILE.write_text("tiled", encoding="utf-8")
 
@@ -1319,6 +1322,8 @@ class TestDoctorInstallCheck(unittest.TestCase):
         pdir.mkdir(parents=True)
         for src in sorted((self.root / "plugins").glob("omni.*")):
             (pdir / src.name).symlink_to(src)
+        # install.sh also links plugins/shared (plugin ../shared/* links need it)
+        (pdir / "shared").symlink_to(self.root / "plugins" / "shared")
         return pdir
 
     def test_fresh_home_reports_missing_with_reinstall_fix(self):
@@ -2117,12 +2122,12 @@ class TestAutoSwitchState(unittest.TestCase):
         self.engine = OmniPalEngine(PROJECT_ROOT)
         self.engine.restore()
         self.notes = []
-        self._orig_notify = engine_module.notify_user
-        engine_module.notify_user = lambda t, b="": self.notes.append((t, b))
+        self._orig_notify = _engine_core.notify_user
+        _engine_core.notify_user = lambda t, b="": self.notes.append((t, b))
         self.engine.save_app_rules({"enabled": True, "rules": [{"class": "code", "mode": "mac"}]})
 
     def tearDown(self):
-        engine_module.notify_user = self._orig_notify
+        _engine_core.notify_user = self._orig_notify
         self.engine.restore(auto=None)
         if self._old is None:
             os.environ.pop("OMNIPAL_CONFIG_DIR", None)

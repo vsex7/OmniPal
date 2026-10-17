@@ -1,0 +1,209 @@
+"""Profile/action catalog loading, key-forward specs, window classifiers."""
+
+import atexit
+import datetime
+import json
+import contextlib
+import fcntl
+import io
+import os
+import re
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
+from engine.omnipal.paths import (app_rules_file_path)
+from engine.omnipal.util import (_debug, lua_str)
+
+FORWARD_ACTION = "forward_shortcut"
+TERMINAL_CLASSES = (
+    "alacritty", "kitty", "foot", "footclient", "ghostty", "com.mitchellh.ghostty",
+    "org.wezfurlong.wezterm", "wezterm", "xterm", "konsole", "org.kde.konsole",
+    "gnome-terminal", "org.gnome.terminal", "org.gnome.ptyxis", "tilix", "terminator",
+)
+_FORWARD_MOD_RE = re.compile(r"^[A-Za-z]+$")
+_FORWARD_KEY_RE = re.compile(r"^[A-Za-z0-9_]{1,24}$")
+
+
+def parse_forward(spec: str):
+    """'CTRL SHIFT T' -> (['CTRL','SHIFT'], 'T'). Raises ValueError on bad input."""
+    parts = str(spec or "").replace("+", " ").split()
+    if not parts:
+        raise ValueError("empty forward shortcut")
+    *mods, key = parts
+    mods = [m.upper() for m in mods]
+    for m in mods:
+        if not _FORWARD_MOD_RE.match(m):
+            raise ValueError(f"bad modifier: {m!r}")
+    if not _FORWARD_KEY_RE.match(key):
+        raise ValueError(f"bad key: {key!r}")
+    return mods, (key.upper() if len(key) == 1 else key)
+
+
+def load_terminal_patterns() -> List[str]:
+    """Built-in terminals plus ~/.config/omnipal/terminals.json (a JSON list of window
+    classes; a trailing '*' means prefix match). Lower-cased, deduped."""
+    pats = list(TERMINAL_CLASSES)
+    try:
+        path = app_rules_file_path().parent / "terminals.json"
+        if path.exists():
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            for x in raw if isinstance(raw, list) else []:
+                if isinstance(x, str) and x.strip():
+                    pats.append(x.strip().lower())
+    except (OSError, ValueError) as e:
+        print(f"Warning: Failed to read terminals.json: {e}", file=sys.stderr)
+    return list(dict.fromkeys(pats))
+
+
+def is_terminal_class(window_class: str, patterns: Optional[List[str]] = None) -> bool:
+    wc = (window_class or "").strip().lower()
+    if not wc:
+        return False
+    for p in (patterns if patterns is not None else load_terminal_patterns()):
+        if (p.endswith("*") and wc.startswith(p[:-1])) or wc == p:
+            return True
+    return False
+
+
+def forward_lua(mods: List[str], key: str, patterns: List[str]) -> str:
+    """Pure-Lua forward: reads the focused window class, adds SHIFT for terminals,
+    then dispatches send_shortcut. Every dynamic value goes through lua_str()."""
+    exact = ", ".join(f"[{lua_str(p)}] = true" for p in patterns if not p.endswith("*"))
+    prefix = ", ".join(lua_str(p[:-1]) for p in patterns if p.endswith("*"))
+    term_mods = mods + ["SHIFT"] if "CTRL" in mods and "SHIFT" not in mods else mods
+    return ("function() local w = hl.get_active_window(); "
+            "local c = string.lower((w and w.class) or ''); "
+            f"local t = ({{ {exact} }})[c] or false; "
+            f"for _, p in ipairs({{ {prefix} }}) do if c:sub(1, #p) == p then t = true end end; "
+            f"hl.dispatch(hl.dsp.send_shortcut({{ mods = t and {lua_str(' '.join(term_mods))} or {lua_str(' '.join(mods))}, "
+            f"key = {lua_str(key)} }})) end")
+
+
+def forward_for_class(spec: str, window_class: str):
+    """Terminals keep Ctrl+W / Ctrl+C for the shell, so they get Ctrl+Shift instead."""
+    mods, key = parse_forward(spec)
+    if is_terminal_class(window_class) and "CTRL" in mods and "SHIFT" not in mods:
+        mods = mods + ["SHIFT"]
+    return mods, key
+
+
+RETIRED_MODES = ("kde",)  # removed built-in modes; saved references migrate to MIGRATION_FALLBACK_MODE
+MIGRATION_FALLBACK_MODE = "windows"
+
+VALID_WINDOW_POLICIES = {"tiled", "floating", "follow-profile"}
+WINDOW_POLICY_ALIASES = {
+    "tile": "tiled",
+    "tiled": "tiled",
+    "float": "floating",
+    "floating": "floating",
+    "follow": "follow-profile",
+    "follow-profile": "follow-profile",
+    "follow_profile": "follow-profile",
+}
+
+def normalize_window_policy(policy: Optional[str]) -> Optional[str]:
+    if not policy:
+        return None
+    return WINDOW_POLICY_ALIASES.get(str(policy).lower().strip())
+
+DIALOG_KEYWORDS = (
+    "polkit",
+    "pinentry",
+    "portal",
+    "calc",
+    "about",
+    "dialog",
+    "prompt",
+    "steam_app_",
+    "wlogout",
+    "rofi",
+)
+
+def is_pip_window(cls_name: str = "", title: str = "") -> bool:
+    """Checks if a window is Picture-in-Picture based on class or title."""
+    c = str(cls_name or "").lower()
+    t = str(title or "").lower()
+    if any(p in t for p in ("picture-in-picture", "picture in picture")):
+        return True
+    if any(p in c for p in ("picture-in-picture", "picture in picture")):
+        return True
+    parts = re.split(r"[-_.\s]+", c)
+    if "pip" in parts or c == "pip":
+        return True
+    return False
+
+def is_scratchpad_workspace(ws_name: str = "", ws_id: Optional[Union[int, str]] = None) -> bool:
+    """Checks if workspace is a scratchpad / special workspace (starts with 'special:' or id < 0)."""
+    name = str(ws_name or "").strip()
+    if name.startswith("special"):
+        return True
+    if ws_id is not None:
+        try:
+            if int(ws_id) < 0:
+                return True
+        except (ValueError, TypeError):
+            pass
+    if name.startswith("-"):
+        try:
+            if int(name) < 0:
+                return True
+        except (ValueError, TypeError):
+            pass
+    return False
+
+def is_dialog_window(cls_name: str = "", title: str = "") -> bool:
+    """Checks if a window is a dialog, prompt, or popup based on class or title."""
+    c = str(cls_name or "").lower()
+    t = str(title or "").lower()
+    return any(k in c or k in t for k in DIALOG_KEYWORDS)
+
+def is_micro_window(size: Optional[Union[List[int], Tuple[int, ...]]]) -> bool:
+    """Checks if window size is unusually small (micro-window / tooltip / transient element)."""
+    if not size or len(size) < 2:
+        return False
+    try:
+        w, h = int(size[0]), int(size[1])
+        return (0 < w < 300 or 0 < h < 200)
+    except (ValueError, TypeError):
+        return False
+
+def is_special_window(
+    cls_name: str = "",
+    title: str = "",
+    ws_name: str = "",
+    ws_id: Optional[Union[int, str]] = None,
+    size: Optional[Union[List[int], Tuple[int, ...]]] = None
+) -> Tuple[bool, bool]:
+    """
+    Classifies whether a window is special or a dialog.
+    Returns (skip_cascade, is_dialog):
+    - skip_cascade is True if PiP, scratchpad, or micro-window (completely skip resizing and cascading).
+    - is_dialog is True if dialog/prompt/popup (center window without resizing).
+    """
+    if is_pip_window(cls_name, title):
+        return True, False
+    if is_scratchpad_workspace(ws_name, ws_id):
+        return True, False
+    if is_micro_window(size):
+        return True, False
+    if is_dialog_window(cls_name, title):
+        return False, True
+    return False, False
+
+def load_fixed_bindings(root_dir: Path) -> List[Dict[str, Any]]:
+    """Mode-independent OmniPal entry points (schema/fixed_bindings.json), injected in every mode."""
+    try:
+        data = json.loads((Path(root_dir) / "schema" / "fixed_bindings.json").read_text(encoding="utf-8"))
+        return [b for b in data.get("bindings", []) if b.get("action") and b.get("key")]
+    except (OSError, ValueError) as e:
+        # Corrupt fixed_bindings.json must not kill startup; fixed entry
+        # points simply stay uninjected until the file is repaired.
+        _debug(f"Failed to load fixed_bindings.json: {e}")
+        return []

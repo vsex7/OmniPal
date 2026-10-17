@@ -4,7 +4,7 @@
 // Mode identity in the UI = glyph + name, never colour. Profile JSON
 // display.icon / display.color stay in the schema for compatibility but are
 // not rendered.
-// Single source: plugins/shared/Icons.js (copied by scripts/sync_tokens.py).
+// Single source: plugins/shared/Icons.js (symlinked into each plugin as ../shared/Icons.js).
 
 var glyph = {
   windows: "󰖳",

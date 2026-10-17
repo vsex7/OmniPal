@@ -17,8 +17,9 @@ import qs.Commons as Commons
 // Anything that has a native widget (Button, TextField, ToggleSwitch, PanelHero,
 // PanelSectionHeader, PanelSeparator, ...) must use that widget instead of this.
 //
-// Single source: plugins/shared/OmniTheme.qml, copied into each plugin by
-// scripts/sync_tokens.py (plugins are symlinked individually, so no ../ imports).
+// Single source: plugins/shared/OmniTheme.qml, symlinked into each plugin as
+// ../shared/OmniTheme.qml (install.sh also links plugins/shared itself, so the
+// relative links keep resolving after per-plugin symlinked installs).
 QtObject {
   id: t
 
