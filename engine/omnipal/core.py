@@ -534,7 +534,9 @@ class OmniPalEngine:
         for b in target_bindings:
             action_id = b.get("action")
             action_meta = self.actions_catalog.get(action_id, {})
-            name = action_meta.get("name", action_id)
+            # Binding-level display name wins (e.g. mac forwards) so `hyprctl binds`
+            # shows the same name as the cheatsheet; falls back to the action name.
+            name = b.get("name") or action_meta.get("name", action_id)
             mod = b.get("mod", "").strip()
             key = b.get("key", "").strip()
             if not key:
@@ -1894,6 +1896,7 @@ end
                     g[k] = e[k]
         for e in merged:
             e["key"] = " / ".join(e["keys"])
+            del e["keys"]  # merge-time accumulator only; not part of the row contract
         return merged
 
     def get_windows(self) -> List[Dict[str, Any]]:
@@ -2403,8 +2406,10 @@ end"""
         # Run quietly so `omni-profile doctor --json` stays pure JSON on stdout.
         try:
             from scripts.check_consistency import check_consistency as _check_consistency
+            from scripts.check_consistency import find_protected_violations as _find_protected_violations
         except ImportError:
             _check_consistency = None
+            _find_protected_violations = None
 
         if _check_consistency is not None:
             with contextlib.redirect_stdout(io.StringIO()):
@@ -2421,6 +2426,18 @@ end"""
                 report["consistency"] = False
         if not report["consistency"]:
             report["issues"].append("Schema or profile consistency validation failed")
+
+        # 4.6 Protected system keybindings: name exactly which profile overrides what,
+        # so `doctor` (not just the dev-side checker) points at the problem.
+        if _find_protected_violations is not None:
+            try:
+                for p_id, mod, key, reason in _find_protected_violations(self.root_dir, self.profiles):
+                    report["issues"].append(
+                        f"Profile '{p_id}' overrides protected system key {mod} {key} ({reason})")
+                    report["fixes"].append(
+                        f"从 '{p_id}' 移除 {mod} {key} 绑定，或改用其他组合键")
+            except Exception as e:
+                _debug(f"protected-bindings scan failed: {e}")
 
         if report["issues"]:
             report["healthy"] = False

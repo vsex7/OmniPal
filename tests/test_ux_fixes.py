@@ -107,7 +107,8 @@ class TestCheatsheetMerge(unittest.TestCase):
         sheet = _engine().cheatsheet("mac")
         cs = next(r for r in sheet if r["action"] == "cheat_sheet")
         self.assertIn("SLASH", cs["key"])
-        self.assertEqual(len(cs["keys"]), 2)
+        self.assertIn("/", cs["key"])
+        self.assertNotIn("keys", cs, "merge accumulator must not leak into the row")
 
 
 class TestProtectedBindings(unittest.TestCase):
@@ -147,6 +148,82 @@ class TestProtectedBindings(unittest.TestCase):
                 b.get("mod", "").upper().replace(" ", "") == "SUPERALT"
                 and b.get("key", "").lower() == "space",
                 "mac profile must not override the Omarchy menu key")
+
+
+class TestProtectedEnforcement(unittest.TestCase):
+    """P0 follow-up: `import` and `doctor` must enforce protected bindings,
+    not just the dev-side consistency checker."""
+
+    def test_import_rejects_protected_combo(self):
+        cli = _load_cli()
+        e = _engine()
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "evil.json"
+            bad.write_text(json.dumps({"id": "evil", "name": "evil", "bindings": [
+                {"action": "lock_screen", "mod": "SUPER ALT", "key": "space"}]}),
+                encoding="utf-8")
+            args = types.SimpleNamespace(file=str(bad), id=None, force=False, yes=True)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                with self.assertRaises(SystemExit) as cm:
+                    cli.cmd_import(e, args)
+            self.assertEqual(cm.exception.code, 1)
+            self.assertIn("保护键位", err.getvalue())
+            self.assertFalse((e.user_profiles_dir / "evil.json").exists())
+
+    def test_import_accepts_compliant_profile(self):
+        cli = _load_cli()
+        e = _engine()
+        dest = e.user_profiles_dir / "good.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            good = Path(tmp) / "good.json"
+            good.write_text(json.dumps({"id": "good", "name": "good", "bindings": [
+                {"action": "lock_screen", "mod": "SUPER", "key": "Q"}]}),
+                encoding="utf-8")
+            args = types.SimpleNamespace(file=str(good), id=None, force=False, yes=True)
+            out = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                    cli.cmd_import(e, args)
+            finally:
+                if dest.exists():
+                    dest.unlink()
+        self.assertIn("已导入", out.getvalue())
+
+    def test_doctor_names_protected_violation(self):
+        e = _engine()
+        e.profiles["_evil"] = {"id": "_evil", "bindings": [
+            {"action": "lock_screen", "mod": "SUPER ALT", "key": "space"}]}
+        diag = e.doctor()
+        hits = [i for i in diag["issues"] if "_evil" in i and "protected" in i]
+        self.assertTrue(hits, f"doctor should name the violation, got: {diag['issues']}")
+        self.assertTrue(diag["fixes"], "doctor should suggest a fix")
+
+    def test_doctor_clean_tree_has_no_protected_issue(self):
+        diag = _engine().doctor()
+        self.assertFalse([i for i in diag["issues"] if "protected system key" in i])
+
+
+class TestBindOpNaming(unittest.TestCase):
+    """P2: the Hyprland bind description should prefer the binding-level name,
+    so `hyprctl binds` agrees with the cheatsheet."""
+
+    def test_bind_op_prefers_binding_name(self):
+        e = _engine()
+        ops, records = e._build_bind_ops([
+            {"mod": "SUPER", "key": "W", "action": "forward_shortcut",
+             "forward": "CTRL W", "name": "关闭标签页"}])
+        binds = [o for o in ops if o.startswith("o.bind(")]
+        self.assertTrue(binds, "expected at least one o.bind op")
+        self.assertIn("关闭标签页", binds[0])
+        self.assertEqual(records[0]["name"], "关闭标签页")
+
+    def test_bind_op_falls_back_to_action_name(self):
+        e = _engine()
+        ops, _ = e._build_bind_ops([{"mod": "SUPER", "key": "Q", "action": "close_window"}])
+        binds = [o for o in ops if o.startswith("o.bind(")]
+        self.assertTrue(binds, "expected at least one o.bind op")
+        self.assertIn("关闭当前窗口", binds[0])
 
 
 class TestDiffUnknown(unittest.TestCase):

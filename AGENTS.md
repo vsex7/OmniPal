@@ -33,7 +33,7 @@ OmniPal 是一个**纯运行时内存热切换**的肌肉记忆引擎，叠加�
    切换模式与策略严禁写入 `~/.config/hypr/` 下的任何文件（H-1 铁律绝不妥协）。为保证关机与重启后体验一致（记忆关机前配置），OmniPal 默认将最后使用的配置（Profile 与 Window Policy）安全持久化于独立的 `~/.config/omnipal/persistence.json`，且支持用户显式执行 `omni-profile persist disable` 关闭重启恢复。
 
 3. **单一事实源**  
-   所有快捷键与动作定义只存在于 `schema/actions.json` 与 `profiles/*`。  
+   所有快捷键与动作定义只存在于 `schema/`（`actions.json`、`fixed_bindings.json`、`protected_bindings.json`）与 `profiles/*`。  
    QML、文档、测试中禁止硬编码键位列表。
 
 4. **退出必须可恢复**  
