@@ -242,12 +242,14 @@ Item {
     onFileChanged: reload()
   }
 
-  // 上手指南第 2 步的三个固定快捷键：取自 cheatsheet 输出里 fixed 的行（Engine 单一事实源）。
+  // 上手指南第 2 步的三个固定快捷键：取自 cheatsheet 输出里 fixed 的行
+  // （Engine 单一事实源）。只用 fixed_key（固定组合键本身），不用合并后的
+  // r.key ——后者会把模式专属别名（mac 的 Super+,）也包装成固定入口。
   readonly property var fixedRows: {
     var out = []
     for (var i = 0; i < root.rawRows.length; i++) {
       var r = root.rawRows[i]
-      if (r && r.fixed === true) out.push({ combo: Takeovers.prettyCombo(r.key), name: String(r.name || "") })
+      if (r && r.fixed === true) out.push({ combo: Takeovers.prettyCombo(r.fixed_key), name: String(r.name || "") })
     }
     return out
   }
@@ -255,7 +257,7 @@ Item {
   function fixedCombo(action) {
     for (var i = 0; i < root.rawRows.length; i++) {
       var r = root.rawRows[i]
-      if (r && r.fixed === true && r.action === action) return Takeovers.prettyCombo(r.key)
+      if (r && r.fixed === true && r.action === action) return Takeovers.prettyCombo(r.fixed_key)
     }
     return ""
   }

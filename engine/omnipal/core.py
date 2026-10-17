@@ -1866,9 +1866,14 @@ end
         sheet = [e for e in sheet if e["key"] not in fixed]
         for b in self.fixed_bindings:
             meta = self.actions_catalog.get(b["action"], {})
+            combo = format_combo(b.get("mod", ""), b["key"])
             sheet.append({
                 "action": b["action"],
-                "key": format_combo(b.get("mod", ""), b["key"]),
+                "key": combo,
+                # Canonical fixed combo, kept verbatim even when this row is
+                # merged with a mode-specific alias row: the onboarding guide
+                # must show only the fixed combo, never the merged list.
+                "fixed_key": combo,
                 "name": meta.get("name", b["action"]),
                 "category": "omnipal",
                 "description": "固定入口：所有模式通用",
@@ -1891,8 +1896,10 @@ end
             if e["key"] not in g["keys"]:
                 g["keys"].append(e["key"])
             # A fixed entry is canonical: keep its metadata on the merged row.
+            # fixed_key (the fixed combo alone) survives the merge so the
+            # onboarding guide can show it without the mode-specific aliases.
             if e.get("fixed") and not g.get("fixed"):
-                for k in ("name", "category", "description", "fixed"):
+                for k in ("name", "category", "description", "fixed", "fixed_key"):
                     g[k] = e[k]
         for e in merged:
             e["key"] = " / ".join(e["keys"])
