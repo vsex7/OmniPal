@@ -213,11 +213,32 @@ class TestImportCliHardening(unittest.TestCase):
         self.addCleanup(lambda: Path(f.name).unlink(missing_ok=True))
         return f.name
 
+    def _run_bytes(self, *argv, stdin_bytes=None):
+        return subprocess.run([sys.executable, CLI, *argv], capture_output=True,
+                              input=stdin_bytes, timeout=30)
+
     def test_import_rejects_oversize_file(self):
         big = self._tmp("x" * (1024 * 1024 + 100))
         r = self._run("import", big)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("上限", r.stderr)
+
+    def test_import_rejects_multibyte_stdin_over_byte_limit(self):
+        # 400k CJK chars are ~1.2MB on the wire; the cap must count bytes.
+        r = self._run("import", "-", stdin_data="汉" * 400_000)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("上限", r.stderr)
+
+    def test_import_rejects_just_under_byte_limit_stdin(self):
+        # 349_525 CJK chars = 1_048_575 bytes (1MiB - 1): must be accepted by
+        # the size gate (it will then fail JSON parsing, not the size check).
+        r = self._run("import", "-", stdin_data="汉" * 349_525)
+        self.assertNotIn("上限", r.stderr)
+
+    def test_import_rejects_invalid_utf8_stdin(self):
+        r = self._run_bytes("import", "-", stdin_bytes=b'{"id": "x", \xff\xfe')
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("UTF-8", r.stderr.decode("utf-8", "replace"))
 
     def test_import_rejects_malformed_types_cleanly(self):
         # mod as int used to crash the validator with a traceback

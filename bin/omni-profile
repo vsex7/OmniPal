@@ -25,8 +25,10 @@ def _read_import_text(source: str, what: str) -> str:
     """Reads an import payload from a file path or stdin ('-'), with a size cap."""
     if source == "-":
         chunks, total = [], 0
+        # Read bytes, not str: len() on a decoded str counts characters, which
+        # lets multi-byte payloads (e.g. 400k CJK chars ~= 1.2MB) pass a byte cap.
         while True:
-            chunk = sys.stdin.read(65536)
+            chunk = sys.stdin.buffer.read(65536)
             if not chunk:
                 break
             total += len(chunk)
@@ -34,7 +36,11 @@ def _read_import_text(source: str, what: str) -> str:
                 print(f"❌ {what}超过 {MAX_IMPORT_BYTES // 1024}KB 上限", file=sys.stderr)
                 sys.exit(1)
             chunks.append(chunk)
-        return "".join(chunks)
+        try:
+            return b"".join(chunks).decode("utf-8")
+        except UnicodeDecodeError as e:
+            print(f"❌ {what}不是有效的 UTF-8 编码: {e}", file=sys.stderr)
+            sys.exit(1)
     p = Path(source).expanduser()
     try:
         if p.stat().st_size > MAX_IMPORT_BYTES:
