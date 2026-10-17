@@ -207,3 +207,82 @@ def load_fixed_bindings(root_dir: Path) -> List[Dict[str, Any]]:
         # points simply stay uninjected until the file is repaired.
         _debug(f"Failed to load fixed_bindings.json: {e}")
         return []
+
+
+# ---------- protected system keybindings (schema/protected_bindings.json) ----------
+# Single home for the protected-combos rules: shared by the consistency checker
+# (scripts/check_consistency.py), `omni-profile import`, engine.doctor() and the
+# switch-time filter in engine.switch_mode(), so all four agree on what counts
+# as a protected combination.
+
+def combo_key(mod: str, key: str) -> str:
+    """Normalized combo key: modifiers upper-cased and sorted, joined with the key.
+
+    'SUPER ALT'+'space', 'ALT SUPER'+'SPACE' and 'alt+super + space' all map to
+    the same string, so every caller detects the same violations."""
+    mods = [m.upper() for m in str(mod or "").replace("+", " ").split()]
+    return "+".join(sorted(mods) + [str(key or "").upper()])
+
+
+def load_protected_combos(root_dir) -> dict:
+    """combo_key -> reason, from schema/protected_bindings.json.
+
+    Raises FileNotFoundError when the schema file is missing and ValueError on
+    a malformed entry; callers that treat this as non-fatal must catch it."""
+    protected_file = Path(root_dir) / "schema" / "protected_bindings.json"
+    protected = json.loads(protected_file.read_text(encoding="utf-8")).get("bindings", [])
+    combos = {}
+    for b in protected:
+        if not isinstance(b.get("mod"), str) or not isinstance(b.get("key"), str):
+            raise ValueError(f"protected_bindings.json entry has non-str mod/key: {b!r}")
+        combos[combo_key(b["mod"], b["key"])] = b.get("reason", "")
+    return combos
+
+
+def find_protected_violations(root_dir, profiles: dict) -> list:
+    """Scan loaded profiles ({profile_id: profile_dict}) for bindings on protected
+    system combos. Returns [(profile_id, mod, key, reason), ...].
+
+    A missing or unreadable protected_bindings.json yields no violations
+    (callers that must hard-fail on that use validate_protected_bindings)."""
+    try:
+        combos = load_protected_combos(root_dir)
+    except Exception:
+        return []
+    out = []
+    for p_id, p_data in (profiles or {}).items():
+        for b in (p_data or {}).get("bindings", []):
+            if not isinstance(b, dict):
+                continue
+            ck = combo_key(b.get("mod", ""), b.get("key", ""))
+            if ck in combos:
+                out.append((p_id, b.get("mod", ""), b.get("key", ""), combos[ck]))
+    return out
+
+
+def validate_protected_bindings(root_dir, profile_files) -> bool:
+    """System-critical combos (e.g. the Omarchy menu key) that no profile
+    may override. A violation is a hard error, not a warning: overriding
+    one of these silently breaks the user's way back into the menu/settings."""
+    try:
+        combos = load_protected_combos(root_dir)
+    except FileNotFoundError:
+        print("❌ Missing schema/protected_bindings.json (system-critical combos)", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"❌ Invalid protected_bindings.json: {e}", file=sys.stderr)
+        return False
+    profiles = {}
+    for p_file in profile_files:
+        try:
+            profiles[Path(p_file).name] = json.loads(Path(p_file).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+    ok = True
+    for p_name, mod, key, reason in find_protected_violations(root_dir, profiles):
+        print(f"❌ [{p_name}] {mod} {key} is a protected system "
+              f"entry ({reason}); profiles must not override it", file=sys.stderr)
+        ok = False
+    if ok:
+        print(f"✅ Protected system entries ({len(combos)}) not overridden by any profile")
+    return ok

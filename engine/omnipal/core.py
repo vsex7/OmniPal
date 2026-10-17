@@ -22,7 +22,7 @@ from engine.omnipal.version import (__version__)
 from engine.omnipal.paths import (APPLIED_WINDOW_MODE_FILE, APP_RULE_STATE_FILE, BASELINE_FILE, OVERLAY_FILE, PID_FILE, SNAP_FILE, SNAP_LAYOUTS_FILE, STATE_FILE, _resolve_run_dir, app_rules_file_path, persistence_file_path, resolve_user_profiles_dir)
 from engine.omnipal.util import (LUA_RESTORE_BASELINE, _KEEP, _debug, _escape_lua_string, _sig_combo, atomic_write_json, bind_key_name, bind_signature, combo_signature, compositor_mutation_disabled, engine_lock, find_duplicate_binds, format_combo, lua_str, notify_user, write_state_json)
 from engine.omnipal.hypr_ipc import (_dedupe_binds_lua, _ensure_hyprland_instance, _native_stash_lua, _native_unstash_lua, find_socket2_path)
-from engine.omnipal.profiles import (FORWARD_ACTION, MIGRATION_FALLBACK_MODE, RETIRED_MODES, forward_for_class, forward_lua, is_special_window, load_fixed_bindings, load_terminal_patterns, normalize_window_policy, parse_forward)
+from engine.omnipal.profiles import (FORWARD_ACTION, MIGRATION_FALLBACK_MODE, RETIRED_MODES, combo_key, find_protected_violations, forward_for_class, forward_lua, is_special_window, load_fixed_bindings, load_protected_combos, load_terminal_patterns, normalize_window_policy, parse_forward)
 
 LUA_DISPATCHERS = {
     "close_window": "hl.dsp.window.close()",
@@ -656,6 +656,31 @@ class OmniPalEngine:
         fixed = self.fixed_combos()
         return [b for b in bindings if format_combo(b.get("mod", ""), b.get("key", "")) not in fixed]
 
+    def _without_protected(self, profile_id: str, bindings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Profile bindings minus those on protected system combos.
+
+        `omni-profile import` rejects such profiles outright, but a mode file
+        dropped straight into the profiles directory bypasses `import`, so the
+        engine itself refuses to install these bindings at switch time: skip
+        them with a warning and let the switch continue."""
+        try:
+            combos = load_protected_combos(self.root_dir)
+        except Exception as e:
+            _debug(f"protected-bindings load failed, cannot filter: {e}")
+            return bindings
+        if not combos:
+            return bindings
+        kept = []
+        for b in bindings:
+            ck = combo_key(b.get("mod", ""), b.get("key", ""))
+            if ck in combos:
+                print(f"Warning: skipping protected system key {b.get('mod', '')} {b.get('key', '')} "
+                      f"({combos[ck]}) from profile '{profile_id}'; it will not be installed",
+                      file=sys.stderr)
+            else:
+                kept.append(b)
+        return kept
+
     def _fixed_bind_ops(self) -> List[str]:
         ops, _records = self._build_bind_ops(self.fixed_bindings)
         return ops
@@ -686,6 +711,8 @@ class OmniPalEngine:
             return self.apply_fixed_bindings()
         target_profile = self.profiles[target_mode]
         target_bindings = self._without_fixed(target_profile.get("bindings", []))
+        # Same guard as switch_mode(): never re-install a protected combo.
+        target_bindings = self._without_protected(target_mode, target_bindings)
         # Called after a config reload: the overlay is gone and natives are back, so live == native.
         live = self._live_bind_counts()
         lua_ops, new_overlay_records = self._build_bind_ops(target_bindings, live, self._live_bind_details())
@@ -1570,6 +1597,9 @@ end
             target_profile = self.profiles[target_mode]
             # Fixed entry points (schema/fixed_bindings.json) always win over profile bindings.
             target_bindings = self._without_fixed(target_profile.get("bindings", []))
+            # Protected system combos (schema/protected_bindings.json) are never
+            # installed, even from a mode file dropped in without `import`.
+            target_bindings = self._without_protected(target_mode, target_bindings)
 
             # A previous overlay that unbound natives needs a restore first (exact rebind, reload only as fallback)
             if any(b.get("native_unbound") for b in self._get_active_overlay()):
@@ -2411,12 +2441,13 @@ end"""
 
         # 4. Consistency check
         # Run quietly so `omni-profile doctor --json` stays pure JSON on stdout.
+        # NOTE: only the full checker comes from scripts/ here; the protected
+        # bindings rules come from the engine itself (engine.omnipal.profiles),
+        # so the engine no longer reverse-imports scripts/ for them.
         try:
             from scripts.check_consistency import check_consistency as _check_consistency
-            from scripts.check_consistency import find_protected_violations as _find_protected_violations
         except ImportError:
             _check_consistency = None
-            _find_protected_violations = None
 
         if _check_consistency is not None:
             with contextlib.redirect_stdout(io.StringIO()):
@@ -2436,15 +2467,16 @@ end"""
 
         # 4.6 Protected system keybindings: name exactly which profile overrides what,
         # so `doctor` (not just the dev-side checker) points at the problem.
-        if _find_protected_violations is not None:
-            try:
-                for p_id, mod, key, reason in _find_protected_violations(self.root_dir, self.profiles):
-                    report["issues"].append(
-                        f"Profile '{p_id}' overrides protected system key {mod} {key} ({reason})")
-                    report["fixes"].append(
-                        f"从 '{p_id}' 移除 {mod} {key} 绑定，或改用其他组合键")
-            except Exception as e:
-                _debug(f"protected-bindings scan failed: {e}")
+        # The rules come from engine.omnipal.profiles (imported at module top):
+        # no reverse dependency on scripts/ here.
+        try:
+            for p_id, mod, key, reason in find_protected_violations(self.root_dir, self.profiles):
+                report["issues"].append(
+                    f"Profile '{p_id}' overrides protected system key {mod} {key} ({reason})")
+                report["fixes"].append(
+                    f"从 '{p_id}' 移除 {mod} {key} 绑定，或改用其他组合键")
+        except Exception as e:
+            _debug(f"protected-bindings scan failed: {e}")
 
         if report["issues"]:
             report["healthy"] = False

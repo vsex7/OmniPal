@@ -12,6 +12,16 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# Protected-combos rules live in the engine (engine/omnipal/profiles.py) so the
+# consistency checker, `omni-profile import`, engine.doctor() and the engine's
+# switch-time filter all share one copy (scripts -> engine is forward deps).
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+from engine.omnipal.profiles import combo_key as _combo_key
+from engine.omnipal.profiles import find_protected_violations
+from engine.omnipal.profiles import validate_protected_bindings as _validate_protected_bindings
+
 def _validate_profile_file(p_file: Path, valid_action_ids: dict) -> bool:
     try:
         with open(p_file, "r", encoding="utf-8") as f:
@@ -229,11 +239,6 @@ def _validate_snap_layouts(project_root: Path) -> bool:
         print(f"  💥 Snap layouts validation failed for {snap_file.name}", file=sys.stderr)
     return file_passed
 
-def _combo_key(mod: str, key: str) -> str:
-    mods = [m.upper() for m in str(mod or "").replace("+", " ").split()]
-    return "+".join(sorted(mods) + [str(key or "").upper()])
-
-
 def _validate_fixed_bindings(project_root: Path, valid_action_ids: dict, profile_files) -> bool:
     fixed_file = project_root / "schema" / "fixed_bindings.json"
     if not fixed_file.exists():
@@ -264,69 +269,6 @@ def _validate_fixed_bindings(project_root: Path, valid_action_ids: dict, profile
                 ok = False
     if ok:
         print(f"✅ Fixed entry points ({len(fixed)}) not overridden by any profile")
-    return ok
-
-
-def _load_protected_combos(project_root: Path) -> dict:
-    """combo_key -> reason, from schema/protected_bindings.json."""
-    protected_file = project_root / "schema" / "protected_bindings.json"
-    protected = json.loads(protected_file.read_text(encoding="utf-8")).get("bindings", [])
-    combos = {}
-    for b in protected:
-        if not isinstance(b.get("mod"), str) or not isinstance(b.get("key"), str):
-            raise ValueError(f"protected_bindings.json entry has non-str mod/key: {b!r}")
-        combos[_combo_key(b["mod"], b["key"])] = b.get("reason", "")
-    return combos
-
-
-def find_protected_violations(project_root: Path, profiles: dict) -> list:
-    """Scan loaded profiles ({profile_id: profile_dict}) for bindings on protected
-    system combos. Returns [(profile_id, mod, key, reason), ...].
-
-    Shared by the consistency checker, `omni-profile import`, and `engine.doctor()`
-    so all three agree on what counts as a violation.
-    """
-    try:
-        combos = _load_protected_combos(project_root)
-    except Exception:
-        return []
-    out = []
-    for p_id, p_data in (profiles or {}).items():
-        for b in (p_data or {}).get("bindings", []):
-            if not isinstance(b, dict):
-                continue
-            ck = _combo_key(b.get("mod", ""), b.get("key", ""))
-            if ck in combos:
-                out.append((p_id, b.get("mod", ""), b.get("key", ""), combos[ck]))
-    return out
-
-
-def _validate_protected_bindings(project_root: Path, profile_files) -> bool:
-    """System-critical combos (e.g. the Omarchy menu key) that no profile
-    may override. A violation is a hard error, not a warning: overriding
-    one of these silently breaks the user's way back into the menu/settings.
-    """
-    try:
-        combos = _load_protected_combos(project_root)
-    except FileNotFoundError:
-        print("❌ Missing schema/protected_bindings.json (system-critical combos)", file=sys.stderr)
-        return False
-    except Exception as e:
-        print(f"❌ Invalid protected_bindings.json: {e}", file=sys.stderr)
-        return False
-    profiles = {}
-    for p_file in profile_files:
-        try:
-            profiles[Path(p_file).name] = json.loads(Path(p_file).read_text(encoding="utf-8"))
-        except Exception:
-            continue
-    ok = True
-    for p_name, mod, key, reason in find_protected_violations(project_root, profiles):
-        print(f"❌ [{p_name}] {mod} {key} is a protected system "
-              f"entry ({reason}); profiles must not override it", file=sys.stderr)
-        ok = False
-    if ok:
-        print(f"✅ Protected system entries ({len(combos)}) not overridden by any profile")
     return ok
 
 

@@ -457,7 +457,8 @@ def cmd_export(engine: OmniPalEngine, args):
 
 def cmd_import(engine: OmniPalEngine, args):
     import tempfile, os, io, contextlib
-    from scripts.check_consistency import _validate_profile_file, _validate_protected_bindings
+    from scripts.check_consistency import _validate_profile_file
+    from engine.omnipal.profiles import validate_protected_bindings
     try:
         raw = _read_import_text(args.file, "模式文件")
         p_data = json.loads(raw)
@@ -497,7 +498,7 @@ def cmd_import(engine: OmniPalEngine, args):
         # System-critical combos (e.g. the Omarchy menu key) are rejected here too,
         # not just in check_consistency.py, so `import` can't smuggle one in.
         with contextlib.redirect_stdout(io.StringIO()):
-            protected_ok = _validate_protected_bindings(engine.root_dir, [tmp])
+            protected_ok = validate_protected_bindings(engine.root_dir, [tmp])
         if not protected_ok:
             print("❌ 覆盖了系统保护键位，未导入", file=sys.stderr)
             sys.exit(1)
