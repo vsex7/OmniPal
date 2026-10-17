@@ -50,16 +50,28 @@ LUA_DISPATCHERS = {
 APP_RULE_REGEX_MAX_LEN = 200
 APP_RULE_WINDOW_CLASS_MAX_LEN = 512
 
-# Group containing a greedy inner quantifier, immediately followed by another
-# quantifier: the classic catastrophic-backtracking shape, e.g. (a+)+, (.*)*.
-# Deliberately conservative (may flag some linear patterns like (https?://)?);
-# window-class regexes are short in practice, so false positives are cheap and
-# the rule stays explainable and testable.
-_NESTED_QUANTIFIER_RE = re.compile(r"\([^()]*[*+][^()]*\)[*+?]")
+# A group-closing `)` directly followed by `*`, `+`, or `{`: the whole group is
+# under quantification — the catastrophic-backtracking shape, e.g. (a+)+,
+# (a|a)*b, (.*a){12}, (a{1,30}){1,30}. `)?` stays allowed, so the existing
+# `(https?://)?` is unaffected. Operates on the literal-stripped skeleton, so
+# only real group closes are seen.
 # Same single atom quantified twice in a row, e.g. a*a* or .*.* : ambiguous and
 # just as exponential on failure; nobody writes this on purpose. (a*b* with
 # different atoms is linear and stays allowed.)
 _REPEATED_QUANTIFIED_ATOM_RE = re.compile(r"(.)[*+]\1[*+]")
+
+
+def _has_quantified_group(skeleton: str) -> bool:
+    """True if a group-closing `)` is directly followed by `*`, `+`, or `{`.
+    Runs on the literal-stripped skeleton so only real group closes are seen;
+    `)?` is deliberately not flagged here (checked by callers)."""
+    i = skeleton.find(")")
+    while i != -1:
+        j = i + 1
+        if j < len(skeleton) and skeleton[j] in "*+{":
+            return True
+        i = skeleton.find(")", j)
+    return False
 
 
 def _strip_regex_literals(pattern: str) -> str:
@@ -106,9 +118,11 @@ def validate_app_rule_pattern(pattern: str) -> None:
     except re.error as e:
         raise ValueError(f"正则非法: {e}")
     skeleton = _strip_regex_literals(pattern)
-    if _NESTED_QUANTIFIER_RE.search(skeleton) or \
-            _REPEATED_QUANTIFIED_ATOM_RE.search(skeleton):
-        raise ValueError("正则包含嵌套/重复量词（如 (a+)+、a*a*），匹配可能卡死，已拒绝")
+    if _has_quantified_group(skeleton):
+        raise ValueError("正则中分组后面不能直接跟量词（*、+、{…}），可能导致匹配卡死，已拒绝；"
+                         "可选分组请用 (…) ? 形式")
+    if _REPEATED_QUANTIFIED_ATOM_RE.search(skeleton):
+        raise ValueError("正则包含重复量词（如 a*a*），匹配可能卡死，已拒绝")
 
 
 class OmniPalEngine:
@@ -736,7 +750,10 @@ class OmniPalEngine:
         try:
             combos = load_protected_combos(self.root_dir)
         except Exception as e:
-            _debug(f"protected-bindings load failed, cannot filter: {e}")
+            # Loud on purpose: silently disabling the filter would leave the
+            # Omarchy menu key unprotected with no visible trace.
+            print(f"Warning: protected_bindings.json 读取失败（{e}），受保护键位过滤已停用",
+                  file=sys.stderr)
             return bindings
         if not combos:
             return bindings
@@ -1801,10 +1818,45 @@ end
                     data["enabled"] = bool(raw.get("enabled", True))
                     dm = raw.get("default_mode")
                     data["default_mode"] = dm if dm in self.profiles else None
-                    data["rules"] = [r for r in raw.get("rules", []) if isinstance(r, dict) and r.get("class") and r.get("mode")]
+                    rules = []
+                    for r in raw.get("rules", []):
+                        if not (isinstance(r, dict) and r.get("class") and r.get("mode")):
+                            continue
+                        if r.get("match") == "regex":
+                            try:
+                                validate_app_rule_pattern(r["class"])
+                            except ValueError as e:
+                                # Hand-edited or legacy rule files bypass the
+                                # save-time gate; skip the rule here so a bad
+                                # regex can never reach the matcher and hang the
+                                # daemon. doctor() reports these via
+                                # invalid_app_rules().
+                                _debug(f"skipping app rule with unsafe regex {r.get('class')!r}: {e}")
+                                continue
+                        rules.append(r)
+                    data["rules"] = rules
             except (OSError, ValueError) as e:
                 print(f"Warning: Failed to read app rules {path}: {e}", file=sys.stderr)
         return data
+
+    def invalid_app_rules(self) -> List[Dict[str, str]]:
+        """Rules in the on-disk file that load_app_rules() skips for unsafe regex.
+        Returns [{class, reason}]; used by doctor() to report them."""
+        path = app_rules_file_path()
+        out: List[Dict[str, str]] = []
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return out
+        if not isinstance(raw, dict):
+            return out
+        for r in raw.get("rules", []):
+            if isinstance(r, dict) and r.get("match") == "regex":
+                try:
+                    validate_app_rule_pattern(r.get("class"))
+                except ValueError as e:
+                    out.append({"class": str(r.get("class")), "reason": str(e)})
+        return out
 
     def save_app_rules(self, data: Dict[str, Any]) -> None:
         for r in data.get("rules", []):
@@ -2550,6 +2602,17 @@ end"""
                     f"从 '{p_id}' 移除 {mod} {key} 绑定，或改用其他组合键")
         except Exception as e:
             _debug(f"protected-bindings scan failed: {e}")
+
+        # App rules skipped at load for unsafe regex (hand-edited / legacy files
+        # bypass the save-time gate).
+        try:
+            for bad in self.invalid_app_rules():
+                report["issues"].append(
+                    f"App rule '{bad['class']}' skipped: unsafe regex ({bad['reason']})")
+                report["fixes"].append(
+                    "修改该规则的正则（去掉分组后的量词）或改用 exact/prefix 匹配")
+        except Exception as e:
+            _debug(f"invalid app-rules scan failed: {e}")
 
         if report["issues"]:
             report["healthy"] = False

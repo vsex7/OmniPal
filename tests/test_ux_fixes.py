@@ -244,16 +244,21 @@ class TestDiffUnknown(unittest.TestCase):
         self.assertNotIn("0 个", out.getvalue())
 
 
-class TestFixedUnification(unittest.TestCase):
-    """Issue #6b: all fixed entries share one modifier group."""
+class TestFixedEntries(unittest.TestCase):
+    """Fixed entries must match schema/fixed_bindings.json exactly.
 
-    def test_all_fixed_entries_use_super_alt(self):
+    NOTE: cheat_sheet is SUPER CTRL+slash, NOT SUPER ALT+slash — the latter
+    collides with Omarchy's native "Monitor scaling down" (tiling.lua).
+    Do not "unify" the modifiers without checking Omarchy defaults first."""
+
+    def test_fixed_combos_match_schema(self):
+        e = _engine()
         fixed = json.loads(
             (PROJECT_ROOT / "schema" / "fixed_bindings.json").read_text(encoding="utf-8"))["bindings"]
-        self.assertEqual(len(fixed), 3)
-        for b in fixed:
-            mods = sorted(b["mod"].upper().split())
-            self.assertEqual(mods, ["ALT", "SUPER"], f"{b} should use SUPER ALT")
+        expected = {f"{b['mod'].replace(' ', ' + ')} + {b['key'].upper()}": b["action"]
+                    for b in fixed}
+        self.assertEqual(e.fixed_combos(), expected)
+        self.assertEqual(e.fixed_combos()["SUPER + CTRL + SLASH"], "cheat_sheet")
 
 
 class TestCategoryLabels(unittest.TestCase):

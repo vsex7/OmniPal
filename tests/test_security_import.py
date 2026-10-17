@@ -187,6 +187,64 @@ class TestValidatorHardening(unittest.TestCase):
                 self.assertTrue(_validate_profile_file(p, e.actions_catalog))
 
 
+class TestRegexBacktrackingGuard(unittest.TestCase):
+    """A4 返工：分组后跟量词一律拒绝；加载时过滤手改/遗留规则文件；doctor 上报。"""
+
+    # 用户验收的 5 个绕过用例：旧启发式放行、实际会卡死（29 字符类名 >3 秒）
+    BYPASSES = [
+        "(a|a)*b",
+        "((a+))+$",
+        "(a+){2,}$",
+        "(a{1,30}){1,30}$",
+        "(.*a){12}$",
+    ]
+
+    def test_rejects_quantified_groups(self):
+        from engine.engine import validate_app_rule_pattern
+        for pat in self.BYPASSES + ["(a+)+$", "(ab)+", "(a|b){2}"]:
+            with self.subTest(pattern=pat):
+                with self.assertRaises(ValueError):
+                    validate_app_rule_pattern(pat)
+
+    def test_allows_optional_group_and_legit_patterns(self):
+        from engine.engine import validate_app_rule_pattern
+        for pat in ["(https?://)?", r"firefox(\.exe)?", "^jetbrains-",
+                    "a*b*", "[Cc]ode|kitty", "^a+$", "(a)?b"]:
+            with self.subTest(pattern=pat):
+                validate_app_rule_pattern(pat)  # must not raise
+
+    def test_load_skips_hand_edited_bad_regex(self):
+        from engine.omnipal.paths import app_rules_file_path
+        e = OmniPalEngine(root_dir=PROJECT_ROOT, user_profiles_dir=Path(tempfile.mkdtemp()))
+        path = app_rules_file_path()
+        path.write_text(json.dumps({"rules": [
+            {"class": "(a|a)*b", "match": "regex", "mode": "windows"},
+            {"class": "firefox", "match": "exact", "mode": "windows"},
+        ]}), encoding="utf-8")
+        try:
+            rules = e.load_app_rules()["rules"]
+            self.assertEqual([r["class"] for r in rules], ["firefox"])
+            bad = e.invalid_app_rules()
+            self.assertEqual(len(bad), 1)
+            self.assertEqual(bad[0]["class"], "(a|a)*b")
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_doctor_reports_skipped_rule(self):
+        from engine.omnipal.paths import app_rules_file_path
+        e = OmniPalEngine(root_dir=PROJECT_ROOT, user_profiles_dir=Path(tempfile.mkdtemp()))
+        path = app_rules_file_path()
+        path.write_text(json.dumps({"rules": [
+            {"class": "(.*a){12}$", "match": "regex", "mode": "mac"},
+        ]}), encoding="utf-8")
+        try:
+            diag = e.doctor()
+            hits = [i for i in diag["issues"] if "(.*a){12}$" in i]
+            self.assertTrue(hits, f"doctor should report the skipped rule: {diag['issues']}")
+        finally:
+            path.unlink(missing_ok=True)
+
+
 class TestImportCliHardening(unittest.TestCase):
     def setUp(self):
         # Other test modules' tearDownModule may pop these; re-ensure isolation.
