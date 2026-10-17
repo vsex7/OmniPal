@@ -1821,6 +1821,14 @@ end
         except (OSError, ValueError, TypeError) as e:
             _debug(e)
 
+    def _pretty_forward_target(self, spec: str) -> str:
+        """'CTRL W' -> 'Ctrl+W' for cheatsheet display; falls back to raw."""
+        try:
+            mods, key = parse_forward(spec)
+        except ValueError:
+            return str(spec)
+        return "+".join([m.capitalize() for m in mods] + [key])
+
     def cheatsheet(self, mode: Optional[str] = None) -> List[Dict[str, Any]]:
         """Returns structured cheatsheet data from single source of truth."""
         mode = (mode or self.get_state().get("mode", "omarchy")).lower().strip()
@@ -1833,14 +1841,25 @@ end
             action_id = b.get("action")
             action_meta = self.actions_catalog.get(action_id, {})
             combo = format_combo(b.get("mod", ""), b.get("key", ""))
+            # Binding-level display name override (optional "name" in the
+            # profile). forward_shortcut falls back to its target combo so
+            # that 19 identical 「转发快捷键到应用」 rows stay distinguishable.
+            name = b.get("name")
+            if action_id == FORWARD_ACTION and b.get("forward"):
+                target = self._pretty_forward_target(b["forward"])
+                name = f"{name}（发送 {target}）" if name else f"转发为 {target}"
+            if not name:
+                name = action_meta.get("name", action_id)
             sheet.append({
                 "action": action_id,
                 "key": combo,
-                "name": action_meta.get("name", action_id),
+                "name": name,
                 "category": action_meta.get("category", "other"),
                 "description": action_meta.get("description", "")
             })
         # Fixed entry points are live in every mode (incl. Omarchy 原生模式).
+        # A fixed combo always wins: a profile row on the very same keys is
+        # dropped so the fixed entry is never shadowed.
         fixed = self.fixed_combos()
         sheet = [e for e in sheet if e["key"] not in fixed]
         for b in self.fixed_bindings:
@@ -1853,7 +1872,29 @@ end
                 "description": "固定入口：所有模式通用",
                 "fixed": True,
             })
-        return sheet
+        # One action on several combos (profile alias + fixed entry) merges
+        # into a single row listing every combo, e.g. "SUPER+slash / SUPER+ALT+slash".
+        # Grouped by (action, name): forward_shortcut rows each carry their own
+        # meaning ("关闭标签页", "新建标签页", …) and must NOT collapse into one.
+        merged: List[Dict[str, Any]] = []
+        by_action: Dict[tuple, Dict[str, Any]] = {}
+        for e in sheet:
+            g = by_action.get((e["action"], e["name"]))
+            if g is None:
+                e = dict(e)
+                e["keys"] = [e["key"]]
+                by_action[(e["action"], e["name"])] = e
+                merged.append(e)
+                continue
+            if e["key"] not in g["keys"]:
+                g["keys"].append(e["key"])
+            # A fixed entry is canonical: keep its metadata on the merged row.
+            if e.get("fixed") and not g.get("fixed"):
+                for k in ("name", "category", "description", "fixed"):
+                    g[k] = e[k]
+        for e in merged:
+            e["key"] = " / ".join(e["keys"])
+        return merged
 
     def get_windows(self) -> List[Dict[str, Any]]:
         """Queries all clients/windows from Hyprland via `hyprctl clients -j` safely."""

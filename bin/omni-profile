@@ -243,7 +243,9 @@ def cmd_diff(engine: OmniPalEngine, args):
         print(json.dumps(d, indent=2, ensure_ascii=False))
         return
     if d["source"] == "none":
-        print("⚠️ 读不到 Hyprland 当前的快捷键，也没有快照，无法对比。", file=sys.stderr)
+        print("⚠️ 读不到 Hyprland 当前的快捷键，也没有快照，无法判断接管情况。", file=sys.stderr)
+        print(f"模式 {d['mode']} 的 Omarchy 原生快捷键接管情况：无法判断")
+        return
     print(f"模式 {d['mode']} 会接管 {d['count']} 个 Omarchy 原生快捷键（来源: {d['source']}）")
     for e in d["takeovers"]:
         was = "；".join(n["description"] or f"{n['dispatcher']} {n['arg']}".strip() for n in e["native"])

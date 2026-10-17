@@ -97,7 +97,7 @@ Item {
   // 应用规则自动切换标记（state.json auto）
   property var autoInfo: null
   // 固定入口（schema/fixed_bindings.json），所有模式通用
-  readonly property string fixedKeysText: "固定入口（所有模式通用）：Super+Ctrl+/ 速查表 · Super+Alt+I 控制中心 · Super+Alt+O 概览"
+  readonly property string fixedKeysText: "固定入口（所有模式通用）：Super+Alt+/ 速查表 · Super+Alt+I 控制中心 · Super+Alt+O 概览"
 
   function windowModeLabel(m) { return m === "floating" ? "浮动" : "平铺" }
   function policyLabel(p) { return p === "follow-profile" ? "跟随模式" : root.windowModeLabel(p) }

@@ -51,6 +51,11 @@ def _validate_profile_file(p_file: Path, valid_action_ids: dict) -> bool:
             print(f"  ❌ [{p_file.name} #binding {i+1}] 'mod'/'key' must be strings", file=sys.stderr)
             file_passed = False
             continue
+
+        # Optional display-name override (used by the cheatsheet).
+        if "name" in b and not isinstance(b["name"], str):
+            print(f"  ❌ [{p_file.name} #binding {i+1}] 'name' must be a string", file=sys.stderr)
+            file_passed = False
         mod = mod.strip()
         key = key.strip()
 
@@ -262,6 +267,44 @@ def _validate_fixed_bindings(project_root: Path, valid_action_ids: dict, profile
     return ok
 
 
+def _validate_protected_bindings(project_root: Path, profile_files) -> bool:
+    """System-critical combos (e.g. the Omarchy menu key) that no profile
+    may override. A violation is a hard error, not a warning: overriding
+    one of these silently breaks the user's way back into the menu/settings.
+    """
+    protected_file = project_root / "schema" / "protected_bindings.json"
+    if not protected_file.exists():
+        print("❌ Missing schema/protected_bindings.json (system-critical combos)", file=sys.stderr)
+        return False
+    try:
+        protected = json.loads(protected_file.read_text(encoding="utf-8")).get("bindings", [])
+    except Exception as e:
+        print(f"❌ Invalid protected_bindings.json: {e}", file=sys.stderr)
+        return False
+    ok = True
+    combos = {}
+    for b in protected:
+        if not isinstance(b.get("mod"), str) or not isinstance(b.get("key"), str):
+            print(f"❌ protected_bindings.json entry has non-str mod/key: {b!r}", file=sys.stderr)
+            ok = False
+            continue
+        combos[_combo_key(b["mod"], b["key"])] = b.get("reason", "")
+    for p_file in profile_files:
+        try:
+            prof = json.loads(Path(p_file).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for b in prof.get("bindings", []):
+            ck = _combo_key(b.get("mod", ""), b.get("key", ""))
+            if ck in combos:
+                print(f"❌ [{Path(p_file).name}] {b.get('mod')} {b.get('key')} is a protected system "
+                      f"entry ({combos[ck]}); profiles must not override it", file=sys.stderr)
+                ok = False
+    if ok:
+        print(f"✅ Protected system entries ({len(combos)}) not overridden by any profile")
+    return ok
+
+
 def _validate_version_consistency(project_root: Path) -> bool:
     """All plugin manifest.json versions must equal the engine __version__.
 
@@ -349,6 +392,10 @@ def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = No
     if not _validate_fixed_bindings(project_root, valid_action_ids, profile_files):
         all_passed = False
 
+    # Protected system entries (e.g. Omarchy menu key): no profile may override them.
+    if not _validate_protected_bindings(project_root, profile_files):
+        all_passed = False
+
     target_user_dir = user_profiles_dir
     if target_user_dir is None and "OMNIPAL_USER_PROFILES_DIR" in os.environ:
         target_user_dir = Path(os.environ["OMNIPAL_USER_PROFILES_DIR"])
@@ -361,6 +408,8 @@ def check_consistency(project_root: Path, user_profiles_dir: Optional[Path] = No
                 if not _validate_profile_file(u_file, valid_action_ids):
                     all_passed = False
             if not _validate_fixed_bindings(project_root, valid_action_ids, user_profile_files):
+                all_passed = False
+            if not _validate_protected_bindings(project_root, user_profile_files):
                 all_passed = False
 
     # Validate snap layouts catalog (single source of truth for zones/templates)

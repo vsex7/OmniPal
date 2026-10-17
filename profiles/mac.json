@@ -107,7 +107,7 @@
     {
       "action": "file_manager",
       "mod": "SUPER ALT",
-      "key": "space"
+      "key": "E"
     },
     {
       "action": "emoji_picker",
@@ -118,115 +118,134 @@
       "mod": "SUPER",
       "key": "W",
       "action": "forward_shortcut",
-      "forward": "CTRL W"
+      "forward": "CTRL W",
+      "name": "关闭标签页"
     },
     {
       "mod": "SUPER",
       "key": "T",
       "action": "forward_shortcut",
-      "forward": "CTRL T"
+      "forward": "CTRL T",
+      "name": "新建标签页"
     },
     {
       "mod": "SUPER SHIFT",
       "key": "T",
       "action": "forward_shortcut",
-      "forward": "CTRL SHIFT T"
+      "forward": "CTRL SHIFT T",
+      "name": "恢复关闭的标签页"
     },
     {
       "mod": "SUPER",
       "key": "F",
       "action": "forward_shortcut",
-      "forward": "CTRL F"
+      "forward": "CTRL F",
+      "name": "查找"
     },
     {
       "mod": "SUPER",
       "key": "Z",
       "action": "forward_shortcut",
-      "forward": "CTRL Z"
+      "forward": "CTRL Z",
+      "name": "撤销"
     },
     {
       "mod": "SUPER SHIFT",
       "key": "Z",
       "action": "forward_shortcut",
-      "forward": "CTRL SHIFT Z"
+      "forward": "CTRL SHIFT Z",
+      "name": "重做"
     },
     {
       "mod": "SUPER",
       "key": "A",
       "action": "forward_shortcut",
-      "forward": "CTRL A"
+      "forward": "CTRL A",
+      "name": "全选"
     },
     {
       "mod": "SUPER",
       "key": "S",
       "action": "forward_shortcut",
-      "forward": "CTRL S"
+      "forward": "CTRL S",
+      "name": "保存"
     },
     {
       "mod": "SUPER",
       "key": "L",
       "action": "forward_shortcut",
-      "forward": "CTRL L"
+      "forward": "CTRL L",
+      "name": "定位到地址栏"
     },
     {
       "mod": "SUPER",
       "key": "R",
       "action": "forward_shortcut",
-      "forward": "CTRL R"
+      "forward": "CTRL R",
+      "name": "刷新页面"
     },
     {
       "mod": "SUPER",
       "key": "1",
       "action": "forward_shortcut",
-      "forward": "CTRL 1"
+      "forward": "CTRL 1",
+      "name": "切换到第1个标签页"
     },
     {
       "mod": "SUPER",
       "key": "2",
       "action": "forward_shortcut",
-      "forward": "CTRL 2"
+      "forward": "CTRL 2",
+      "name": "切换到第2个标签页"
     },
     {
       "mod": "SUPER",
       "key": "3",
       "action": "forward_shortcut",
-      "forward": "CTRL 3"
+      "forward": "CTRL 3",
+      "name": "切换到第3个标签页"
     },
     {
       "mod": "SUPER",
       "key": "4",
       "action": "forward_shortcut",
-      "forward": "CTRL 4"
+      "forward": "CTRL 4",
+      "name": "切换到第4个标签页"
     },
     {
       "mod": "SUPER",
       "key": "5",
       "action": "forward_shortcut",
-      "forward": "CTRL 5"
+      "forward": "CTRL 5",
+      "name": "切换到第5个标签页"
     },
     {
       "mod": "SUPER",
       "key": "6",
       "action": "forward_shortcut",
-      "forward": "CTRL 6"
+      "forward": "CTRL 6",
+      "name": "切换到第6个标签页"
     },
     {
       "mod": "SUPER",
       "key": "7",
       "action": "forward_shortcut",
-      "forward": "CTRL 7"
+      "forward": "CTRL 7",
+      "name": "切换到第7个标签页"
     },
     {
       "mod": "SUPER",
       "key": "8",
       "action": "forward_shortcut",
-      "forward": "CTRL 8"
+      "forward": "CTRL 8",
+      "name": "切换到第8个标签页"
     },
     {
       "mod": "SUPER",
       "key": "9",
       "action": "forward_shortcut",
-      "forward": "CTRL 9"
+      "forward": "CTRL 9",
+      "name": "切换到第9个标签页"
     },
     {
       "action": "app_switch_next",

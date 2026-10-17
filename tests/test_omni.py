@@ -2060,7 +2060,7 @@ class TestFixedEntryPoints(unittest.TestCase):
 
     def test_fixed_combos(self):
         self.assertEqual(self.engine.fixed_combos(), {
-            "SUPER + CTRL + SLASH": "cheat_sheet",
+            "SUPER + ALT + SLASH": "cheat_sheet",
             "SUPER + ALT + I": "omni_settings",
             "SUPER + ALT + O": "task_view",
         })
@@ -2103,9 +2103,9 @@ class TestFixedEntryPoints(unittest.TestCase):
         import check_consistency as cc
         with tempfile.TemporaryDirectory() as tmp:
             bad = Path(tmp) / "bad.json"
-            bad.write_text(json.dumps({"bindings": [{"action": "lock_screen", "mod": "SUPER CTRL", "key": "slash"}]}))
+            bad.write_text(json.dumps({"bindings": [{"action": "lock_screen", "mod": "SUPER ALT", "key": "slash"}]}))
             ok_alias = Path(tmp) / "ok.json"
-            ok_alias.write_text(json.dumps({"bindings": [{"action": "cheat_sheet", "mod": "SUPER CTRL", "key": "slash"}]}))
+            ok_alias.write_text(json.dumps({"bindings": [{"action": "cheat_sheet", "mod": "SUPER ALT", "key": "slash"}]}))
             actions = {a["id"]: a for a in json.loads((PROJECT_ROOT / "schema" / "actions.json").read_text())["actions"]}
             with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
                 self.assertFalse(cc._validate_fixed_bindings(PROJECT_ROOT, actions, [bad]))
@@ -2177,7 +2177,7 @@ class TestUiAutoOverrideText(unittest.TestCase):
         self.assertIn("离开后回到", bar)
         st = (PROJECT_ROOT / "plugins/omni.settings/SettingsPanel.qml").read_text(encoding="utf-8")
         self.assertIn("root.windowModeLabel(modeCard.modelData.windowMode)", st)
-        self.assertIn("Super+Ctrl+/", st)
+        self.assertIn("Super+Alt+/", st)
         self.assertIn("已覆盖 · ", bar)
         self.assertIn("（已覆盖：全局", st)
         self.assertIn("已覆盖 · ", st)
