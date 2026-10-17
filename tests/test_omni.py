@@ -1403,6 +1403,56 @@ class TestAppRules(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.engine.save_app_rules({"enabled": True, "rules": [{"class": "x", "mode": "nope"}]})
 
+    def test_save_rejects_nested_quantifier_regex(self):
+        # catastrophic-backtracking shapes must never reach the daemon
+        for pat in ("(a+)+$", "(a+)+", "(x*)*", "(.*)+", "(?:ab+)+",
+                    "(?P<n>a+)+", "a*a*", ".*.*"):
+            with self.assertRaises(ValueError, msg=pat):
+                self.engine.save_app_rules(
+                    {"enabled": True,
+                     "rules": [{"class": pat, "match": "regex", "mode": "windows"}]})
+
+    def test_save_rejects_overlong_regex(self):
+        with self.assertRaises(ValueError):
+            self.engine.save_app_rules(
+                {"enabled": True,
+                 "rules": [{"class": "a" * 201, "match": "regex", "mode": "windows"}]})
+        # exactly at the cap is fine
+        self.engine.save_app_rules(
+            {"enabled": True,
+             "rules": [{"class": "a" * 200, "match": "regex", "mode": "windows"}]})
+
+    def test_save_rejects_invalid_regex(self):
+        with self.assertRaises(ValueError):
+            self.engine.save_app_rules(
+                {"enabled": True,
+                 "rules": [{"class": "(unclosed", "match": "regex", "mode": "windows"}]})
+
+    def test_legit_regex_rules_unaffected(self):
+        # escaped metachars / char classes are not quantifiers; ordinary
+        # patterns must keep working end to end
+        rules = {"enabled": True, "rules": [
+            {"class": "^jetbrains-", "match": "regex", "mode": "windows"},
+            {"class": r"firefox(\.exe)?", "match": "regex", "mode": "mac"},
+            {"class": "[Cc]ode|kitty", "match": "regex", "mode": "omarchy"},
+            {"class": "a*b*", "match": "regex", "mode": "mac"},  # 不同原子相邻量词是线性的
+        ]}
+        self.engine.save_app_rules(rules)
+        m = self.engine.match_app_rule
+        self.assertEqual(m("jetbrains-idea")["mode"], "windows")
+        self.assertEqual(m("Firefox.exe")["mode"], "mac")
+        self.assertEqual(m("kitty")["mode"], "omarchy")
+        self.assertEqual(m("aaabbb")["mode"], "mac")
+
+    def test_match_bounds_long_window_class(self):
+        # a pathological window class is truncated before user regexes see it:
+        # matching stays prompt and still works for ordinary patterns
+        rules = {"enabled": True, "rules": [
+            {"class": "^a+$", "match": "regex", "mode": "windows"},
+        ]}
+        self.assertEqual(self.engine.match_app_rule("a" * 5000, rules)["mode"], "windows")
+        self.assertIsNone(self.engine.match_app_rule("b" * 5000, rules))
+
     def test_switch_and_return_to_manual_mode(self):
         self.engine.save_app_rules({"enabled": True, "default_mode": None,
                                     "rules": [{"class": "code", "mode": "mac"}]})

@@ -41,6 +41,76 @@ LUA_DISPATCHERS = {
 # Actions that forward a shortcut to the focused app (Hyprland `sendshortcut`).
 # Their combo usually collides with an Omarchy native bind, so the native bind is
 # unbound while the overlay is active and restored via `hyprctl reload`.
+# --- App-rule regex safety -------------------------------------------------
+# A regex-typed app rule runs inside the daemon on every focus change
+# (OmniPalEngine.match_app_rule), so a catastrophic-backtracking pattern can
+# wedge the whole daemon. All rule entry points (`rules add`, `rules import`,
+# and the settings panel, which shells out to the `omni-profile rules` CLI)
+# funnel through validate_app_rule_pattern(); keep it the single gate.
+APP_RULE_REGEX_MAX_LEN = 200
+APP_RULE_WINDOW_CLASS_MAX_LEN = 512
+
+# Group containing a greedy inner quantifier, immediately followed by another
+# quantifier: the classic catastrophic-backtracking shape, e.g. (a+)+, (.*)*.
+# Deliberately conservative (may flag some linear patterns like (https?://)?);
+# window-class regexes are short in practice, so false positives are cheap and
+# the rule stays explainable and testable.
+_NESTED_QUANTIFIER_RE = re.compile(r"\([^()]*[*+][^()]*\)[*+?]")
+# Same single atom quantified twice in a row, e.g. a*a* or .*.* : ambiguous and
+# just as exponential on failure; nobody writes this on purpose. (a*b* with
+# different atoms is linear and stays allowed.)
+_REPEATED_QUANTIFIED_ATOM_RE = re.compile(r"(.)[*+]\1[*+]")
+
+
+def _strip_regex_literals(pattern: str) -> str:
+    """Blank out escaped chars and [...] classes so the nested-quantifier
+    heuristic only sees real regex syntax (e.g. ``\\+`` or ``[+]`` are not
+    quantifiers)."""
+    out = []
+    i, n = 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "\\":
+            out.append(" ")
+            i += 2
+            continue
+        if c == "[":
+            j = i + 1
+            if j < n and pattern[j] == "^":
+                j += 1
+            if j < n and pattern[j] == "]":
+                j += 1  # a leading "]" is a literal
+            while j < n and pattern[j] != "]":
+                if pattern[j] == "\\":
+                    j += 1
+                j += 1
+            i = j + 1 if j < n else n
+            out.append(" ")
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def validate_app_rule_pattern(pattern: str) -> None:
+    """Reject regex-typed app-rule patterns that are invalid, too long, or
+    shaped for catastrophic backtracking. Raises ValueError with a
+    human-readable (Chinese) reason; returns None when the pattern is fine."""
+    if not isinstance(pattern, str):
+        raise ValueError("规则类名必须是字符串")
+    if len(pattern) > APP_RULE_REGEX_MAX_LEN:
+        raise ValueError(
+            f"正则过长（{len(pattern)} 字符，上限 {APP_RULE_REGEX_MAX_LEN}），请缩短")
+    try:
+        re.compile(pattern)
+    except re.error as e:
+        raise ValueError(f"正则非法: {e}")
+    skeleton = _strip_regex_literals(pattern)
+    if _NESTED_QUANTIFIER_RE.search(skeleton) or \
+            _REPEATED_QUANTIFIED_ATOM_RE.search(skeleton):
+        raise ValueError("正则包含嵌套/重复量词（如 (a+)+、a*a*），匹配可能卡死，已拒绝")
+
+
 class OmniPalEngine:
     def __init__(self, root_dir: Optional[Path] = None, user_profiles_dir: Optional[Path] = None):
         self.root_dir = root_dir or Path(__file__).resolve().parents[2]  # NOTE(structure): core.py lives one level deeper than the old engine.py; parents[2] == repo root
@@ -1743,8 +1813,7 @@ end
             if r.get("match", "exact") not in ("exact", "prefix", "regex"):
                 raise ValueError(f"Invalid match type '{r.get('match')}'")
             if r.get("match") == "regex":
-                import re
-                re.compile(r["class"])
+                validate_app_rule_pattern(r["class"])
         dm = data.get("default_mode")
         if dm is not None and dm not in self.profiles:
             raise ValueError(f"Unknown default mode '{dm}'")
@@ -1762,6 +1831,10 @@ end
         if not rules.get("enabled", True) or not window_class:
             return None
         wc = window_class.strip().lower()
+        # Bound the subject handed to user regexes: a hostile rule (or a
+        # hostile window class) must not be able to wedge the daemon with
+        # backtracking over an unbounded string.
+        regex_subject = window_class[:APP_RULE_WINDOW_CLASS_MAX_LEN]
         for r in rules.get("rules", []):
             if not r.get("enabled", True):
                 continue
@@ -1770,7 +1843,7 @@ end
             try:
                 if (kind == "exact" and wc == pat.lower()) or \
                    (kind == "prefix" and wc.startswith(pat.lower())) or \
-                   (kind == "regex" and re.search(pat, window_class, re.IGNORECASE)):
+                   (kind == "regex" and re.search(pat, regex_subject, re.IGNORECASE)):
                     return r
             except re.error as e:
                 _debug(e)

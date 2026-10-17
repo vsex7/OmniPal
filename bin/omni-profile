@@ -6,7 +6,6 @@ Direct controller for OmniPal runtime engine.
 
 import argparse
 import json
-import re
 import sys
 import os
 from pathlib import Path
@@ -15,7 +14,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from engine.engine import OmniPalEngine, run_daemon, LUA_DISPATCHERS
+from engine.engine import OmniPalEngine, run_daemon, LUA_DISPATCHERS, validate_app_rule_pattern
 
 # Untrusted import files (profile JSON / app rules) are capped to stay well
 # above any legitimate size while blocking memory-exhaustion via huge inputs.
@@ -669,9 +668,9 @@ def cmd_rules(engine: OmniPalEngine, args):
                 skipped.append(f"{cls}（未知匹配方式 {match!r}）"); continue
             if match == "regex":
                 try:
-                    re.compile(cls)
-                except re.error as e:
-                    skipped.append(f"{cls}（正则非法: {e}）"); continue
+                    validate_app_rule_pattern(cls)
+                except ValueError as e:
+                    skipped.append(f"{cls}（{e}）"); continue
             if r["mode"] not in engine.profiles:
                 skipped.append(f"{cls} -> {r['mode']}（本机没有这个模式，可先用 import 导入对应 profile）"); continue
             new_rules.append({"class": cls, "match": match,

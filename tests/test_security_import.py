@@ -256,6 +256,7 @@ class TestImportCliHardening(unittest.TestCase):
                 {"class": "evil", "match": "bogus-kind", "mode": "windows"},
                 {"class": "(a+)+$", "match": "regex", "mode": "windows"},
                 {"class": "(unclosed", "match": "regex", "mode": "windows"},
+                {"class": "a" * 250, "match": "regex", "mode": "windows"},
                 {"class": "x" * 300, "match": "exact", "mode": "windows"},
                 {"class": {"not": "a string"}, "match": "exact", "mode": "windows"},
                 {"class": "code", "match": "exact", "mode": {"not": "a string"}},
@@ -265,12 +266,13 @@ class TestImportCliHardening(unittest.TestCase):
         p = self._tmp(json.dumps(rules))
         r = self._run("rules", "import", p)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("已导入 2 条", r.stdout)  # firefox + evil-regex skipped? no: 2 valid
+        self.assertIn("已导入 1 条", r.stdout)  # 只有 firefox 合法，其余逐条跳过
         saved = json.loads(Path(os.environ["OMNIPAL_CONFIG_DIR"], "app_rules.json")
                            .read_text(encoding="utf-8"))
         classes = [x["class"] for x in saved["rules"]]
         self.assertIn("firefox", classes)
-        self.assertIn("(a+)+$", classes)  # valid regex kept
+        self.assertNotIn("(a+)+$", classes)  # 嵌套量词：可能卡死守护进程，拒绝
+        self.assertNotIn("a" * 250, classes)  # 超过 200 字符上限的正则，拒绝
         self.assertNotIn("(unclosed", classes)
         self.assertNotIn("bogus-kind", [x["match"] for x in saved["rules"]])
         self.assertTrue(all(len(c) <= 256 for c in classes))

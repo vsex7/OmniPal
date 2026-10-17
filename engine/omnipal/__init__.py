@@ -80,6 +80,7 @@ _NAME2MOD = {
     'parse_forward': 'profiles',
     'LUA_DISPATCHERS': 'core',
     'OmniPalEngine': 'core',
+    'validate_app_rule_pattern': 'core',
     '_watch_hyprland_socket2': 'daemon',
     'resolve_reapply_mode': 'daemon',
     'restore_persisted_profile': 'daemon',
