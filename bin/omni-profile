@@ -81,7 +81,7 @@ def cmd_window_policy(engine: OmniPalEngine, args):
     as_json = getattr(args, "json", False)
     if getattr(args, "policy_action", None) == "set":
         policy = args.policy
-        if not engine.set_window_policy(policy):
+        if not engine.set_window_policy(policy, source="cli:window-policy set"):
             print(f"❌ 设置窗口策略失败: {policy}（Compositor 拒绝或未连通，已恢复原策略）", file=sys.stderr)
             sys.exit(1)
         state = engine.get_state()
@@ -555,7 +555,7 @@ def cmd_persist(engine: OmniPalEngine, args):
         return
 
     if action == "enable":
-        if not engine.set_persistence(True, profile=args.profile, window_policy=getattr(args, "policy", None)):
+        if not engine.set_persistence(True, profile=args.profile, window_policy=getattr(args, "policy", None), source="cli:persist enable"):
             print("❌ 启用持久化被拒绝：模式或窗口策略无效，或配置写入失败", file=sys.stderr)
             sys.exit(1)
         status = engine.get_persistence_status()

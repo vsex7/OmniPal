@@ -28,7 +28,7 @@ def _resolve_run_dir() -> Path:
             d = Path(xdg) / "omnipal"
         else:
             d = Path(f"/run/user/{os.getuid()}/omnipal")
-    global RUN_DIR, STATE_FILE, OVERLAY_FILE, SNAP_FILE, SNAP_LAYOUTS_FILE, PID_FILE, LOCK_FILE, APPLIED_WINDOW_MODE_FILE, BASELINE_FILE, APP_RULE_STATE_FILE
+    global RUN_DIR, STATE_FILE, OVERLAY_FILE, SNAP_FILE, SNAP_LAYOUTS_FILE, PID_FILE, LOCK_FILE, APPLIED_WINDOW_MODE_FILE, BASELINE_FILE, APP_RULE_STATE_FILE, FLOATED_BY_OMNIPAL_FILE
     RUN_DIR = d
     STATE_FILE = d / "state.json"
     OVERLAY_FILE = d / "active_overlay.json"
@@ -39,6 +39,7 @@ def _resolve_run_dir() -> Path:
     APPLIED_WINDOW_MODE_FILE = d / "applied_window_mode"
     BASELINE_FILE = d / "baseline_bindings.json"
     APP_RULE_STATE_FILE = d / "app_rule.json"
+    FLOATED_BY_OMNIPAL_FILE = d / "floated_by_omnipal.json"
     return d
 
 RUN_DIR = _resolve_run_dir()
@@ -52,6 +53,7 @@ APP_RULE_STATE_FILE = RUN_DIR / "app_rule.json"
 LOCK_FILE = RUN_DIR / "engine.lock"
 APPLIED_WINDOW_MODE_FILE = RUN_DIR / "applied_window_mode"
 BASELINE_FILE = RUN_DIR / "baseline_bindings.json"
+FLOATED_BY_OMNIPAL_FILE = RUN_DIR / "floated_by_omnipal.json"
 
 def resolve_user_profiles_dir() -> Path:
     """Resolves the user custom profiles directory, honoring OMNIPAL_USER_PROFILES_DIR and XDG."""
@@ -76,6 +78,10 @@ def resolve_config_dir() -> Path:
 def persistence_file_path() -> Path:
     """The single explicit opt-in persistence file. Never touched unless the user enables it."""
     return resolve_config_dir() / "persistence.json"
+
+def policy_audit_log_path() -> Path:
+    return resolve_config_dir() / "policy-audit.log"
+
 
 def app_rules_file_path() -> Path:
     """Per-app auto-switch rules. Only written when the user adds a rule."""

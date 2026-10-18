@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -188,6 +189,15 @@ class TestValidatorHardening(unittest.TestCase):
 
 
 class TestRegexBacktrackingGuard(unittest.TestCase):
+    def setUp(self):
+        # Other test classes/modules may pop OMNIPAL_CONFIG_DIR or delete its dir
+        # (falling back to ~/.config/omnipal, absent on CI): use a private one.
+        td = tempfile.TemporaryDirectory(prefix="sec-regex-cfg-")
+        self.addCleanup(td.cleanup)
+        patcher = mock.patch.dict(os.environ, {"OMNIPAL_CONFIG_DIR": td.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     """A4 返工：分组后跟量词一律拒绝；加载时过滤手改/遗留规则文件；doctor 上报。"""
 
     # 用户验收的 5 个绕过用例：旧启发式放行、实际会卡死（29 字符类名 >3 秒）

@@ -113,6 +113,9 @@ def normalize_window_policy(policy: Optional[str]) -> Optional[str]:
         return None
     return WINDOW_POLICY_ALIASES.get(str(policy).lower().strip())
 
+# Apps that choose their own window size / aspect ratio: never resized by the floating policy.
+OWN_SIZE_CLASSES = ("scrcpy", "mpv", "imv", "vlc", "org.gnome.loupe", "feh")
+
 DIALOG_KEYWORDS = (
     "polkit",
     "pinentry",
@@ -159,10 +162,28 @@ def is_scratchpad_workspace(ws_name: str = "", ws_id: Optional[Union[int, str]] 
     return False
 
 def is_dialog_window(cls_name: str = "", title: str = "") -> bool:
-    """Checks if a window is a dialog, prompt, or popup based on class or title."""
+    """Checks if a window is a dialog, prompt, or popup based on class or title.
+
+    Short keywords (<=4 chars) match whole tokens only: "calc" matches class/title
+    token "calc" but not the substring inside "chatgpt"."""
     c = str(cls_name or "").lower()
     t = str(title or "").lower()
-    return any(k in c or k in t for k in DIALOG_KEYWORDS)
+    parts_c = re.split(r"[-_.\s]+", c)
+    parts_t = re.split(r"[-_.\s]+", t)
+    for k in DIALOG_KEYWORDS:
+        if k == "calc":
+            # calculator apps: token "calc", or "calculator"/"galculator" substring
+            if "calc" in parts_c or "calc" in parts_t:
+                return True
+            if "calculator" in c or "calculator" in t or "galculator" in c or "galculator" in t:
+                return True
+            continue
+        if len(k) <= 4:
+            if k in parts_c or k in parts_t:
+                return True
+        elif k in c or k in t:
+            return True
+    return False
 
 def is_micro_window(size: Optional[Union[List[int], Tuple[int, ...]]]) -> bool:
     """Checks if window size is unusually small (micro-window / tooltip / transient element)."""

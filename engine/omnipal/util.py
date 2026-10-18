@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-from engine.omnipal.paths import (LOCK_FILE, _resolve_run_dir)
+from engine.omnipal.paths import (LOCK_FILE, _resolve_run_dir, policy_audit_log_path)
 
 def compositor_mutation_disabled() -> bool:
     """Returns True when tests or maintenance tools request a non-mutating dry run."""
@@ -258,3 +258,29 @@ def find_duplicate_binds(binds: List[Dict[str, Any]]) -> Dict[Tuple[int, str], i
         if n > 1:
             out[k[0]] = out.get(k[0], 0) + n - 1
     return out
+
+
+def _policy_caller() -> str:
+    """Who asked: $OMNIPAL_SOURCE (set by the bar menu / settings panel), else parent process."""
+    src = os.environ.get("OMNIPAL_SOURCE", "").strip()
+    try:
+        parent = Path(f"/proc/{os.getppid()}/comm").read_text(encoding="utf-8").strip()
+    except Exception:
+        parent = "?"
+    return f"{src or 'unknown'} (pid {os.getpid()}, parent {parent})"
+
+
+def log_policy_write(what: str, old: Any, new: Any, source: str) -> None:
+    """Audit trail for every global window-policy write (journal + policy-audit.log)."""
+    line = (f"{datetime.datetime.now().astimezone().isoformat(timespec='seconds')} {what}: "
+            f"{old} -> {new} source={source} caller={_policy_caller()}")
+    print(f"🪟 window policy {line}", file=sys.stderr, flush=True)
+    try:
+        path = policy_audit_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > 256 * 1024:
+            path.replace(path.with_suffix(".log.1"))
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        _debug(f"policy audit log failed: {e}")

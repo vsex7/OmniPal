@@ -50,6 +50,7 @@ Panel {
   // Keyboard cursor over the panel rows: profiles, policies, actions, system, then 打开设置.
   property bool cursorActive: false
   property int cursorIndex: 0
+  property bool cursorFromKeyboard: false
   property string windowPolicy: "follow-profile"
   property string effectiveWindowMode: "tiled"
   property bool compositorConnected: false
@@ -230,15 +231,20 @@ Panel {
   }
 
   function moveCursor(dx, dy) {
-    if (!root.cursorActive) { root.cursorActive = true; return }
+    if (!root.cursorActive) { root.cursorActive = true; root.cursorFromKeyboard = true; return }
     if (dy !== 0) root.cursorIndex = Math.max(0, Math.min(root.cursorCount - 1, root.cursorIndex + dy))
+    root.cursorFromKeyboard = true
   }
 
   function activateCursor() {
     if (!root.cursorActive) return
     var i = root.cursorIndex
     if (i < root.policyBase) root.switchModeWithUndo(root.profiles[i].id)
-    else if (i < root.actionBase) root.setPolicy(root.policyOptions[i - root.policyBase].id)
+    else if (i < root.actionBase) {
+      // A policy row only applies on Enter when the keyboard put the cursor there: a mouse
+      // resting over "浮动" must not turn Enter into a global policy change.
+      if (root.cursorFromKeyboard) root.setPolicy(root.policyOptions[i - root.policyBase].id, "bar-menu-keyboard")
+    }
     else if (i < root.systemBase) root.runAction(root.actionRows[i - root.actionBase])
     else if (i < root.settingsRowIndex) root.runAction(root.systemRows[i - root.systemBase])
     else root.runAction(root.settingsRow)
@@ -248,6 +254,7 @@ Panel {
     if (!on) return
     root.cursorActive = true
     root.cursorIndex = i
+    root.cursorFromKeyboard = false
   }
 
   function cycleMode(reverse) {
@@ -339,12 +346,12 @@ Panel {
     runCmd("omni-profile switch " + cleanMode)
   }
 
-  function setPolicy(policyId) {
+  function setPolicy(policyId, source) {
     if (!policyId) return
     var norm = Model.normalizePolicy(policyId)
     root.windowPolicy = norm
     root.effectiveWindowMode = Model.computeEffectiveMode(norm, root.currentMode, root.profiles)
-    runCmd("omni-profile window-policy set " + norm)
+    runCmd("OMNIPAL_SOURCE=" + (source || "bar-menu") + " omni-profile window-policy set " + norm)
   }
 
   function openSettings() {
@@ -393,7 +400,7 @@ Panel {
     function switchMode(mode: string): void { root.switchMode(mode) }
     function getWindowPolicy(): string { return root.windowPolicy }
     function getEffectiveWindowMode(): string { return root.effectiveWindowMode }
-    function setWindowPolicy(policy: string): void { root.setPolicy(policy) }
+    function setWindowPolicy(policy: string): void { root.setPolicy(policy, "ipc") }
   }
 
   implicitWidth: button.implicitWidth
@@ -592,7 +599,7 @@ Panel {
               hasCursor: root.cursorActive && root.cursorIndex === root.policyBase + index
               foreground: Commons.Color.popups.text
               onHovered: function(on) { root.hoverRow(root.policyBase + policyRow.index, on) }
-              onClicked: root.setPolicy(policyRow.modelData.id)
+              onClicked: root.setPolicy(policyRow.modelData.id, "bar-menu-click")
 
               RowHint {
                 visible: policyRow.isCurrent

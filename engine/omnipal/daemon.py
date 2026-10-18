@@ -161,8 +161,16 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                                         )
                                         if skip:
                                             continue
-                                        engine._apply_golden_cascade_geometry(addr, step=cascade_counter, is_dialog=is_dlg)
-                                        if not is_dlg:
+                                        if OmniPalEngine.keeps_own_size(cls_name):
+                                            # scrcpy etc.: float only; user's own size/move rules win
+                                            engine._apply_golden_cascade_geometry(addr, keep_size=True)
+                                        elif is_dlg:
+                                            engine._apply_golden_cascade_geometry(addr, is_dialog=True)
+                                        else:
+                                            # Golden terraced cascade (like f0adc4f); no size cap for new windows
+                                            engine._apply_golden_cascade_geometry(
+                                                addr, step=cascade_counter, is_dialog=False)
+                                            engine._remember_floated(addr)
                                             cascade_counter = (cascade_counter + 1) % 6
                 except socket.timeout:
                     continue
@@ -221,9 +229,9 @@ def run_daemon():
     if persisted_policy and (persisted_policy != "follow-profile"
                              or engine.get_window_policy() != "follow-profile"):
         print(f"📦 Restoring persisted window policy on startup: {persisted_policy}", flush=True)
-        engine.set_window_policy(persisted_policy)
+        engine.set_window_policy(persisted_policy, source="daemon-startup (persisted choice)")
     elif persisted_status.get("enabled"):
-        engine.set_persistence(True, window_policy=engine.get_window_policy())
+        engine.set_persistence(True, source="daemon-startup")
 
     if persisted_mode and persisted_mode != "omarchy":
         restore_persisted_profile(engine)
