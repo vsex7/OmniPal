@@ -21,6 +21,7 @@ var CATEGORY_LABELS = {
   navigation: "工作区 / 导航",
   launcher: "启动器",
   apps: "系统应用",
+  app: "应用快捷键转发",
   tools: "效率工具",
   system: "会话与安全",
   omnipal: "OmniPal 固定入口（所有模式通用）",
@@ -62,15 +63,20 @@ function groupByCategory(rows) {
 }
 
 // "SUPER + SHIFT + S" -> ["SUPER", "SHIFT", "S"] for one chip per key.
-// Engine-side formatting owns the separator; a lone "+" (or any combo that
-// degrades to nothing) falls back to the raw string so nothing disappears.
+// A merged row lists several combos as "A / B"; the "/" becomes a separator
+// chip. Engine-side formatting owns the separators; a lone "+" (or any combo
+// that degrades to nothing) falls back to the raw string so nothing disappears.
 function splitCombo(key) {
   var raw = String(key || "");
-  var parts = raw.split("+");
   var out = [];
-  for (var i = 0; i < parts.length; i++) {
-    var part = parts[i].trim();
-    if (part) out.push(part);
+  var groups = raw.split("/");
+  for (var gi = 0; gi < groups.length; gi++) {
+    if (gi > 0) out.push("/");
+    var parts = groups[gi].split("+");
+    for (var i = 0; i < parts.length; i++) {
+      var part = parts[i].trim();
+      if (part) out.push(part);
+    }
   }
   return out.length ? out : [raw];
 }

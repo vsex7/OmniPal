@@ -14,7 +14,41 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from engine.engine import OmniPalEngine, run_daemon, LUA_DISPATCHERS
+from engine.engine import OmniPalEngine, run_daemon, LUA_DISPATCHERS, validate_app_rule_pattern
+
+# Untrusted import files (profile JSON / app rules) are capped to stay well
+# above any legitimate size while blocking memory-exhaustion via huge inputs.
+MAX_IMPORT_BYTES = 1024 * 1024
+
+def _read_import_text(source: str, what: str) -> str:
+    """Reads an import payload from a file path or stdin ('-'), with a size cap."""
+    if source == "-":
+        chunks, total = [], 0
+        # Read bytes, not str: len() on a decoded str counts characters, which
+        # lets multi-byte payloads (e.g. 400k CJK chars ~= 1.2MB) pass a byte cap.
+        while True:
+            chunk = sys.stdin.buffer.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_IMPORT_BYTES:
+                print(f"❌ {what}超过 {MAX_IMPORT_BYTES // 1024}KB 上限", file=sys.stderr)
+                sys.exit(1)
+            chunks.append(chunk)
+        try:
+            return b"".join(chunks).decode("utf-8")
+        except UnicodeDecodeError as e:
+            print(f"❌ {what}不是有效的 UTF-8 编码: {e}", file=sys.stderr)
+            sys.exit(1)
+    p = Path(source).expanduser()
+    try:
+        if p.stat().st_size > MAX_IMPORT_BYTES:
+            print(f"❌ {what}超过 {MAX_IMPORT_BYTES // 1024}KB 上限", file=sys.stderr)
+            sys.exit(1)
+    except OSError as e:
+        print(f"❌ 读取失败: {e}", file=sys.stderr)
+        sys.exit(1)
+    return p.read_text(encoding="utf-8")
 
 def cmd_status(engine: OmniPalEngine, args):
     state = engine.get_state()
@@ -214,7 +248,9 @@ def cmd_diff(engine: OmniPalEngine, args):
         print(json.dumps(d, indent=2, ensure_ascii=False))
         return
     if d["source"] == "none":
-        print("⚠️ 读不到 Hyprland 当前的快捷键，也没有快照，无法对比。", file=sys.stderr)
+        print("⚠️ 读不到 Hyprland 当前的快捷键，也没有快照，无法判断接管情况。", file=sys.stderr)
+        print(f"模式 {d['mode']} 的 Omarchy 原生快捷键接管情况：无法判断")
+        return
     print(f"模式 {d['mode']} 会接管 {d['count']} 个 Omarchy 原生快捷键（来源: {d['source']}）")
     for e in d["takeovers"]:
         was = "；".join(n["description"] or f"{n['dispatcher']} {n['arg']}".strip() for n in e["native"])
@@ -425,10 +461,11 @@ def cmd_export(engine: OmniPalEngine, args):
     print(f"✅ 已导出 '{p_id}' 到 {out}")
 
 def cmd_import(engine: OmniPalEngine, args):
-    import tempfile, os
+    import tempfile, os, io, contextlib
     from scripts.check_consistency import _validate_profile_file
+    from engine.omnipal.profiles import validate_protected_bindings
     try:
-        raw = sys.stdin.read() if args.file == "-" else Path(args.file).expanduser().read_text(encoding="utf-8")
+        raw = _read_import_text(args.file, "模式文件")
         p_data = json.loads(raw)
     except Exception as e:
         print(f"❌ 读取失败: {e}", file=sys.stderr)
@@ -444,6 +481,10 @@ def cmd_import(engine: OmniPalEngine, args):
         print(f"❌ 模式 ID '{p_id}' 不合法：只能用小写字母、数字、- 和 _，最长 32 位。可用 --id 指定新 ID", file=sys.stderr)
         sys.exit(1)
     p_data["id"] = p_id
+    name = p_data.get("name", p_id)
+    if not isinstance(name, str):
+        print("❌ 模式 name 必须是字符串", file=sys.stderr)
+        sys.exit(1)
     p_data.setdefault("name", p_id)
 
     existing = engine.profiles.get(p_id)
@@ -458,6 +499,13 @@ def cmd_import(engine: OmniPalEngine, args):
         tmp.write_text(json.dumps(p_data, ensure_ascii=False), encoding="utf-8")
         if not _validate_profile_file(tmp, valid_actions):
             print("❌ 校验未通过，未导入", file=sys.stderr)
+            sys.exit(1)
+        # System-critical combos (e.g. the Omarchy menu key) are rejected here too,
+        # not just in check_consistency.py, so `import` can't smuggle one in.
+        with contextlib.redirect_stdout(io.StringIO()):
+            protected_ok = validate_protected_bindings(engine.root_dir, [tmp])
+        if not protected_ok:
+            print("❌ 覆盖了系统保护键位，未导入", file=sys.stderr)
             sys.exit(1)
 
     # 自定义命令会在按键时被执行，导入前列出来让用户心里有数
@@ -601,7 +649,7 @@ def cmd_rules(engine: OmniPalEngine, args):
         return
     elif act == "import":
         try:
-            raw = sys.stdin.read() if args.file == "-" else Path(args.file).expanduser().read_text(encoding="utf-8")
+            raw = _read_import_text(args.file, "规则文件")
             incoming = json.loads(raw)
         except Exception as e:
             print(f"❌ 读取失败: {e}", file=sys.stderr); sys.exit(1)
@@ -609,16 +657,29 @@ def cmd_rules(engine: OmniPalEngine, args):
             print("❌ 不是有效的应用规则文件（缺少 rules 列表）", file=sys.stderr); sys.exit(1)
         new_rules, skipped = [], []
         for r in incoming["rules"]:
-            if not isinstance(r, dict) or not r.get("class") or not r.get("mode"):
-                skipped.append(str(r)); continue
+            if not isinstance(r, dict) or not isinstance(r.get("class"), str) or not r["class"].strip() \
+                    or not isinstance(r.get("mode"), str) or not r["mode"]:
+                skipped.append(str(r)[:120]); continue
+            cls = r["class"].strip()
+            if len(cls) > 256:
+                skipped.append(f"{cls[:60]}…（类名过长）"); continue
+            match = r.get("match", "exact")
+            if match not in ("exact", "prefix", "regex"):
+                skipped.append(f"{cls}（未知匹配方式 {match!r}）"); continue
+            if match == "regex":
+                try:
+                    validate_app_rule_pattern(cls)
+                except ValueError as e:
+                    skipped.append(f"{cls}（{e}）"); continue
             if r["mode"] not in engine.profiles:
-                skipped.append(f"{r['class']} -> {r['mode']}（本机没有这个模式，可先用 import 导入对应 profile）"); continue
-            new_rules.append({"class": str(r["class"]), "match": r.get("match", "exact"),
+                skipped.append(f"{cls} -> {r['mode']}（本机没有这个模式，可先用 import 导入对应 profile）"); continue
+            new_rules.append({"class": cls, "match": match,
                               "mode": r["mode"], "enabled": bool(r.get("enabled", True))})
         if args.replace:
             data["rules"] = new_rules
-            if incoming.get("default_mode") in engine.profiles or incoming.get("default_mode") is None:
-                data["default_mode"] = incoming.get("default_mode")
+            dm = incoming.get("default_mode")
+            if dm is None or (isinstance(dm, str) and dm in engine.profiles):
+                data["default_mode"] = dm
         else:
             incoming_classes = {r["class"] for r in new_rules}
             data["rules"] = [r for r in data["rules"] if r["class"] not in incoming_classes] + new_rules

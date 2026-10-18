@@ -17,17 +17,23 @@ var KEY_NAMES = {
 
 // "SUPER + SHIFT + SPACE" -> "Super+Shift+Space" (docs/GLOSSARY.md 按键写法)
 function prettyCombo(combo) {
-  var parts = String(combo || "").split("+");
+  // Merged rows list several combos as "A / B"; prettify each side.
+  var groups = String(combo || "").split("/");
   var out = [];
-  for (var i = 0; i < parts.length; i++) {
-    var p = parts[i].trim();
-    if (!p) continue;
-    var up = p.toUpperCase();
-    if (KEY_NAMES[up] !== undefined) out.push(KEY_NAMES[up]);
-    else if (/^F[0-9]+$/.test(up) || p.length === 1) out.push(up);
-    else out.push(up.charAt(0) + up.slice(1).toLowerCase());
+  for (var gi = 0; gi < groups.length; gi++) {
+    var parts = groups[gi].split("+");
+    var pretty = [];
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i].trim();
+      if (!p) continue;
+      var up = p.toUpperCase();
+      if (KEY_NAMES[up] !== undefined) pretty.push(KEY_NAMES[up]);
+      else if (/^F[0-9]+$/.test(up) || p.length === 1) pretty.push(up);
+      else pretty.push(up.charAt(0) + up.slice(1).toLowerCase());
+    }
+    out.push(pretty.join("+"));
   }
-  return out.join("+");
+  return out.join(" / ");
 }
 
 // What the native bind did: description first, dispatcher+arg as fallback.

@@ -18,8 +18,13 @@
 
 ### 🐛 修复
 - **持久化与 restore**：`omni-profile restore`（以及状态栏/设置等同路径）在持久化启用时会把 `persistence.json` 的 profile 同步为 `omarchy`，与 `switch`/`cycle` 一致；守护进程退出时的 cleanup restore 不会改写持久化，以免重启后丢上次模式。`persist enable` 未指定模式时优先快照当前模式，不再沿用过期的已持久化 profile。
+- **速查表可读性**：mac 模式 19 个快捷键转发各自具名（如「关闭标签页（发送 Ctrl+W）」），不再 19 行重名；同一动作的多个组合键合并为一行（如「SUPER+SLASH / SUPER+ALT+SLASH」）；新增 `app` 分类中文名「应用快捷键转发」。
+- **`omni-profile diff`**：读不到 Hyprland 快捷键且无快照时显示「无法判断」，不再输出「会接管 0 个原生快捷键」。
 
 ### 🔧 变更
+- **系统保护键位**：新增 `schema/protected_bindings.json`（如 Super+Alt+Space / Omarchy 菜单），模式文件覆盖时 `check_consistency.py` 与 `omni-profile import` 直接报错，`doctor` 点名指出违规的模式与键位；mac 模式文件管理器改 Super+Alt+E。
+- **固定入口统一修饰键**：三个固定入口统一为 Super+Alt（速查表 Super+Ctrl+/ → Super+Alt+/）。
+- **绑定级 `name`**：模式文件 binding 的可选 `name` 同时用于 Hyprland 绑定描述，`hyprctl binds` 与速查表显示一致。
 - 全局窗口策略保留：跟随模式（默认）/ 平铺 / 浮动，`omni-profile window-policy` 查看、`window-policy set <follow-profile|tiled|floating>` 设置；状态栏右键菜单「窗口策略」三行（标注「当前」）、设置模式页选择器、模式卡片「已覆盖：全局平铺/浮动」、doctor「⚠️ 已覆盖」提示；IPC `setWindowPolicy` / `getWindowPolicy`；随配置持久化记住（`persist enable --policy`）。不再在启动时清除已保存的 `window_policy`。
 - mac 模式开启时会暂时停用 Omarchy 原生的 Super+W、Super+数字绑定；还原或切到别的模式时会执行 `hyprctl reload` 把它们找回来。
 - mac 模式不再用 Super+数字切换工作区，改用 Super+Ctrl+←/→。

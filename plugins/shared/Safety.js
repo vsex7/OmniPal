@@ -1,4 +1,4 @@
-// Safety.js - shared UX safety helpers (single source; synced into each plugin by scripts/sync_tokens.py)
+// Safety.js - shared UX safety helpers (single source; symlinked into each plugin as ../shared/Safety.js)
 // - Mode switches are undoable for UNDO_MS ("已切换至 <mode> · U 撤销").
 // - Window close has NO undo: first press arms, a second press within CONFIRM_MS closes.
 .pragma library

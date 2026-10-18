@@ -33,7 +33,7 @@ OmniPal 是一个**纯运行时内存热切换**的肌肉记忆引擎，叠加�
    切换模式与策略严禁写入 `~/.config/hypr/` 下的任何文件（H-1 铁律绝不妥协）。为保证关机与重启后体验一致（记忆关机前配置），OmniPal 默认将最后使用的配置（Profile 与 Window Policy）安全持久化于独立的 `~/.config/omnipal/persistence.json`，且支持用户显式执行 `omni-profile persist disable` 关闭重启恢复。
 
 3. **单一事实源**  
-   所有快捷键与动作定义只存在于 `schema/actions.json` 与 `profiles/*`。  
+   所有快捷键与动作定义只存在于 `schema/`（`actions.json`、`fixed_bindings.json`、`protected_bindings.json`）与 `profiles/*`。  
    QML、文档、测试中禁止硬编码键位列表。
 
 4. **退出必须可恢复**  
@@ -51,7 +51,7 @@ OmniPal 是一个**纯运行时内存热切换**的肌肉记忆引擎，叠加�
 | 编号 | 禁止项 | 说明 |
 |------|--------|------|
 | H-1 | 默认写入用户 Hyprland 配置 | 不得自动修改 `bindings.lua` 或其他主配置 |
-| H-2 | 应用内快捷键拦截 | 不得重映射 Ctrl+C/V/Z 等应用快捷键 |
+| H-2 | 应用内快捷键拦截 | 不得重映射 Ctrl+C/V/Z 等应用快捷键；例外（v1.9.0，用户已批准）：mac 模式 Cmd→Ctrl 有限转发（如 Cmd+W→Ctrl+W 发给当前应用），纯 Hyprland Lua 实现、无外部进程，终端内改发 Ctrl+Shift 以不破坏 Ctrl+W 删词 / Ctrl+C 中断语义 |
 | H-3 | 全局输入重映射依赖 | 不得把 keyd、kanata、ydotool 等作为默认依赖 |
 | H-4 | 实时鼠标拖拽吸附 | 只允许键盘触发的吸附 |
 | H-5 | 窗口像素缩略图抓取 | Dock / Overview 只使用元数据（图标、标题、状态） |

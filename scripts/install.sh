@@ -79,6 +79,9 @@ for p_path in "${PROJECT_ROOT}/plugins"/omni.*; do
         echo "  ✅ 已挂载插件: ${p_name} -> ${OMARCHY_PLUGINS_DIR}/${p_name}"
     fi
 done
+# 共享设计文件目录：各插件内的 ../shared/<file> 相对软链接在安装后解析到这里。
+ln -sfn "${PROJECT_ROOT}/plugins/shared" "${OMARCHY_PLUGINS_DIR}/shared"
+echo "  ✅ 已挂载共享目录: shared -> ${OMARCHY_PLUGINS_DIR}/shared"
 
 # 5. 创建可选的 systemd 用户守护进程（用于在会话退出时自动触发 restore）
 track_mkdir "${SYSTEMD_USER_DIR}"

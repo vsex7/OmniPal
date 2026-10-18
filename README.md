@@ -2,7 +2,7 @@
 
 # OmniPal
 
-在 Omarchy（Hyprland）上一条命令切换 Windows 或 macOS 的快捷键习惯。只在内存里生效，不改你现有的配置文件，随时切回原生键位。
+把 Windows / macOS 的桌面习惯一键带到 Omarchy（Hyprland）：快捷键方案随心切换，外加任务视图、可视化窗口吸附、mac 风格 Dock 与设置中心。所有覆写只在内存里生效，不碰你现有的配置文件，随时一键还原。
 
 <p align="center"><img src="docs/assets/demo.gif" alt="演示：切换模式与窗口吸附（示意动画）" width="80%"></p>
 
@@ -50,7 +50,7 @@ omni-profile window-policy set follow-profile   # 窗口策略：follow-profile 
 
 - **三套习惯模式**：Windows（Alt+F4、Win+方向键吸附、Win+E）、macOS（Super+Q、Super+Space、Super+Shift+3/4）、Omarchy 原生模式（还原系统原生键位）。
 - **窗口吸附**：半屏、三分之一、三分之二、居中，`Win+Z` 呼出布局选择器。
-- **Quickshell 插件**：顶栏模式指示器、快捷键速查表、设置中心、吸附反馈、任务视图、Dock。
+- **Quickshell 插件**：顶栏模式指示器、快捷键速查表（`Super+Ctrl+/`）、设置中心（`Super+Alt+I`）、任务视图（`Super+Alt+O`，跨桌面窗口概览）、mac 风格 Dock、可视化吸附布局选择器（`Win+Z`）。
 - **自定义模式**：在 `~/.config/omnipal/profiles/` 放 JSON，或用 `omni-profile import` 导入别人分享的。
 
 ## 更多

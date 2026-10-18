@@ -10,7 +10,7 @@ import Quickshell.Wayland
 // layer-shell surface 4.0.4's own overlays (plugins/menu) use, on the focused
 // monitor. Main's scale-wait reveal is omitted: it depends on Quickshell APIs
 // (devicePixelRatio, Hyprland.refreshMonitors) not guaranteed on 4.0.4.
-// Single source: plugins/shared/OverlayWindow.qml (copied by scripts/sync_tokens.py).
+// Single source: plugins/shared/OverlayWindow.qml (symlinked into each plugin as ../shared/OverlayWindow.qml).
 PanelWindow {
   id: window
 
