@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -188,6 +189,15 @@ class TestValidatorHardening(unittest.TestCase):
 
 
 class TestRegexBacktrackingGuard(unittest.TestCase):
+    def setUp(self):
+        # Other test classes/modules may pop OMNIPAL_CONFIG_DIR or delete its dir
+        # (falling back to ~/.config/omnipal, absent on CI): use a private one.
+        td = tempfile.TemporaryDirectory(prefix="sec-regex-cfg-")
+        self.addCleanup(td.cleanup)
+        patcher = mock.patch.dict(os.environ, {"OMNIPAL_CONFIG_DIR": td.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     """A4 返工：分组后跟量词一律拒绝；加载时过滤手改/遗留规则文件；doctor 上报。"""
 
     # 用户验收的 5 个绕过用例：旧启发式放行、实际会卡死（29 字符类名 >3 秒）
@@ -249,11 +259,9 @@ class TestImportCliHardening(unittest.TestCase):
     def setUp(self):
         # Other test modules' tearDownModule may pop these; re-ensure isolation.
         self._tmpdirs = []
-        self._saved_env = {}
         for var, prefix in (("OMNIPAL_CONFIG_DIR", "sec-cfg-"),
                             ("OMNIPAL_RUN_DIR", "sec-run-")):
             if not os.environ.get(var) or not os.path.isdir(os.environ[var]):
-                self._saved_env[var] = os.environ.get(var)
                 td = tempfile.TemporaryDirectory(prefix=prefix)
                 self._tmpdirs.append(td)
                 os.environ[var] = td.name
@@ -262,13 +270,6 @@ class TestImportCliHardening(unittest.TestCase):
     def tearDown(self):
         for td in self._tmpdirs:
             td.cleanup()
-        # Don't leave the env pointing at the just-deleted temp dirs (later
-        # classes, e.g. TestRegexBacktrackingGuard, write app_rules.json there).
-        for var, val in self._saved_env.items():
-            if val is None:
-                os.environ.pop(var, None)
-            else:
-                os.environ[var] = val
 
     def _run(self, *argv, stdin_data=None):
         return subprocess.run([sys.executable, CLI, *argv], capture_output=True,
