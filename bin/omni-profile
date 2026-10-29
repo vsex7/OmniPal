@@ -406,6 +406,14 @@ def cmd_doctor(engine: OmniPalEngine, args):
     if fixed:
         print(f"  • 固定入口: {', '.join(fixed)}（所有模式通用）")
 
+    pinned = diag.get("pinned_windows", [])
+    if pinned:
+        print(f"  • 置顶固定窗口: ⚠️ 检测到 {len(pinned)} 个窗口处于全局置顶状态 (Pinned):")
+        for pw in pinned:
+            title_str = f" - {pw.get('title')}" if pw.get('title') else ""
+            print(f"      - [{pw.get('class')}]{title_str} ({pw.get('address')})")
+        print("    💡 提示: 置顶窗口会跨所有工作区并始终居于最顶层。若需取消，可聚焦该窗口按 Super+O，或运行 omni-profile unpin")
+
     issues = diag.get("issues", [])
     if issues:
         print("\n⚠️ 诊断发现的问题:")
@@ -419,6 +427,20 @@ def cmd_doctor(engine: OmniPalEngine, args):
         sys.exit(1)
     else:
         print("\n🎉 系统运行良好，无冲突与异常。")
+
+def cmd_unpin(engine: OmniPalEngine, args):
+    res = engine.unpin(address=args.address, all_windows=args.all)
+    if args.json:
+        print(json.dumps(res, ensure_ascii=False))
+        return
+    if not res.get("unpinned"):
+        msg = res.get("message", "未找到需要取消置顶的窗口")
+        print(f"ℹ️ {msg}")
+    else:
+        print(f"✅ 已成功取消置顶 {len(res['unpinned'])} 个窗口:")
+        for item in res["unpinned"]:
+            t = f" - {item.get('title')}" if item.get('title') else ""
+            print(f"  • [{item.get('class')}]{t} ({item.get('address')})")
 
 def cmd_list(engine: OmniPalEngine, args):
     profiles = engine.list_profiles()
@@ -862,6 +884,13 @@ def main():
     # the subparser resetting it to False.
     wp_set.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="以 JSON 格式输出结果")
     wp_set.set_defaults(func=cmd_window_policy)
+
+    # unpin
+    p_unpin = subparsers.add_parser("unpin", help="取消窗口的全局置顶/固定状态（解除 Super+O 置顶）")
+    p_unpin.add_argument("address", nargs="?", default=None, help="目标窗口地址（如 0x556813f26970，默认当前焦点或唯一的置顶窗口）")
+    p_unpin.add_argument("--all", action="store_true", help="取消当前所有窗口的置顶状态")
+    p_unpin.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_unpin.set_defaults(func=cmd_unpin)
 
     args = parser.parse_args()
     if not args.command:

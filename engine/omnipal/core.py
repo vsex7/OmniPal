@@ -1180,6 +1180,10 @@ end
             # Rules are kept in the Lua registry so tiled mode can disable them without a reload.
             lua_code = (
                 'local R = debug.getregistry(); '
+                'if type(o) == "table" and type(o.workspace_mode) == "function" then '
+                '  local ws = (type(hl) == "table" and type(hl.get_active_workspace) == "function") and hl.get_active_workspace() or nil; '
+                '  if ws and ws.id then o.workspace_mode({ workspace = tostring(ws.id), mode = "floating" }) end '
+                'end; '
                 'if R.omnipal_float_rules then '
                 'for _, r in ipairs(R.omnipal_float_rules) do r:set_enabled(true) end '
                 'elseif type(hl) == "table" and type(hl.window_rule) == "function" then '
@@ -1200,6 +1204,7 @@ end
                     self._clear_floated()
                 self._set_applied_window_mode("floating")
                 self._float_existing_windows()
+                self._notify_omarchy_layout()
             return ok
         else:
             # target_mode == "tiled"
@@ -1210,6 +1215,7 @@ end
                 return False
             self._unfloat_existing_windows()
             self._set_applied_window_mode("tiled")
+            self._notify_omarchy_layout()
             if not reloaded:
                 return True
 
@@ -1222,13 +1228,30 @@ end
     def _disable_float_rules(self) -> Optional[bool]:
         """Turns the floating rules off. Returns False if done in place (no reload), True if it had
         to fall back to a config-only reload (Lua state rebuilt), None if both failed."""
-        lua = ('local R = debug.getregistry(); local t = R.omnipal_float_rules; '
-               'if not t then error("omnipal: no float rules") end; '
-               'for _, r in ipairs(t) do r:set_enabled(false) end')
+        lua = (
+            'local R = debug.getregistry(); '
+            'if type(o) == "table" and type(o.workspace_mode) == "function" then '
+            '  local ws = (type(hl) == "table" and type(hl.get_active_workspace) == "function") and hl.get_active_workspace() or nil; '
+            '  local gl = (type(hl) == "table" and type(hl.get_config) == "function" and hl.get_config("general.layout")) or "dwindle"; '
+            '  if ws and ws.id then o.workspace_mode({ workspace = tostring(ws.id), mode = gl }) end '
+            'end; '
+            'local t = R.omnipal_float_rules; '
+            'if not t then error("omnipal: no float rules") end; '
+            'for _, r in ipairs(t) do r:set_enabled(false) end'
+        )
         if self._eval_lua_strict(lua):
             return False
         print("Disabling float rules in place failed; falling back to config reload", file=sys.stderr)
         return True if self._reload_config_only() else None
+
+    def _notify_omarchy_layout(self) -> None:
+        """Notifies Omarchy shell to refresh dock and workspaces widgets if available."""
+        if shutil.which("omarchy-shell"):
+            try:
+                subprocess.run(["omarchy-shell", "-q", "omarchy.workspaces", "refresh"], capture_output=True, timeout=0.3, check=False)
+                subprocess.run(["omarchy-shell", "-q", "omarchy.dock", "refresh"], capture_output=True, timeout=0.3, check=False)
+            except (OSError, subprocess.SubprocessError) as _e:
+                _debug(f"omarchy-shell layout refresh failed: {_e}")
 
     def get_effective_window_mode(self, mode: Optional[str] = None, policy: Optional[str] = None) -> str:
         pol = normalize_window_policy(policy) or self.get_window_policy()
@@ -1668,6 +1691,7 @@ end
                 if policy_restored:
                     self._unfloat_existing_windows()
                     self._set_applied_window_mode("tiled")
+                    self._notify_omarchy_layout()
             if not policy_restored:
                 print("Warning: Restore window policy reload failed; retaining active overlay for retry", file=sys.stderr)
                 return False
@@ -1726,16 +1750,19 @@ end
 
     def send_shortcut(self, spec: str, window_class: Optional[str] = None) -> bool:
         """Forwards a shortcut to the focused window, adjusted for terminals."""
+        tags = []
         if window_class is None:
             window_class = ""
             try:
                 _ensure_hyprland_instance()
                 res = subprocess.run(["hyprctl", "activewindow", "-j"], capture_output=True, text=True, check=False)
-                window_class = (json.loads(res.stdout or "{}") or {}).get("class", "") or ""
+                win_data = json.loads(res.stdout or "{}") or {}
+                window_class = win_data.get("class", "") or ""
+                tags = win_data.get("tags", []) or []
             except (OSError, ValueError, subprocess.SubprocessError) as e:
                 _debug(e)
         try:
-            mods, key = forward_for_class(spec, window_class)
+            mods, key = forward_for_class(spec, window_class, tags=tags)
         except ValueError as e:
             print(f"Invalid shortcut: {e}", file=sys.stderr)
             return False
@@ -2208,6 +2235,61 @@ end
             _debug(f"hyprctl activewindow query failed: {_e}")
             return None
 
+    def unpin(self, address: Optional[str] = None, all_windows: bool = False) -> Dict[str, Any]:
+        """Unpins pinned window(s) so they no longer float on top of all workspaces."""
+        _ensure_hyprland_instance()
+        windows = self.get_windows()
+        pinned_windows = [w for w in windows if w.get("pinned", False)]
+
+        target_windows = []
+        if all_windows:
+            target_windows = pinned_windows
+            if not target_windows:
+                return {"unpinned": [], "message": "当前没有处于置顶状态的窗口"}
+        elif address:
+            addr_norm = address.lower().strip()
+            if not addr_norm.startswith("0x"):
+                addr_norm = "0x" + addr_norm
+            target_windows = [w for w in windows if str(w.get("address", "")).lower() == addr_norm]
+            if not target_windows:
+                return {"unpinned": [], "message": f"未找到地址为 {address} 的窗口"}
+        else:
+            # Active window or single pinned window fallback
+            active = self.get_active_window()
+            if active and active.get("pinned", False):
+                target_windows = [active]
+            elif len(pinned_windows) == 1:
+                target_windows = pinned_windows
+            elif active and not pinned_windows:
+                return {"unpinned": [], "message": f"当前活动窗口 [{active.get('class')}] 并未处于置顶状态"}
+            elif not pinned_windows:
+                return {"unpinned": [], "message": "当前没有处于置顶状态的窗口"}
+            else:
+                classes = ", ".join(f"[{w.get('class', '')}] {w.get('address')}" for w in pinned_windows[:3])
+                return {
+                    "unpinned": [],
+                    "message": f"存在多个置顶窗口 ({len(pinned_windows)} 个: {classes})，请聚焦窗口后运行、指定窗口地址或加 --all"
+                }
+
+        unpinned = []
+        for w in target_windows:
+            addr = w.get("address")
+            if not addr:
+                continue
+            win_arg = f"address:{addr}"
+            try:
+                subprocess.run(["hyprctl", "dispatch", "pin", win_arg], capture_output=True, timeout=0.5, check=False)
+                subprocess.run(["hyprctl", "dispatch", "tagwindow", "-pop", win_arg], capture_output=True, timeout=0.5, check=False)
+                unpinned.append({
+                    "address": addr,
+                    "class": w.get("class", ""),
+                    "title": (w.get("title", "") or "")[:30]
+                })
+            except (OSError, subprocess.SubprocessError) as _e:
+                _debug(f"Failed to unpin {addr}: {_e}")
+
+        return {"unpinned": unpinned, "message": "成功" if unpinned else "未执行取消置顶"}
+
     def snap(self, zone: str, target_address: Optional[str] = None, no_hud: bool = False) -> bool:
         """Triggers visual snap feedback and dispatches the corresponding window management action."""
         zone = zone.lower().strip()
@@ -2627,6 +2709,23 @@ end"""
             report["issues"].append(f"❌ Duplicate binds: {total} extra copies on {len(dups)} key combos ("
                                     + ", ".join(report["duplicate_binds"]["combos"][:8]) + ")")
             report["fixes"].append("omni-profile restore（会自动合并重复绑定）或 hyprctl reload")
+
+        # 3.7 Pinned windows check (windows forced on top)
+        report["pinned_windows"] = []
+        try:
+            for c in self.get_windows():
+                if c.get("pinned", False):
+                    cls_name = str(c.get("class", "") or "unknown")
+                    title = str(c.get("title", "") or "")
+                    addr = str(c.get("address", "") or "")
+                    short_t = title[:24] + ("..." if len(title) > 24 else "")
+                    report["pinned_windows"].append({
+                        "class": cls_name,
+                        "title": short_t,
+                        "address": addr
+                    })
+        except Exception as _e:
+            _debug(f"pinned-windows query failed: {_e}")
 
         # 4. Installation self-check (CLI link, plugin links, systemd unit, token copies)
         install = self.check_installation()

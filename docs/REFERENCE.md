@@ -36,7 +36,7 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
   3. `omni.settings`：图形化控制中心，可视化切换模式，预览按键覆盖并提供快捷动作。
   4. `omni.snap-feedback`：分屏动效反馈 HUD，触发窗口吸附时在屏幕边缘渲染平滑高亮过渡动画。
   5. `omni.overview`：空间多工作区任务视图。工作区按 16:9 画布卡片自动平铺，窗口依 Compositor 矢量元数据（`hyprctl --batch`）映射真实相对位置，**严守 Hard Stop H-5，零像素截图**，支持 `1-9` 直达桌面、`Shift+1-9` 跨桌面瞬移与实时搜索。
-  6. `omni.mac-dock`：macOS 风格底部浮动 Dock 栏，实时展示运行中应用图标、运行指示圆点与平滑悬停动效。
+  （注：底部 Dock 由 Omarchy 4.5 官方原生提供并深度集成，无需第三方插件）。
 
 ---
 
@@ -86,6 +86,10 @@ omni-profile snap-layouts
 # 执行系统健康诊断与一致性校验
 omni-profile doctor
 
+# 解除置顶固定窗口（支持当前焦点窗口、指定窗口地址或 --all 解除全部）
+omni-profile unpin
+omni-profile unpin --all
+
 # 执行微秒级性能基准测试
 omni-profile benchmark
 
@@ -119,9 +123,6 @@ omarchy-shell shell toggle omni.cheat-sheet
 # 呼出多任务概览（Windows 下按 Super+Tab，macOS 下按 Super+Up 亦可直达）
 omarchy-shell shell toggle omni.overview
 
-# 呼出 macOS 底部 Dock 栏（macOS 下按 Super+Alt+D 亦可直达）
-omarchy-shell shell toggle omni.mac-dock
-
 # 测试分屏高亮反馈
 omarchy-shell shell summon omni.snap-feedback '{"zone":"left"}'
 
@@ -151,8 +152,7 @@ OmniPal/
 │   ├── omni.cheat-sheet/     # 快捷键 HUD 速查表
 │   ├── omni.settings/        # 图形控制中心面板
 │   ├── omni.snap-feedback/   # 窗口吸附视觉反馈 HUD
-│   ├── omni.overview/        # 多任务视图（零截图设计）
-│   └── omni.mac-dock/        # macOS 风格底部 Dock 栏
+│   └── omni.overview/        # 多任务视图（零截图设计）
 ├── scripts/
 │   ├── install.sh            # 安装部署脚本
 │   ├── uninstall.sh          # 干净卸载与还原脚本

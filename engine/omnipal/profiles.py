@@ -73,23 +73,40 @@ def is_terminal_class(window_class: str, patterns: Optional[List[str]] = None) -
 
 
 def forward_lua(mods: List[str], key: str, patterns: List[str]) -> str:
-    """Pure-Lua forward: reads the focused window class, adds SHIFT for terminals,
-    then dispatches send_shortcut. Every dynamic value goes through lua_str()."""
+    """Pure-Lua forward: checks Omarchy terminal tags and window classes, adds SHIFT
+    for terminals, and dispatches using down/up pulse (send_key_state + 50ms timer)
+    to prevent modifier sticking on Hyprland, with send_shortcut fallback."""
     exact = ", ".join(f"[{lua_str(p)}] = true" for p in patterns if not p.endswith("*"))
     prefix = ", ".join(lua_str(p[:-1]) for p in patterns if p.endswith("*"))
     term_mods = mods + ["SHIFT"] if "CTRL" in mods and "SHIFT" not in mods else mods
     return ("function() local w = hl.get_active_window(); "
+            "local t = false; "
+            "if w and w.tags then for _, tag in ipairs(w.tags) do "
+            "if string.gsub(tag, '%*$', '') == 'terminal' then t = true break end end end; "
+            "if not t then "
             "local c = string.lower((w and w.class) or ''); "
-            f"local t = ({{ {exact} }})[c] or false; "
-            f"for _, p in ipairs({{ {prefix} }}) do if c:sub(1, #p) == p then t = true end end; "
-            f"hl.dispatch(hl.dsp.send_shortcut({{ mods = t and {lua_str(' '.join(term_mods))} or {lua_str(' '.join(mods))}, "
-            f"key = {lua_str(key)} }})) end")
+            f"t = ({{ {exact} }})[c] or false; "
+            f"if not t then for _, p in ipairs({{ {prefix} }}) do if c:sub(1, #p) == p then t = true break end end end "
+            "end; "
+            f"local m = t and {lua_str(' '.join(term_mods))} or {lua_str(' '.join(mods))}; "
+            f"local k = {lua_str(key)}; "
+            "if hl.dsp and hl.dsp.send_key_state and hl.timer then "
+            "hl.dispatch(hl.dsp.send_key_state({ mods = m, key = k, state = 'down' })); "
+            "hl.timer(function() hl.dispatch(hl.dsp.send_key_state({ mods = m, key = k, state = 'up' })) end, { timeout = 50, type = 'oneshot' }) "
+            "else "
+            "hl.dispatch(hl.dsp.send_shortcut({ mods = m, key = k })) "
+            "end end")
 
 
-def forward_for_class(spec: str, window_class: str):
+def forward_for_class(spec: str, window_class: str, tags: Optional[List[str]] = None):
     """Terminals keep Ctrl+W / Ctrl+C for the shell, so they get Ctrl+Shift instead."""
     mods, key = parse_forward(spec)
-    if is_terminal_class(window_class) and "CTRL" in mods and "SHIFT" not in mods:
+    is_term = False
+    if tags:
+        is_term = any(str(t).rstrip("*") == "terminal" for t in tags)
+    if not is_term and is_terminal_class(window_class):
+        is_term = True
+    if is_term and "CTRL" in mods and "SHIFT" not in mods:
         mods = mods + ["SHIFT"]
     return mods, key
 

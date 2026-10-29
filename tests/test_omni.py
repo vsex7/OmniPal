@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import shutil as _shutil
-if not _shutil.which("hyprctl") or os.environ.get("OMNIPAL_FAKE_HYPRCTL") == "1":
+if not _shutil.which("hyprctl") or os.environ.get("OMNIPAL_FAKE_HYPRCTL") != "0":
     os.environ["PATH"] = str(Path(__file__).resolve().parent / "fakebin") + os.pathsep + os.environ.get("PATH", "")
 if not os.environ.get("XDG_RUNTIME_DIR") or not os.path.isdir(os.environ["XDG_RUNTIME_DIR"]):
     os.environ["XDG_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="omnipal-test-")
@@ -129,7 +129,6 @@ class TestOmniPal(BaseOmniTestCase):
             "omni.cheat-sheet",
             "omni.settings",
             "omni.snap-feedback",
-            "omni.mac-dock",
             "omni.overview"
         ]
         plugins_dir = PROJECT_ROOT / "plugins"
@@ -1615,7 +1614,8 @@ class TestForwardShortcut(unittest.TestCase):
         for b in fw:
             self.assertIn(f"hl.unbind({lua_str(b['combo'])})", lua)
         self.assertNotIn("omni-profile send", lua)  # no external process per key
-        self.assertIn('hl.dsp.send_shortcut({ mods = t and "CTRL SHIFT" or "CTRL", key = "W" })', lua)
+        self.assertIn("hl.dsp.send_key_state", lua)
+        self.assertIn("send_shortcut", lua)
         self.assertIn('["alacritty"] = true', lua)
 
     def test_bad_forward_is_skipped(self):
@@ -1959,11 +1959,6 @@ class TestUxSafetyRound2(unittest.TestCase):
         self.assertNotIn("(i < 8)", self.read("omni.overview/Model.js"))
         self.assertIn("num < 9", self.read("omni.settings/SettingsPanel.qml"))
 
-    def test_dock_multi_window_close_arms_first(self):
-        qml = self.read("omni.mac-dock/MacDock.qml")
-        self.assertIn("it.windowCount > 1 && !Safety.isArmed(root.closeArmedKey", qml)
-        self.assertIn("interval: Safety.CONFIRM_MS", qml)
-
     def test_mode_indicator_switch_is_undoable(self):
         qml = self.read("omni.mode-indicator/BarWidget.qml")
         self.assertIn("onClicked: root.switchModeWithUndo(profileRow.modelData.id)", qml)
@@ -1976,7 +1971,7 @@ class TestUxSafetyRound2(unittest.TestCase):
         self.assertIn("var UNDO_MS = 5000", js)
         self.assertIn("var CONFIRM_MS = 2000", js)
         self.assertIn("再按一次关闭", js)
-        for d in ("omni.overview", "omni.mac-dock", "omni.mode-indicator", "omni.settings"):
+        for d in ("omni.overview", "omni.mode-indicator", "omni.settings"):
             self.assertEqual((self.P / d / "Safety.js").read_text(encoding="utf-8"), js, d)
 
 
@@ -2797,3 +2792,52 @@ class TestOmniPalFloatedTracking(unittest.TestCase):
         e._float_existing_windows()
         owned = e._load_floated_addrs()
         self.assertEqual(owned, {"0xtiled"})
+
+    def test_doctor_reports_pinned_windows(self):
+        e = self.engine
+        e.get_windows = lambda: [
+            {"address": "0xpop1", "class": "antigravity", "title": "Antigravity", "pinned": True},
+            {"address": "0xfoot", "class": "foot", "title": "term", "pinned": False},
+        ]
+        doc = e.doctor()
+        self.assertEqual(len(doc["pinned_windows"]), 1)
+        self.assertEqual(doc["pinned_windows"][0]["address"], "0xpop1")
+        self.assertEqual(doc["pinned_windows"][0]["class"], "antigravity")
+
+    def test_unpin_flow(self):
+        e = self.engine
+        calls = []
+        import subprocess
+        orig_run = subprocess.run
+
+        def mock_run(cmd, *a, **kw):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        e.get_windows = lambda: [
+            {"address": "0xpop1", "class": "antigravity", "title": "Antigravity", "pinned": True},
+            {"address": "0xpop2", "class": "calc", "title": "Calculator", "pinned": True},
+            {"address": "0xnorm", "class": "foot", "title": "term", "pinned": False},
+        ]
+        e.get_active_window = lambda: {"address": "0xpop1", "class": "antigravity", "title": "Antigravity", "pinned": True}
+
+        subprocess.run = mock_run
+        try:
+            res = e.unpin()
+            self.assertEqual(len(res["unpinned"]), 1)
+            self.assertEqual(res["unpinned"][0]["address"], "0xpop1")
+            self.assertIn(["hyprctl", "dispatch", "pin", "address:0xpop1"], calls)
+            self.assertIn(["hyprctl", "dispatch", "tagwindow", "-pop", "address:0xpop1"], calls)
+
+            calls.clear()
+            res2 = e.unpin(address="0xpop2")
+            self.assertEqual(len(res2["unpinned"]), 1)
+            self.assertEqual(res2["unpinned"][0]["address"], "0xpop2")
+
+            calls.clear()
+            res3 = e.unpin(all_windows=True)
+            self.assertEqual(len(res3["unpinned"]), 2)
+            self.assertEqual({x["address"] for x in res3["unpinned"]}, {"0xpop1", "0xpop2"})
+        finally:
+            subprocess.run = orig_run
+

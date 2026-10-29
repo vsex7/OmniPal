@@ -36,6 +36,14 @@
       "default_arg": ""
     },
     {
+      "id": "minimize_window",
+      "name": "最小化窗口到 Dock",
+      "category": "window",
+      "description": "将当前窗口最小化收纳至底部 Dock 栏",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-hyprland-window-minimize"
+    },
+    {
       "id": "snap_left",
       "name": "窗口向左吸附/平铺",
       "category": "snap",
@@ -234,14 +242,6 @@
       "description": "呼出当前快捷键模式速查表 HUD",
       "dispatcher": "exec",
       "default_arg": "omarchy-shell shell toggle omni.cheat-sheet"
-    },
-    {
-      "id": "toggle_dock",
-      "name": "切换底部 Dock",
-      "category": "navigation",
-      "description": "呼出或隐藏 macOS 风格底部应用 Dock",
-      "dispatcher": "exec",
-      "default_arg": "omarchy-shell shell toggle omni.mac-dock"
     },
     {
       "id": "omni_settings",

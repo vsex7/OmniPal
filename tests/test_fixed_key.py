@@ -70,13 +70,13 @@ class TestFixedKey(unittest.TestCase):
                                  f"{mode} {r['action']}: fixed_key is not the fixed combo")
 
     def test_merged_row_keeps_merged_key_but_single_fixed_key(self):
-        # mac omni_settings: profile alias SUPER+comma merges with the fixed
+        # windows omni_settings: profile alias SUPER+I merges with the fixed
         # entry SUPER+ALT+I; the main table keeps the merged key (intentional),
         # but fixed_key must hold only the fixed combo.
-        rows = {r["action"]: r for r in _engine().cheatsheet("mac")}
+        rows = {r["action"]: r for r in _engine().cheatsheet("windows")}
         row = rows["omni_settings"]
         self.assertIn("/", row["key"], "alias row must stay merged")
-        self.assertIn("SUPER + COMMA", row["key"])
+        self.assertIn("SUPER + I", row["key"])
         self.assertEqual(row["fixed_key"], "SUPER + ALT + I")
 
     def test_guide_combos_are_fixed_only_in_every_mode(self):

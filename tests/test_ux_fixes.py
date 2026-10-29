@@ -61,9 +61,9 @@ class TestForwardNaming(unittest.TestCase):
     def test_mac_forwards_all_named_distinctly(self):
         sheet = _engine().cheatsheet("mac")
         fw = [r for r in sheet if r["action"] == "forward_shortcut"]
-        self.assertEqual(len(fw), 19)
+        self.assertEqual(len(fw), 18)
         names = [r["name"] for r in fw]
-        self.assertEqual(len(set(names)), 19, f"duplicate forward names: {names}")
+        self.assertEqual(len(set(names)), 18, f"duplicate forward names: {names}")
         for r in fw:
             self.assertIn("发送 Ctrl", r["name"])
             self.assertEqual(r["category"], "app")
@@ -96,7 +96,7 @@ class TestCheatsheetMerge(unittest.TestCase):
     """Issue #1: one action -> one row listing every combo."""
 
     def test_fixed_entries_merged_with_profile_aliases(self):
-        sheet = _engine().cheatsheet("mac")
+        sheet = _engine().cheatsheet("windows")
         for action in ("cheat_sheet", "omni_settings", "task_view"):
             rows = [r for r in sheet if r["action"] == action]
             self.assertEqual(len(rows), 1, f"{action} should be a single merged row")

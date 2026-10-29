@@ -25,6 +25,7 @@ omni-profile switch mac       # macOS 习惯
 omni-profile restore          # 回到 Omarchy 原生键位
 omni-profile cheatsheet       # 当前模式的快捷键
 omni-profile doctor           # 出问题时先跑这个
+omni-profile unpin            # 解除窗口置顶/固定（Super+O）
 omni-profile window-policy set follow-profile   # 窗口策略：follow-profile 跟随模式 / tiled 平铺 / floating 浮动
 ```
 
@@ -44,13 +45,13 @@ omni-profile window-policy set follow-profile   # 窗口策略：follow-profile 
 | `Super+Alt+I` | OmniPal 控制中心 |
 | `Super+Alt+O` | 概览 |
 
-它们都不占用 Omarchy 4.0 的默认快捷键。各模式自己的别名（如 Windows 模式的 `Super+Tab` 概览、`Super+I` 控制中心，macOS 模式的 `Super+,`）照常可用。定义在 `schema/fixed_bindings.json`，`scripts/check_consistency.py` 会拒绝把这些组合键绑到其他动作的模式文件。
+它们都不占用 Omarchy 默认快捷键。各模式自己的别名（如 Windows 模式的 `Super+Tab` 概览、`Super+I` 控制中心）照常可用。定义在 `schema/fixed_bindings.json`，`scripts/check_consistency.py` 会拒绝把这些组合键绑到其他动作的模式文件。
 
 ## 包含什么
 
 - **三套习惯模式**：Windows（Alt+F4、Win+方向键吸附、Win+E）、macOS（Super+Q、Super+Space、Super+Shift+3/4）、Omarchy 原生模式（还原系统原生键位）。
 - **窗口吸附**：半屏、三分之一、三分之二、居中，`Win+Z` 呼出布局选择器。
-- **Quickshell 插件**：顶栏模式指示器、快捷键速查表（`Super+Ctrl+/`）、设置中心（`Super+Alt+I`）、任务视图（`Super+Alt+O`，跨桌面窗口概览）、mac 风格 Dock、可视化吸附布局选择器（`Win+Z`）。
+- **Quickshell 插件**：顶栏模式指示器、快捷键速查表（`Super+Ctrl+/`）、设置中心（`Super+Alt+I`）、任务视图（`Super+Alt+O`，跨桌面窗口概览）、可视化吸附布局选择器（`Win+Z`）（底部 Dock 由 Omarchy 4.5 原生提供并无缝集成）。
 - **自定义模式**：在 `~/.config/omnipal/profiles/` 放 JSON，或用 `omni-profile import` 导入别人分享的。
 
 ## 更多

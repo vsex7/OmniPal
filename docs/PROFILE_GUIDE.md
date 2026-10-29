@@ -46,7 +46,7 @@ omni-profile import my-mac.json --id my-mac
 
 工作区：`task_view` `workspace_next` `workspace_prev`
 
-OmniPal：`cheat_sheet` `toggle_dock` `omni_settings`
+OmniPal：`cheat_sheet` `omni_settings`
 
 完整说明见 `schema/actions.json`。
 
