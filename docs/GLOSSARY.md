@@ -8,8 +8,8 @@
 | profile / mode | **模式** | Profile、方案、配置模式 | 例：「macOS 习惯模式」「切换模式」。文件本身可称「模式文件（profiles/*.json）」 |
 | Omarchy 默认（无覆盖） | **Omarchy 原生模式** | 系统原生还原、恢复原生快捷键 | 「还原」动作即切换到原生模式 |
 | Snap / snap layouts | **贴靠**、**贴靠布局（菜单）** | Snap、Snap Layouts、吸附、贴边 | 例：「Super+方向键贴靠」「呼出贴靠布局菜单」 |
-| window policy | **窗口策略** | Window Policy、窗口布局策略 | 取值：平铺（tiled）/ 浮动（floating）/ 跟随模式（follow-profile，默认） |
-| tiled / floating | **平铺** / **浮动** | tile、float | 全局设为平铺或浮动时，会覆盖各模式自带的 window_mode |
+| window policy | **窗口策略** | Window Policy、窗口布局策略 | 取值：平铺（tiled）/ 滚动（scrolling）/ 浮动（floating）/ 跟随模式（follow-profile，默认） |
+| tiled / scrolling / floating | **平铺** / **滚动** / **浮动** | tile、scroll、float | 全局设为平铺、滚动或浮动时，会覆盖各模式自带的 window_mode |
 | override | **已覆盖** | override、强制 | 全局窗口策略不是「跟随模式」时，在 UI 中标注「已覆盖」 |
 | follow-profile | **跟随模式** | follow-profile（仅作 CLI 参数出现） | 由当前模式决定平铺或浮动 |
 | overview / task view | **概览** | Overview、任务视图 | |

@@ -99,12 +99,17 @@ Item {
   // 固定入口（schema/fixed_bindings.json），所有模式通用
   readonly property string fixedKeysText: "固定入口（所有模式通用）：Super+Ctrl+/ 速查表 · Super+Alt+I 控制中心 · Super+Alt+O 概览"
 
-  function windowModeLabel(m) { return m === "floating" ? "浮动" : "平铺" }
+  function windowModeLabel(m) {
+    if (m === "floating") return "浮动"
+    if (m === "scrolling") return "滚动"
+    return "平铺"
+  }
   function policyLabel(p) { return p === "follow-profile" ? "跟随模式" : root.windowModeLabel(p) }
-  // 窗口策略取值（docs/GLOSSARY.md：跟随模式 / 平铺 / 浮动）
+  // 窗口策略取值（docs/GLOSSARY.md：跟随模式 / 平铺 / 滚动 / 浮动）
   readonly property var policyOptions: [
     { value: "follow-profile", label: "跟随模式" },
     { value: "tiled", label: "平铺" },
+    { value: "scrolling", label: "滚动" },
     { value: "floating", label: "浮动" }
   ]
   // 主题样式令牌：直接取 Omarchy Shell 的 qs.Commons（[menu] 表面，与 omarchy.menu /
@@ -286,7 +291,7 @@ Item {
       root.engineUpdatedAt = d.updated_at || ""
       root.engineStatus = d.status || "native"
       var wp = String(d.window_policy || "follow-profile").toLowerCase()
-      root.windowPolicy = (wp === "follow" || wp === "follow_profile") ? "follow-profile" : (wp === "float" ? "floating" : (wp === "tile" ? "tiled" : wp))
+      root.windowPolicy = (wp === "follow" || wp === "follow_profile") ? "follow-profile" : (wp === "float" || wp === "floating") ? "floating" : (wp === "scroll" || wp === "scrolling") ? "scrolling" : (wp === "tile" || wp === "tiled") ? "tiled" : wp
       root.autoInfo = (d.auto && typeof d.auto === "object") ? d.auto : null
       root.engineRunning = true
     } catch (e) {

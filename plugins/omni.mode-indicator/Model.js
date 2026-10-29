@@ -114,6 +114,13 @@ var DEFAULT_POLICIES = [
     "desc": "新常规窗口自动平铺分屏"
   },
   {
+    "id": "scrolling",
+    "name": "滚动",
+    "english": "Scrolling",
+    "icon": "▥",
+    "desc": "新常规窗口横向滚动排列"
+  },
+  {
     "id": "floating",
     "name": "浮动",
     "english": "Floating",
@@ -137,6 +144,7 @@ function normalizePolicy(id) {
   var key = String(id || "").toLowerCase().trim();
   if (key === "follow" || key === "follow_profile" || key === "follow-profile") return "follow-profile";
   if (key === "float" || key === "floating") return "floating";
+  if (key === "scroll" || key === "scrolling") return "scrolling";
   if (key === "tile" || key === "tiled") return "tiled";
   return "follow-profile";
 }
@@ -178,16 +186,17 @@ function effectiveWindowMode(currentMode, profiles) {
   for (var i = 0; i < list.length; i++) {
     if (list[i] && list[i].id === key) {
       var wm = list[i].window_mode;
-      if (wm === "floating" || wm === "tiled") return wm;
+      if (wm === "floating" || wm === "tiled" || wm === "scrolling") return wm;
     }
   }
   return key === "mac" ? "floating" : "tiled";
 }
 
-// 全局窗口策略：跟随模式时由模式自带的 window_mode 决定；平铺/浮动时全局覆盖。
+// 全局窗口策略：跟随模式时由模式自带的 window_mode 决定；平铺/浮动/滚动时全局覆盖。
 function computeEffectiveMode(policy, currentMode, profiles) {
   var p = normalizePolicy(policy);
   if (p === "follow-profile") return effectiveWindowMode(currentMode, profiles);
   if (p === "floating") return "floating";
+  if (p === "scrolling") return "scrolling";
   return "tiled";
 }

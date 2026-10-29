@@ -561,7 +561,7 @@ class OmniPalEngine:
         if APPLIED_WINDOW_MODE_FILE.exists():
             try:
                 val = APPLIED_WINDOW_MODE_FILE.read_text(encoding="utf-8").strip()
-                if val in ("floating", "tiled"):
+                if val in ("floating", "tiled", "scrolling"):
                     return val
             except (OSError, ValueError) as _e:
                 # Best-effort read; fall back to the default below.
@@ -1411,14 +1411,61 @@ end
                     self._ensure_hyprbars_if_floating()
                 self._notify_omarchy_layout()
             return ok
+        elif target_mode == "scrolling":
+            if not force and cur_applied == "scrolling":
+                return True
+            if cur_applied == "floating":
+                reloaded = self._disable_float_rules()
+                if reloaded is None:
+                    return False
+                self._unfloat_existing_windows()
+
+            lua_code = (
+                'local used_omarchy_mode = false; '
+                'if type(o) == "table" and type(o.workspace_mode) == "function" then '
+                '  local ws = (type(hl) == "table" and type(hl.get_active_workspace) == "function") and hl.get_active_workspace() or nil; '
+                '  if ws and ws.id and tonumber(ws.id) and tonumber(ws.id) >= 1 then '
+                '    o.workspace_mode({ workspace = tostring(ws.id), mode = "scrolling" }); '
+                '    used_omarchy_mode = true '
+                '  end '
+                'elseif type(hl) == "table" and type(hl.workspace_rule) == "function" then '
+                '  local ws = (type(hl) == "table" and type(hl.get_active_workspace) == "function") and hl.get_active_workspace() or nil; '
+                '  if ws and ws.id and tonumber(ws.id) and tonumber(ws.id) >= 1 then '
+                '    hl.workspace_rule({ workspace = tostring(ws.id), layout = "scrolling" }); '
+                '    used_omarchy_mode = true '
+                '  end '
+                'end; '
+                'return used_omarchy_mode'
+            )
+            ok = self._eval_lua(lua_code)
+            self._set_applied_window_mode("scrolling")
+            if valid_ws:
+                default_mode = self._default_workspace_layout()
+                self._sync_workspace_layout_file(ws_id, "scrolling", default_mode)
+            self._notify_omarchy_layout()
+            return ok
         else:
             # target_mode == "tiled"
-            if not force and cur_applied != "floating":
+            if not force and cur_applied == "tiled":
                 return True
-            reloaded = self._disable_float_rules()
-            if reloaded is None:
-                return False
-            self._unfloat_existing_windows()
+            reloaded = False
+            if cur_applied == "floating":
+                reloaded = self._disable_float_rules()
+                if reloaded is None:
+                    return False
+                self._unfloat_existing_windows()
+            elif cur_applied == "scrolling":
+                default_mode = self._default_workspace_layout()
+                if valid_ws:
+                    lua = (
+                        'if type(o) == "table" and type(o.workspace_mode) == "function" then '
+                        f'  o.workspace_mode({{ workspace = "{ws_id}", mode = "{default_mode}" }}); '
+                        'elseif type(hl) == "table" and type(hl.workspace_rule) == "function" then '
+                        f'  hl.workspace_rule({{ workspace = "{ws_id}", layout = "{default_mode}" }}); '
+                        'end'
+                    )
+                    self._eval_lua(lua)
+                    self._sync_workspace_layout_file(ws_id, default_mode, default_mode)
             self._set_applied_window_mode("tiled")
             self._notify_omarchy_layout()
             if not reloaded:
@@ -1516,10 +1563,12 @@ end
             m = str(cur_m).lower().strip()
             prof = getattr(self, "profiles", {}).get(m) or {}
             wm = prof.get("window_mode")
-            if wm in ("floating", "tiled"):
+            if wm in ("floating", "tiled", "scrolling"):
                 return wm
             return "floating" if m == "mac" else "tiled"
-        return "floating" if pol == "floating" else "tiled"
+        if pol in ("floating", "scrolling"):
+            return pol
+        return "tiled"
 
     def get_window_policy(self) -> str:
         if STATE_FILE.exists():
@@ -1536,11 +1585,11 @@ end
         return normalize_window_policy(getattr(self, "window_policy", None)) or "follow-profile"
 
     def profile_window_mode(self, mode_id: Any) -> str:
-        """The mode's own window_mode (tiled/floating), ignoring the global policy."""
+        """The mode's own window_mode (tiled/floating/scrolling), ignoring the global policy."""
         m = str(mode_id).lower().strip()
         prof = getattr(self, "profiles", {}).get(m) or {}
         wm = prof.get("window_mode")
-        if wm in ("floating", "tiled"):
+        if wm in ("floating", "tiled", "scrolling"):
             return wm
         return "floating" if m == "mac" else "tiled"
 
@@ -1938,7 +1987,8 @@ end
 
             policy_restored = True
             config_reloaded = False
-            if self._get_applied_window_mode() == "floating" and self.get_effective_window_mode("omarchy") != "floating":
+            cur_wm = self._get_applied_window_mode()
+            if cur_wm == "floating" and self.get_effective_window_mode("omarchy") != "floating":
                 res = self._disable_float_rules()
                 policy_restored = res is not None
                 config_reloaded = bool(res)
@@ -1947,6 +1997,22 @@ end
                     self._set_applied_window_mode("tiled")
                     self._notify_omarchy_layout()
                     self._saved_workspace_layouts.clear()
+            elif cur_wm == "scrolling" and self.get_effective_window_mode("omarchy") != "scrolling":
+                ws_info = self.get_active_workspace_info()
+                ws_id = str(ws_info.get("id", "")) if ws_info else ""
+                default_mode = self._default_workspace_layout()
+                if _is_valid_workspace_id(ws_id):
+                    lua = (
+                        'if type(o) == "table" and type(o.workspace_mode) == "function" then '
+                        f'  o.workspace_mode({{ workspace = "{ws_id}", mode = "{default_mode}" }}); '
+                        'elseif type(hl) == "table" and type(hl.workspace_rule) == "function" then '
+                        f'  hl.workspace_rule({{ workspace = "{ws_id}", layout = "{default_mode}" }}); '
+                        'end'
+                    )
+                    self._eval_lua(lua)
+                    self._sync_workspace_layout_file(ws_id, default_mode, default_mode)
+                self._set_applied_window_mode("tiled")
+                self._notify_omarchy_layout()
             if not policy_restored:
                 print("Warning: Restore window policy reload failed; retaining active overlay for retry", file=sys.stderr)
                 return False

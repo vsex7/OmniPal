@@ -782,6 +782,10 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
             self.assertEqual(self.engine.get_state()["window_policy"], "floating")
             self.assertTrue(self.engine.set_window_policy("tiled"))
             self.assertEqual(self.engine.get_state()["effective_window_mode"], "tiled")
+            self.assertTrue(self.engine.set_window_policy("scrolling"))
+            self.assertEqual(self.engine.get_state()["window_policy"], "scrolling")
+            self.assertEqual(self.engine.get_state()["effective_window_mode"], "scrolling")
+            self.assertEqual(self.engine.get_persistence_status()["window_policy"], "scrolling")
             self.assertTrue(self.engine.set_window_policy("follow-profile"))
             self.assertEqual(self.engine.get_state()["effective_window_mode"], "floating")  # mac's own
             self.assertFalse(self.engine.set_window_policy("bogus"))
@@ -887,14 +891,14 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
         p2 = subprocess.run([bin_path, "window-policy", "--json"], capture_output=True, text=True, env=env)
         self.assertEqual(p2.returncode, 0, p2.stderr)
         data = json.loads(p2.stdout)
-        self.assertIn(data["window_policy"], ("follow-profile", "tiled", "floating"))
+        self.assertIn(data["window_policy"], ("follow-profile", "tiled", "floating", "scrolling"))
         self.assertIn("overridden", data)
         self.assertIn("effective_window_mode", data)
         self.assertEqual(data["window_modes"]["mac"], "floating")
         self.assertEqual(data["window_modes"]["windows"], "tiled")
 
         src = (PROJECT_ROOT / "bin" / "omni-profile").read_text(encoding="utf-8")
-        self.assertIn('WINDOW_POLICY_CHOICES = ["follow-profile", "tiled", "floating"]', src)
+        self.assertIn('WINDOW_POLICY_CHOICES = ["follow-profile", "tiled", "scrolling", "floating"]', src)
         self.assertIn('p_p_enable.add_argument("--policy", choices=WINDOW_POLICY_CHOICES', src)
         self.assertIn("窗口策略: ⚠️ 已覆盖：全局", src)  # doctor warning
         self.assertIn("window-policy set follow-profile", src)
@@ -2262,7 +2266,7 @@ class TestSettingsSingleEntry(unittest.TestCase):
 
     def test_settings_window_policy_selector(self):
         for present in ('"omni-profile", "window-policy", "set", policy]', "policyOptions", "policyGroup",
-                        "policyOverridden", "已覆盖", '"follow-profile"', '"tiled"', '"floating"'):
+                        "policyOverridden", "已覆盖", '"follow-profile"', '"tiled"', '"scrolling"', '"floating"'):
             self.assertIn(present, self.st, present)
         for gone in ('"stats"', "statsProc", "resetStats", "askResetStats", "重置统计数据", "analyticsTab", "RankRow"):
             self.assertNotIn(gone, self.st, gone)

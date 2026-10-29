@@ -102,15 +102,22 @@ def forward_for_class(spec: str, window_class: str, tags: Optional[List[str]] = 
 RETIRED_MODES = ("kde",)  # removed built-in modes; saved references migrate to MIGRATION_FALLBACK_MODE
 MIGRATION_FALLBACK_MODE = "windows"
 
-VALID_WINDOW_POLICIES = {"tiled", "floating", "follow-profile"}
+VALID_WINDOW_POLICIES = {"tiled", "floating", "scrolling", "follow-profile"}
 WINDOW_POLICY_ALIASES = {
     "tile": "tiled",
     "tiled": "tiled",
+    "平铺": "tiled",
     "float": "floating",
     "floating": "floating",
+    "浮动": "floating",
+    "scroll": "scrolling",
+    "scrolling": "scrolling",
+    "滚动": "scrolling",
     "follow": "follow-profile",
     "follow-profile": "follow-profile",
     "follow_profile": "follow-profile",
+    "跟随": "follow-profile",
+    "跟随模式": "follow-profile",
 }
 
 def normalize_window_policy(policy: Optional[str]) -> Optional[str]:

@@ -71,9 +71,9 @@ def cmd_status(engine: OmniPalEngine, args):
         if "updated_at" in state:
             print(f"  更新时间: {state.get('updated_at')}")
 
-WINDOW_MODE_NAMES = {"tiled": "平铺", "floating": "浮动"}
-WINDOW_POLICY_NAMES = {"follow-profile": "跟随模式", "tiled": "平铺", "floating": "浮动"}
-WINDOW_POLICY_CHOICES = ["follow-profile", "tiled", "floating"]
+WINDOW_MODE_NAMES = {"tiled": "平铺", "scrolling": "滚动", "floating": "浮动"}
+WINDOW_POLICY_NAMES = {"follow-profile": "跟随模式", "tiled": "平铺", "scrolling": "滚动", "floating": "浮动"}
+WINDOW_POLICY_CHOICES = ["follow-profile", "tiled", "scrolling", "floating"]
 
 
 def cmd_window_policy(engine: OmniPalEngine, args):
@@ -397,7 +397,7 @@ def cmd_doctor(engine: OmniPalEngine, args):
 
     wp = diag.get("window_policy", {})
     if wp.get("overridden"):
-        name = {"tiled": "平铺", "floating": "浮动"}.get(wp.get("policy"), wp.get("policy"))
+        name = {"tiled": "平铺", "scrolling": "滚动", "floating": "浮动"}.get(wp.get("policy"), wp.get("policy"))
         print(f"  • 窗口策略: ⚠️ 已覆盖：全局{name}覆盖了各模式自带的平铺/浮动设置；"
               f"恢复跟随模式请运行 omni-profile window-policy set follow-profile")
     else:
@@ -874,13 +874,13 @@ def main():
     r_test.add_argument("--delay", type=int, default=3, help="--current 的倒计时秒数")
     p_rules.set_defaults(func=cmd_rules)
 
-    # window-policy：查看 / set <follow-profile|tiled|floating>（无简写别名）
-    p_wp = subparsers.add_parser("window-policy", help="查看或设置窗口策略：跟随模式 / 平铺 / 浮动")
+    # window-policy：查看 / set <follow-profile|tiled|scrolling|floating>（无简写别名）
+    p_wp = subparsers.add_parser("window-policy", help="查看或设置窗口策略：跟随模式 / 平铺 / 滚动 / 浮动")
     p_wp.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_wp.set_defaults(func=cmd_window_policy, policy_action=None)
     wp_sub = p_wp.add_subparsers(dest="policy_action")
     wp_set = wp_sub.add_parser("set", help="设置全局窗口策略（非跟随模式时会覆盖各模式自带的平铺/浮动）")
-    wp_set.add_argument("policy", choices=WINDOW_POLICY_CHOICES, help="follow-profile 跟随模式 / tiled 平铺 / floating 浮动")
+    wp_set.add_argument("policy", choices=WINDOW_POLICY_CHOICES, help="follow-profile 跟随模式 / tiled 平铺 / scrolling 滚动 / floating 浮动")
     # SUPPRESS: `window-policy --json set X` must keep the parent's --json instead of
     # the subparser resetting it to False.
     wp_set.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="以 JSON 格式输出结果")
