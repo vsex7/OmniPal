@@ -45,11 +45,6 @@
       "key": "Right"
     },
     {
-      "action": "cheat_sheet",
-      "mod": "SUPER",
-      "key": "slash"
-    },
-    {
       "action": "snap_left",
       "mod": "SUPER ALT",
       "key": "Left"
@@ -68,11 +63,6 @@
       "action": "snap_bottom",
       "mod": "SUPER ALT",
       "key": "Down"
-    },
-    {
-      "action": "maximize_window",
-      "mod": "SUPER ALT",
-      "key": "Return"
     },
     {
       "action": "snap_center",
@@ -142,13 +132,6 @@
       "action": "forward_shortcut",
       "forward": "CTRL S",
       "name": "保存"
-    },
-    {
-      "mod": "SUPER",
-      "key": "L",
-      "action": "forward_shortcut",
-      "forward": "CTRL L",
-      "name": "定位到地址栏"
     },
     {
       "mod": "SUPER",

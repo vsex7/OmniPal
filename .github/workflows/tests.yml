@@ -13,6 +13,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Run consistency check
+        run: python scripts/check_consistency.py
+      - name: Static syntax and cleanliness check
+        run: |
+          python -m py_compile engine/omnipal/*.py bin/omni-profile scripts/*.py
+          ! git grep -rn "cd /home/""abyss" -- ':(exclude)scripts/release-check.sh'
       - name: Run tests (hyprctl stubbed)
         env:
           OMNIPAL_FAKE_HYPRCTL: "1"

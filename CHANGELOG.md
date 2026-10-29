@@ -9,7 +9,7 @@
 ### ✨ 新功能
 - **解除窗口置顶**：新增 `omni-profile unpin [address] [--all]` 命令与 `doctor` 置顶窗口（Pinned）诊断，精确解除 `Super+O`（`omarchy-hyprland-window-pop`）导致的跨工作区强制置顶，防止反向置顶并校验底层返回码。
 - **上手指南**：安装后第一次登录自动打开一次速查表，显示三步指南（选模式 / 记住三个固定快捷键 / 在设置里调窗口策略或按应用自动切换）。只显示一次（`~/.config/omnipal/onboarding.json`），之后在速查表按 G 或菜单里重新打开；`omni-profile onboarding reset` 可让它下次登录再出现。安装脚本结束时列出三个固定快捷键。
-- **Omarchy 菜单「快捷键模式」**：Super+Alt+Space → Setup → 快捷键模式，可切换模式、打开设置、速查表、上手指南。通过 Omarchy 官方用户扩展 `~/.config/omarchy/extensions/omarchy-menu.jsonc` 注册，只写一个带标记的区块；`omni-profile menu install|uninstall|status`，安装/卸载脚本自动调用，导入模式后自动刷新。
+- **Omarchy 菜单「快捷键模式」**：Super+Space → Setup → 快捷键模式，可切换模式、打开设置、速查表、上手指南。通过 Omarchy 官方用户扩展 `~/.config/omarchy/extensions/omarchy-menu.jsonc` 注册，只写一个带标记的区块；`omni-profile menu install|uninstall|status`，安装/卸载脚本自动调用，导入模式后自动刷新。
 - **接管的原生快捷键**：设置的模式卡片和速查表列出该模式接管的 Omarchy 原生快捷键与「原来的功能」，固定入口单独标注；读不到 Hyprland 快捷键时显示灰色提示（数据来自 `omni-profile doctor --json` 的 `takeovers`）。
 - **mac 模式快捷键转发**：Super+W、T、Shift+T、F、Z、Shift+Z、A、S、L、R 和 1–9 会转成对应的 Ctrl 组合发给当前应用，比如 Cmd+W 在浏览器里只关标签页，Cmd+1 切到第一个标签。终端里改发 Ctrl+Shift，Ctrl+W 删单词、Ctrl+C 中断不受影响。
 - **mac 模式应用切换**：Super+Tab 和 Super+Shift+Tab 在当前工作区的窗口之间切换，不切走工作区。
@@ -30,7 +30,6 @@
   - 释放 `mac.json` 中的 `Super+,` 给 Omarchy 4.5 核心的通知操作（2FA 验证码快速复制等）；OmniPal 控制中心固定为 `Super+Alt+I`。
   - 清理 `mac.json` 中被 Omarchy 4.5 原生实现的重复快捷键（`Super+Q` 关闭窗口、`Super+Space` 应用启动器、`Super+A` 全选转发、`Super+M` 最小化）。
 - **系统保护键位**：新增 `schema/protected_bindings.json`（如 Super+Alt+Space / Omarchy 菜单），模式文件覆盖时 `check_consistency.py` 与 `omni-profile import` 直接报错，`doctor` 点名指出违规的模式与键位；mac 模式文件管理器改 Super+Alt+E。
-- **固定入口统一修饰键**：三个固定入口统一为 Super+Alt（速查表 Super+Ctrl+/ → Super+Alt+/）。
 - **绑定级 `name`**：模式文件 binding 的可选 `name` 同时用于 Hyprland 绑定描述，`hyprctl binds` 与速查表显示一致。
 - 全局窗口策略保留：跟随模式（默认）/ 平铺 / 浮动，`omni-profile window-policy` 查看、`window-policy set <follow-profile|tiled|floating>` 设置；状态栏右键菜单「窗口策略」三行（标注「当前」）、设置模式页选择器、模式卡片「已覆盖：全局平铺/浮动」、doctor「⚠️ 已覆盖」提示；IPC `setWindowPolicy` / `getWindowPolicy`；随配置持久化记住（`persist enable --policy`）。不再在启动时清除已保存的 `window_policy`。
 - mac 模式开启时会暂时停用 Omarchy 原生的 Super+W、Super+数字绑定；还原或切到别的模式时会执行 `hyprctl reload` 把它们找回来。

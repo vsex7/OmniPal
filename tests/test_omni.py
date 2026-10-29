@@ -2860,3 +2860,56 @@ class TestOmniPalFloatedTracking(unittest.TestCase):
         finally:
             subprocess.run = orig_run
 
+
+class TestOmarchy45Alignment(unittest.TestCase):
+    """P0/P1/P2 regression tests for Omarchy 4.5 alignment."""
+
+    def test_file_manager_command_is_nautilus(self):
+        actions_file = Path(__file__).resolve().parent.parent / "schema" / "actions.json"
+        actions = json.loads(actions_file.read_text(encoding="utf-8"))["actions"]
+        fm = next(a for a in actions if a["id"] == "file_manager")
+        self.assertEqual(fm["default_arg"], "omarchy-launch-nautilus")
+
+    def test_exec_commands_exist(self):
+        actions_file = Path(__file__).resolve().parent.parent / "schema" / "actions.json"
+        actions = json.loads(actions_file.read_text(encoding="utf-8"))["actions"]
+        for a in actions:
+            if a.get("dispatcher") == "exec":
+                arg = a.get("default_arg", "").strip()
+                if arg:
+                    cmd = arg.split()[0]
+                    # If running in environment with omarchy installed, verify command
+                    if shutil.which("omarchy-menu"):
+                        self.assertTrue(shutil.which(cmd) or os.path.exists(cmd), f"Action {a['id']} binary '{cmd}' not found")
+
+    def test_check_installation_does_not_delete_user_plugin(self):
+        with tempfile.TemporaryDirectory() as tmp_home:
+            h = Path(tmp_home)
+            p_dir = h / ".config" / "omarchy" / "plugins"
+            p_dir.mkdir(parents=True, exist_ok=True)
+            user_plugin = p_dir / "omni.my-custom-plugin"
+            user_plugin.mkdir()
+            dep_plugin = p_dir / "omni.mac-dock"
+            dep_plugin.mkdir()
+
+            e = OmniPalEngine(Path(__file__).resolve().parent.parent)
+            # Without fix=True: must NOT delete either plugin
+            rep = e.check_installation(home=h, fix=False)
+            self.assertTrue(user_plugin.exists(), "User plugin must never be deleted")
+            self.assertTrue(dep_plugin.exists(), "Deprecated plugin must not be deleted without fix=True")
+            self.assertTrue(any("omni.mac-dock" in str(p.get("problem", "")) for p in rep["problems"]))
+
+            # With fix=True: must remove deprecated plugin, keep user plugin
+            rep2 = e.check_installation(home=h, fix=True)
+            self.assertTrue(user_plugin.exists(), "User plugin must never be deleted even with fix=True")
+            self.assertFalse(dep_plugin.exists(), "Deprecated plugin must be cleaned with fix=True")
+
+    def test_negative_workspace_id_skipped(self):
+        from engine.omnipal.core import _is_valid_workspace_id
+        self.assertFalse(_is_valid_workspace_id("-98"))
+        self.assertFalse(_is_valid_workspace_id("-1"))
+        self.assertFalse(_is_valid_workspace_id("special:scratchpad"))
+        self.assertTrue(_is_valid_workspace_id("1"))
+        self.assertTrue(_is_valid_workspace_id("2"))
+
+

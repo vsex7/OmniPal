@@ -1,6 +1,6 @@
 # OmniPal 已知限制与运行环境说明 (Known Issues & Limitations)
 
-本文档列出 OmniPal v1.8.0 的设计边界、软硬件依赖要求及已知限制。
+本文档列出 OmniPal v1.9.0 的设计边界、软硬件依赖要求及已知限制。
 
 ---
 

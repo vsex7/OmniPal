@@ -177,7 +177,7 @@
       "category": "apps",
       "description": "快速打开系统文件浏览器",
       "dispatcher": "exec",
-      "default_arg": "omarchy-file-manager"
+      "default_arg": "omarchy-launch-nautilus"
     },
     {
       "id": "lock_screen",

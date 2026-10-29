@@ -2,8 +2,9 @@
   "bindings": [
     {
       "key": "space",
-      "mod": "SUPER ALT",
-      "reason": "Omarchy 菜单（Super+Alt+Space）：OmniPal 的「快捷键模式」入口注册在这里，覆盖会导致菜单无法呼出"
+      "mod": "SUPER",
+      "allowed_actions": ["app_launcher"],
+      "reason": "Omarchy 菜单（Super+Space）：OmniPal 的「快捷键模式」入口注册在这里，覆盖会导致菜单无法呼出"
     }
   ],
   "description": "系统关键入口：任何模式文件（含用户自定义 profile）不得覆盖这些组合键，check_consistency.py 校验直接报错。OmniPal 自身的三个固定入口见 schema/fixed_bindings.json（同样不可被模式文件改绑，由 _validate_fixed_bindings 检查）。"

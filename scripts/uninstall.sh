@@ -53,6 +53,11 @@ fi
 # 4. 移除 Quickshell 插件软链接
 OMARCHY_PLUGINS_DIR="${HOME}/.config/omarchy/plugins"
 if [ -d "${OMARCHY_PLUGINS_DIR}" ]; then
+    # 显式清理旧版遗留的 omni.mac-dock 软链接（若存在）
+    if [ -L "${OMARCHY_PLUGINS_DIR}/omni.mac-dock" ] || [ -f "${OMARCHY_PLUGINS_DIR}/omni.mac-dock" ]; then
+        rm -f "${OMARCHY_PLUGINS_DIR}/omni.mac-dock"
+        echo "🗑️ 已移除旧版遗留插件软链接: omni.mac-dock"
+    fi
     for p_link in "${OMARCHY_PLUGINS_DIR}"/omni.*; do
         if [ -L "${p_link}" ]; then
             rm -f "${p_link}"

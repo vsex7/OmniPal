@@ -61,9 +61,9 @@ class TestForwardNaming(unittest.TestCase):
     def test_mac_forwards_all_named_distinctly(self):
         sheet = _engine().cheatsheet("mac")
         fw = [r for r in sheet if r["action"] == "forward_shortcut"]
-        self.assertEqual(len(fw), 18)
+        self.assertEqual(len(fw), 17)
         names = [r["name"] for r in fw]
-        self.assertEqual(len(set(names)), 18, f"duplicate forward names: {names}")
+        self.assertEqual(len(set(names)), 17, f"duplicate forward names: {names}")
         for r in fw:
             self.assertIn("发送 Ctrl", r["name"])
             self.assertEqual(r["category"], "app")
@@ -97,7 +97,7 @@ class TestCheatsheetMerge(unittest.TestCase):
 
     def test_fixed_entries_merged_with_profile_aliases(self):
         sheet = _engine().cheatsheet("windows")
-        for action in ("cheat_sheet", "omni_settings", "task_view"):
+        for action in ("omni_settings",):
             rows = [r for r in sheet if r["action"] == action]
             self.assertEqual(len(rows), 1, f"{action} should be a single merged row")
             self.assertIn("/", rows[0]["key"])
@@ -105,8 +105,8 @@ class TestCheatsheetMerge(unittest.TestCase):
 
     def test_merge_keeps_both_combos(self):
         sheet = _engine().cheatsheet("mac")
-        cs = next(r for r in sheet if r["action"] == "cheat_sheet")
-        self.assertIn("SLASH", cs["key"])
+        cs = next(r for r in sheet if r["action"] == "task_view")
+        self.assertIn("UP", cs["key"])
         self.assertIn("/", cs["key"])
         self.assertNotIn("keys", cs, "merge accumulator must not leak into the row")
 
@@ -118,7 +118,7 @@ class TestProtectedBindings(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             bad = Path(tmp) / "bad.json"
             bad.write_text(json.dumps({"id": "x", "bindings": [
-                {"action": "file_manager", "mod": "SUPER ALT", "key": "space"}]}),
+                {"action": "file_manager", "mod": "SUPER", "key": "space"}]}),
                 encoding="utf-8")
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
@@ -145,7 +145,7 @@ class TestProtectedBindings(unittest.TestCase):
         mac = json.loads((PROJECT_ROOT / "profiles" / "mac.json").read_text(encoding="utf-8"))
         for b in mac["bindings"]:
             self.assertFalse(
-                b.get("mod", "").upper().replace(" ", "") == "SUPERALT"
+                b.get("mod", "").upper().replace(" ", "") == "SUPER"
                 and b.get("key", "").lower() == "space",
                 "mac profile must not override the Omarchy menu key")
 
@@ -160,7 +160,7 @@ class TestProtectedEnforcement(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             bad = Path(tmp) / "evil.json"
             bad.write_text(json.dumps({"id": "evil", "name": "evil", "bindings": [
-                {"action": "lock_screen", "mod": "SUPER ALT", "key": "space"}]}),
+                {"action": "lock_screen", "mod": "SUPER", "key": "space"}]}),
                 encoding="utf-8")
             args = types.SimpleNamespace(file=str(bad), id=None, force=False, yes=True)
             err = io.StringIO()
@@ -193,7 +193,7 @@ class TestProtectedEnforcement(unittest.TestCase):
     def test_doctor_names_protected_violation(self):
         e = _engine()
         e.profiles["_evil"] = {"id": "_evil", "bindings": [
-            {"action": "lock_screen", "mod": "SUPER ALT", "key": "space"}]}
+            {"action": "lock_screen", "mod": "SUPER", "key": "space"}]}
         diag = e.doctor()
         hits = [i for i in diag["issues"] if "_evil" in i and "protected" in i]
         self.assertTrue(hits, f"doctor should name the violation, got: {diag['issues']}")

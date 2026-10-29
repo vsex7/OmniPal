@@ -46,7 +46,7 @@
     },
     {
       "action": "lock_screen",
-      "mod": "SUPER",
+      "mod": "SUPER CTRL",
       "key": "L"
     },
     {
@@ -70,11 +70,6 @@
       "key": "I"
     },
     {
-      "action": "cheat_sheet",
-      "mod": "SUPER",
-      "key": "slash"
-    },
-    {
       "action": "snap_layouts",
       "mod": "SUPER",
       "key": "Z"
@@ -88,11 +83,6 @@
       "action": "workspace_next",
       "mod": "SUPER CTRL",
       "key": "Right"
-    },
-    {
-      "action": "app_launcher",
-      "mod": "SUPER",
-      "key": "S"
     },
     {
       "action": "screenshot_fullscreen",

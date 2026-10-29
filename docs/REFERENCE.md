@@ -1,7 +1,7 @@
 # OmniPal 完整参考
 
 > **肌肉记忆无缝漫游，零配置污染的跨系统快捷键适配框架**  
-> 专为 **Omarchy / Hyprland** 深度定制 · 正式版本 **v1.8.0**
+> 专为 **Omarchy / Hyprland** 深度定制 · 正式版本 **v1.9.0**
 
 OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯的用户，在 Omarchy (Arch Linux + Hyprland + Quickshell) 上提供瞬时、无感、零污染的肌肉记忆还原方案。
 

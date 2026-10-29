@@ -31,7 +31,7 @@
   - 验证记录：交互面板正确反映当前生效状态，点击模式卡片可无感切换。
 - [x] **`omni.snap-feedback` 在吸附时可见**  
   - 验证记录：执行 `omni-profile snap left` 等命令时，屏幕高亮区域即时反馈并在 450ms 内平滑淡出。
-- [x] **`omni.overview` / `omni.mac-dock` 可打开关闭，无 QML 崩**  
+- [x] **`omni.overview` 可打开关闭，无 QML 崩（底部 Dock 由 Omarchy 4.5 官方原生提供并深度协同）**  
   - 验证记录：基于 `hyprctl clients -j` 纯净元数据渲染，使用合规 `hl.dsp.focus` 与 `hl.dsp.window.close` 调度。
 - [x] **停掉 Engine 后插件优雅降级，不拖垮 shell**  
   - 验证记录：清空或移除 `state.json` 后，指示器显示 `⊘ OFF`，其他插件静默退避，无未捕获异常。
@@ -40,7 +40,7 @@
 - [x] **新 clone + `install.sh` 成功**  
   - 验证记录：执行 `bash scripts/install.sh` 无任何硬编码报错，自动完成依赖检查、一致性校验、CLI 链接与插件挂载。
 - [x] **服务 / CLI / 插件就位**  
-  - 验证记录：`~/.local/bin/omni-profile` 可直接调用，`~/.config/omarchy/plugins/` 包含 6 个软链接，`systemd/user/omnipal.service` 正确部署。
+  - 验证记录：`~/.local/bin/omni-profile` 可直接调用，`~/.config/omarchy/plugins/` 包含 5 个软链接（底部 Dock 由 Omarchy 4.5 官方原生提供并深度协同），`systemd/user/omnipal.service` 正确部署。
 - [x] **`uninstall.sh` 后无 CLI、无插件链接、无覆盖绑定、无残留状态目录**  
   - 验证记录：执行 `bash scripts/uninstall.sh` 清理全部软链接、服务单元及 `/run/user/$UID/omnipal/`，恢复原生按键。
 

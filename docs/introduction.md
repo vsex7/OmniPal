@@ -46,7 +46,7 @@ OmniPal 是一个专为从 Windows 或 macOS 迁移到 Omarchy 的用户设计�
 |------|------|
 | 基础窗口吸附 | 支持左右半屏、最大化等常用布局 |
 | 吸附视觉反馈 | 吸附时显示半透明几何预览 |
-| mac-dock | 屏幕底部应用 Dock |
+| 底部 Dock | 屏幕底部应用 Dock（由 Omarchy 4.5 官方原生提供并深度协同） |
 | 任务视图 | 类似 Windows 任务视图 / macOS Mission Control |
 
 #### 2.3 后续可选功能
@@ -109,7 +109,7 @@ A：建议先 `restore`，再决定是否使用 OmniPal。冲突时优先保留�
 | 切换方式 | 纯内存热切换 | 写配置 + 事务应用 | 纯内存热切换 |
 | 切换速度 | 热态典型 < 5ms；单次发布预算 <= 10ms | 较慢，可能闪烁 | 热态典型 < 3–5ms |
 | Hyprland 配置污染 | 无 | 有文件写入 | 无 |
-| 界面完整度 | 高（指示器+HUD+设置+后期Dock等） | 高 | 较低（偏 CLI） |
+| 界面完整度 | 高（指示器+HUD+设置+原生协同Dock等） | 高 | 较低（偏 CLI） |
 | 架构复杂度 | 低 | 高 | 低 |
 | 主要定位 | 完整界面 + 干净热切换 | 完整 Omarchy 插件生态 | 极致性能热切换 |
 | 适合人群 | 想要界面完整又干净的用户 | 深度 Omarchy 用户 | 追求极简与速度的用户 |
@@ -132,7 +132,7 @@ cd OmniPal
 安装程序会自动执行：
 - 校验 JSON Schema、按键定义与所有 Quickshell 插件完整性
 - 创建 CLI 软链接至 `~/.local/bin/omni-profile`
-- 挂载全套 6 个 Quickshell 插件至 `~/.config/omarchy/plugins/`
+- 挂载全套 5 个 Quickshell 插件至 `~/.config/omarchy/plugins/`（底部 Dock 由 Omarchy 4.5 官方原生提供并深度协同）
 - 配置可选的 systemd 用户常驻单元 `omnipal.service`
 
 #### 卸载
@@ -173,7 +173,7 @@ cd OmniPal
 **开发阶段与架构分工**：
 1. 纯内存热切换 + 自动恢复（Phase 0）
 2. 状态栏指示器、快捷键 HUD、设置面板（Phase 1）
-3. 窗口吸附视觉反馈、Overview 任务视图、Mac-Dock（Phase 2）
+3. 窗口吸附视觉反馈、Overview 任务视图与官方原生 Dock 协同（Phase 2）
 4. 用户自定义 Profile 与更丰富吸附布局（v1.1）
 
 ---

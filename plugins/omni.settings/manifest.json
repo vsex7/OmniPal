@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "omni.settings",
   "name": "OmniPal Settings",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "minOmarchy": "4.5.0",
   "author": "OmniPal",
   "license": "MIT",

@@ -16,7 +16,7 @@
 |--------|------|
 | Phase 0 引擎 / schema / profiles / CLI / 基础测试 | 已提交 |
 | Phase 1 插件（indicator / cheat-sheet / settings） | 已提交 |
-| Phase 2 插件（snap-feedback / overview / mac-dock） | 已提交 |
+| Phase 2 插件（snap-feedback / overview / 原生 dock 协同） | 已提交 |
 | install / uninstall / AGENTS / README | 已提交 |
 | 提交历史 | 仅 3 次，同日完成 |
 | Release / 外部验证 | 无 |
@@ -142,7 +142,7 @@
 - [ ] cheat-sheet 内容与当前 Profile 一致  
 - [ ] settings 可切换并预览  
 - [ ] snap-feedback 在吸附时可见  
-- [ ] overview / mac-dock 可打开关闭，无 QML 崩  
+- [ ] overview 可打开关闭，无 QML 崩（底部 Dock 由 Omarchy 4.5 官方原生提供并深度协同）  
 - [ ] 停掉 Engine 后插件降级，不拖垮 shell  
 
 **安装卸载**

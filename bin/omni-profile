@@ -343,7 +343,7 @@ def cmd_onboarding(engine: OmniPalEngine, args):
 
 
 def cmd_doctor(engine: OmniPalEngine, args):
-    diag = engine.doctor()
+    diag = engine.doctor(fix=getattr(args, "fix", False))
     if args.json:
         print(json.dumps(diag, indent=2, ensure_ascii=False))
         if not diag["healthy"]:
@@ -732,7 +732,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="omni-profile",
-        description="OmniPal 运行时内存热切换控制工具 (v1.8.0)"
+        description="OmniPal 运行时内存热切换控制工具 (v1.9.0)"
     )
     subparsers = parser.add_subparsers(dest="command", help="子命令")
 
@@ -805,6 +805,7 @@ def main():
     # doctor
     p_doc = subparsers.add_parser("doctor", help="执行系统状态与按键一致性健康诊断")
     p_doc.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_doc.add_argument("--fix", action="store_true", help="尝试自动修复发现的问题（如清理废弃插件链接）")
     p_doc.set_defaults(func=cmd_doctor)
 
     # diff

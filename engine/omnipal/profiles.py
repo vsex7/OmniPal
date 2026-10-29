@@ -262,8 +262,18 @@ def combo_key(mod: str, key: str) -> str:
     return "+".join(sorted(mods) + [str(key or "").upper()])
 
 
+class ProtectedReason(str):
+    """String subclass holding protected combo reason and exempt actions."""
+    allowed_actions: set
+
+    def __new__(cls, reason: str, allowed_actions=None):
+        instance = super().__new__(cls, reason)
+        instance.allowed_actions = set(allowed_actions or [])
+        return instance
+
+
 def load_protected_combos(root_dir) -> dict:
-    """combo_key -> reason, from schema/protected_bindings.json.
+    """combo_key -> reason (ProtectedReason), from schema/protected_bindings.json.
 
     Raises FileNotFoundError when the schema file is missing and ValueError on
     a malformed entry; callers that treat this as non-fatal must catch it."""
@@ -273,7 +283,10 @@ def load_protected_combos(root_dir) -> dict:
     for b in protected:
         if not isinstance(b.get("mod"), str) or not isinstance(b.get("key"), str):
             raise ValueError(f"protected_bindings.json entry has non-str mod/key: {b!r}")
-        combos[combo_key(b["mod"], b["key"])] = b.get("reason", "")
+        combos[combo_key(b["mod"], b["key"])] = ProtectedReason(
+            b.get("reason", ""),
+            b.get("allowed_actions", [])
+        )
     return combos
 
 
@@ -294,7 +307,11 @@ def find_protected_violations(root_dir, profiles: dict) -> list:
                 continue
             ck = combo_key(b.get("mod", ""), b.get("key", ""))
             if ck in combos:
-                out.append((p_id, b.get("mod", ""), b.get("key", ""), combos[ck]))
+                entry = combos[ck]
+                allowed = getattr(entry, "allowed_actions", set())
+                if b.get("action") in allowed:
+                    continue
+                out.append((p_id, b.get("mod", ""), b.get("key", ""), str(entry)))
     return out
 
 

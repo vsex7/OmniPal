@@ -1,5 +1,5 @@
 {
-  "description": "OmniPal 固定入口：所有模式（含 Omarchy 原生模式）都由引擎注入，模式文件不得把这些组合键绑定到其他动作。组合键均不占用 Omarchy 4.0 默认快捷键。",
+  "description": "OmniPal 固定入口：所有模式（含 Omarchy 原生模式）都由引擎注入，模式文件不得把这些组合键绑定到其他动作。组合键均不占用 Omarchy 4.5 默认快捷键。",
   "bindings": [
     { "action": "cheat_sheet", "mod": "SUPER CTRL", "key": "slash" },
     { "action": "omni_settings", "mod": "SUPER ALT", "key": "I" },

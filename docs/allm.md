@@ -1,7 +1,7 @@
 # OmniPal 完整用户与参考文档
 
 **项目名称**：OmniPal  
-**文档版本**：v1.8.0  
+**文档版本**：v1.9.0  
 **最后更新**：2026-10-14  
 **对应开发文档**：OmniPal 完整开发文档
 
@@ -167,7 +167,7 @@ omni-profile status
 | 切换方式 | 纯内存热切换 | 写配置 + 事务应用 | 纯内存热切换 |
 | 切换速度 | 热态典型 < 5ms；单次发布预算 <= 10ms | 较慢，可能闪烁 | 热态典型 < 3–5ms |
 | Hyprland 配置污染 | 无 | 有文件写入 | 无 |
-| 界面完整度 | 高（指示器 + HUD + 设置 + 后期 Dock 等） | 高 | 较低（偏 CLI） |
+| 界面完整度 | 高（指示器 + HUD + 设置 + 原生协同 Dock 等） | 高 | 较低（偏 CLI） |
 | 架构复杂度 | 低 | 高 | 低 |
 | 主要定位 | 完整界面 + 干净热切换 | 完整 Omarchy 插件生态 | 极致性能热切换 |
 | 适合人群 | 想要界面完整又干净的用户 | 深度 Omarchy 用户 | 追求极简与速度的用户 |
@@ -185,7 +185,7 @@ omni-profile status
 ┌─────────────────────────────────────────┐
 │           Quickshell 插件层              │
 │  mode-indicator │ cheat-sheet │ settings │
-│  （后期）snap-feedback │ dock │ overview  │
+│  （后期）snap-feedback │ 原生 Dock 协同 │ overview  │
 └──────────────────┬──────────────────────┘
                    │ 轻量 IPC / 命令
 ┌──────────────────▼──────────────────────┐
@@ -225,7 +225,7 @@ omni-profile status
 
 **Phase 2（体验增强 · 已交付）**
 - 基础窗口吸附 + 视觉反馈 (omni.snap-feedback)
-- mac-dock (omni.mac-dock)
+- 底部 Dock（由 Omarchy 4.5 官方原生提供并深度协同）
 - 任务视图 (omni.overview)
 - 多显示器支持
 

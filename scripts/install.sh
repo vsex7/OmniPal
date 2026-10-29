@@ -116,7 +116,7 @@ systemctl --user daemon-reload 2>/dev/null || echo "⚠️ systemd 用户会话�
 systemctl --user enable --now omnipal.service 2>/dev/null || true
 echo "✅ 用户守护服务已生成: ${SERVICE_FILE}"
 
-# 6. 在 Omarchy 菜单（Super+Alt+Space）Setup 下注册「快捷键模式」子菜单
+# 6. 在 Omarchy 菜单（Super+Space）Setup 下注册「快捷键模式」子菜单
 #    走 Omarchy 官方用户扩展 ~/.config/omarchy/extensions/omarchy-menu.jsonc，
 #    只写入带标记的 OmniPal 区块，不改 Omarchy 系统文件（H-6）。
 track_mkdir "${HOME}/.config/omarchy/extensions"

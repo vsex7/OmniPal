@@ -74,6 +74,15 @@ def _has_quantified_group(skeleton: str) -> bool:
     return False
 
 
+def _is_valid_workspace_id(ws_id: Any) -> bool:
+    """Validates numeric workspace ID. Named workspaces have negative IDs and must be skipped."""
+    try:
+        val = int(str(ws_id).strip())
+        return val >= 1
+    except (ValueError, TypeError):
+        return False
+
+
 def _strip_regex_literals(pattern: str) -> str:
     """Blank out escaped chars and [...] classes so the nested-quantifier
     heuristic only sees real regex syntax (e.g. ``\\+`` or ``[+]`` are not
@@ -148,6 +157,8 @@ class OmniPalEngine:
                     pol = normalize_window_policy(_st.get("window_policy"))
                     if pol:
                         self.window_policy = pol
+                    if isinstance(_st.get("saved_workspace_layouts"), dict):
+                        self._saved_workspace_layouts = dict(_st["saved_workspace_layouts"])
             except (OSError, ValueError) as _e:
                 # Corrupt/unreadable state file: fall back to default policy.
                 _debug(f"ignoring unreadable state file: {_e}")
@@ -768,8 +779,13 @@ class OmniPalEngine:
         for b in bindings:
             ck = combo_key(b.get("mod", ""), b.get("key", ""))
             if ck in combos:
+                entry = combos[ck]
+                allowed = getattr(entry, "allowed_actions", set())
+                if b.get("action") in allowed:
+                    kept.append(b)
+                    continue
                 print(f"Warning: skipping protected system key {b.get('mod', '')} {b.get('key', '')} "
-                      f"({combos[ck]}) from profile '{profile_id}'; it will not be installed",
+                      f"({entry}) from profile '{profile_id}'; it will not be installed",
                       file=sys.stderr)
             else:
                 kept.append(b)
@@ -1192,6 +1208,34 @@ end
                 _debug(f"workspace layout query failed: {_e}")
         return "dwindle"
 
+    def _save_workspace_layouts_state(self) -> None:
+        """Persists the saved workspace layouts to STATE_FILE."""
+        if not STATE_FILE.exists():
+            return
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                data["saved_workspace_layouts"] = self._saved_workspace_layouts
+                with open(STATE_FILE, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+        except (OSError, ValueError) as _e:
+            _debug(f"Failed to persist saved_workspace_layouts: {_e}")
+
+    def _ensure_hyprbars_if_floating(self) -> None:
+        """Ensures the hyprbars plugin is loaded when floating layout is applied."""
+        if not shutil.which("hyprctl"):
+            return
+        try:
+            res = subprocess.run(["hyprctl", "plugin", "list", "-j"], capture_output=True, text=True, timeout=0.5, check=False)
+            if res.returncode == 0 and res.stdout.strip():
+                plugins = json.loads(res.stdout)
+                has_hyprbars = any(p.get("name") == "hyprbars" for p in plugins if isinstance(p, dict))
+                if not has_hyprbars:
+                    subprocess.run(["hyprctl", "reload"], capture_output=True, timeout=1.0, check=False)
+        except (OSError, ValueError, subprocess.SubprocessError) as _e:
+            _debug(f"check hyprbars failed: {_e}")
+
     def _apply_window_policy(self, force: bool = False) -> bool:
         """Applies the current effective window policy (tiled vs floating) to Hyprland."""
         _ensure_hyprland_instance()
@@ -1204,14 +1248,35 @@ end
 
         ws_info = self.get_active_workspace_info()
         ws_id = str(ws_info.get("id", "")) if ws_info else ""
+        valid_ws = _is_valid_workspace_id(ws_id)
 
         if target_mode == "floating":
             if not force and cur_applied == "floating":
                 return True
-            if ws_id and ws_id not in self._saved_workspace_layouts:
-                cur_layout = self.get_workspace_layout(ws_id)
-                if cur_layout and cur_layout != "floating":
-                    self._saved_workspace_layouts[ws_id] = cur_layout
+            if valid_ws and ws_id not in self._saved_workspace_layouts:
+                modes_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy" / "workspace-layouts"
+                mode_file = modes_dir / f"{ws_id}.lua"
+                cur_layout = ""
+                if mode_file.exists():
+                    try:
+                        m = re.search(r'mode\s*=\s*"([a-z]+)"', mode_file.read_text(encoding="utf-8"))
+                        if m:
+                            cur_layout = m.group(1)
+                    except OSError:
+                        pass
+                if not cur_layout and shutil.which("omarchy-hyprland-workspace-layout-current"):
+                    try:
+                        res = subprocess.run(["omarchy-hyprland-workspace-layout-current", ws_id], capture_output=True, text=True, timeout=0.5, check=False)
+                        if res.returncode == 0 and res.stdout.strip():
+                            cur_layout = res.stdout.strip()
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+                if not cur_layout or cur_layout == "floating":
+                    cur_layout = self.get_workspace_layout(ws_id) or "dwindle"
+                    if cur_layout == "floating":
+                        cur_layout = "dwindle"
+                self._saved_workspace_layouts[ws_id] = cur_layout
+                self._save_workspace_layouts_state()
 
             # Rules are kept in the Lua registry so tiled mode can disable them without a reload.
             lua_code = (
@@ -1219,7 +1284,7 @@ end
                 'local used_omarchy_mode = false; '
                 'if type(o) == "table" and type(o.workspace_mode) == "function" then '
                 '  local ws = (type(hl) == "table" and type(hl.get_active_workspace) == "function") and hl.get_active_workspace() or nil; '
-                '  if ws and ws.id then '
+                '  if ws and ws.id and tonumber(ws.id) and tonumber(ws.id) >= 1 then '
                 '    o.workspace_mode({ workspace = tostring(ws.id), mode = "floating" }); '
                 '    used_omarchy_mode = true '
                 '  end '
@@ -1247,6 +1312,15 @@ end
                     self._clear_floated()
                 self._set_applied_window_mode("floating")
                 self._float_existing_windows()
+                if valid_ws:
+                    try:
+                        modes_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy" / "workspace-layouts"
+                        modes_dir.mkdir(parents=True, exist_ok=True)
+                        mode_file = modes_dir / f"{ws_id}.lua"
+                        mode_file.write_text(f'o.workspace_mode({{ workspace = "{ws_id}", mode = "floating" }})\n', encoding="utf-8")
+                    except OSError as _e:
+                        _debug(f"Failed to record floating workspace layout: {_e}")
+                    self._ensure_hyprbars_if_floating()
                 self._notify_omarchy_layout()
             return ok
         else:
@@ -1273,7 +1347,22 @@ end
         to fall back to a config-only reload (Lua state rebuilt), None if both failed."""
         ws_info = self.get_active_workspace_info()
         ws_id = str(ws_info.get("id", "")) if ws_info else ""
+        valid_ws = _is_valid_workspace_id(ws_id)
         target_layout = self._saved_workspace_layouts.pop(ws_id, None) or ""
+        self._save_workspace_layouts_state()
+
+        default_mode = "dwindle"
+        if shutil.which("omarchy-hyprland-workspace-layout-default"):
+            try:
+                res = subprocess.run(["omarchy-hyprland-workspace-layout-default"], capture_output=True, text=True, timeout=0.5, check=False)
+                if res.returncode == 0 and res.stdout.strip():
+                    default_mode = res.stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+        if not target_layout:
+            target_layout = default_mode
+
         escaped_target = _escape_lua_string(target_layout)
 
         lua = (
@@ -1283,14 +1372,31 @@ end
             '  local gl = (type(hl) == "table" and type(hl.get_config) == "function" and hl.get_config("general.layout")); '
             '  if type(gl) ~= "string" or gl == "" then gl = "dwindle" end; '
             f'  local target_mode = "{escaped_target}" ~= "" and "{escaped_target}" or gl; '
-            '  if ws and ws.id then o.workspace_mode({ workspace = tostring(ws.id), mode = target_mode }) end '
+            '  if ws and ws.id and tonumber(ws.id) and tonumber(ws.id) >= 1 then '
+            '    o.workspace_mode({ workspace = tostring(ws.id), mode = target_mode }) '
+            '  end '
             'end; '
             'local t = R.omnipal_float_rules; '
             'if t then '
             '  for _, r in ipairs(t) do r:set_enabled(false) end '
             'end'
         )
-        if self._eval_lua_strict(lua):
+        ok = self._eval_lua_strict(lua)
+        if valid_ws:
+            modes_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy" / "workspace-layouts"
+            mode_file = modes_dir / f"{ws_id}.lua"
+            try:
+                if target_layout == default_mode:
+                    if mode_file.exists():
+                        mode_file.unlink()
+                else:
+                    modes_dir.mkdir(parents=True, exist_ok=True)
+                    mode_file.write_text(f'o.workspace_mode({{ workspace = "{ws_id}", mode = "{target_layout}" }})\n', encoding="utf-8")
+            except OSError as _e:
+                _debug(f"Failed to restore workspace layout file: {_e}")
+        self._notify_omarchy_layout()
+
+        if ok:
             return False
         print("Disabling float rules in place failed; falling back to config reload", file=sys.stderr)
         return True if self._reload_config_only() else None
@@ -1466,6 +1572,7 @@ end
             "window_policy": cur_policy,
             "effective_window_mode": effective_mode,
             "compositor_connected": compositor_connected,
+            "saved_workspace_layouts": self._saved_workspace_layouts,
         }
         if auto:
             # Set only while an app rule switched the mode: {app, mode, return_to, since}
@@ -2287,8 +2394,35 @@ end
             _debug(f"hyprctl activewindow query failed: {_e}")
             return None
 
+    def _hypr_dispatch(self, lua_cmd: str, legacy_args: List[str]) -> bool:
+        """Dispatches a command via Lua API (hl.dsp.*) first, falling back to legacy hyprctl dispatch."""
+        if compositor_mutation_disabled():
+            if shutil.which("hyprctl") and legacy_args:
+                try:
+                    res = subprocess.run(["hyprctl", "dispatch"] + legacy_args, capture_output=True, timeout=0.5, check=False)
+                    return res.returncode == 0
+                except (OSError, subprocess.SubprocessError):
+                    return False
+            return True
+
+        if lua_cmd and shutil.which("hyprctl"):
+            try:
+                res = subprocess.run(["hyprctl", "dispatch", lua_cmd], capture_output=True, text=True, timeout=0.5, check=False)
+                if res.returncode == 0:
+                    return True
+            except (OSError, subprocess.SubprocessError):
+                pass
+        if legacy_args and shutil.which("hyprctl"):
+            try:
+                res = subprocess.run(["hyprctl", "dispatch"] + legacy_args, capture_output=True, timeout=0.5, check=False)
+                return res.returncode == 0
+            except (OSError, subprocess.SubprocessError) as _e:
+                _debug(f"hyprctl dispatch {legacy_args} failed: {_e}")
+                return False
+        return False
+
     def unpin(self, address: Optional[str] = None, all_windows: bool = False) -> Dict[str, Any]:
-        """Unpins pinned window(s) so they no longer float on top of all workspaces."""
+        """Unpins pinned window(s) so they no longer float on top of all workspaces, matching omarchy-hyprland-window-pop."""
         _ensure_hyprland_instance()
         windows = self.get_windows()
         pinned_windows = [w for w in windows if w.get("pinned", False)]
@@ -2334,12 +2468,17 @@ end
             if not addr:
                 continue
             win_arg = f"address:{addr}"
+            esc_win = f"address:{_escape_lua_string(addr)}"
             try:
-                res = subprocess.run(["hyprctl", "dispatch", "pin", win_arg], capture_output=True, text=True, timeout=0.5, check=False)
-                if res.returncode != 0:
-                    _debug(f"Failed to unpin {addr}: rc={res.returncode} {res.stderr}")
+                # 1. Unpin window
+                if not self._hypr_dispatch(f'hl.dsp.window.pin({{ window = "{esc_win}" }})', ["pin", win_arg]):
+                    _debug(f"Failed to unpin {addr}")
                     continue
-                subprocess.run(["hyprctl", "dispatch", "tagwindow", "-pop", win_arg], capture_output=True, timeout=0.5, check=False)
+                # 2. Toggle floating / restore tiled layout
+                if w.get("floating", False):
+                    self._hypr_dispatch(f'hl.dsp.window.float({{ window = "{esc_win}", action = "toggle" }})', ["togglefloating", win_arg])
+                # 3. Remove -pop tag
+                self._hypr_dispatch(f'hl.dsp.window.tag({{ window = "{esc_win}", tag = "-pop" }})', ["tagwindow", "-pop", win_arg])
                 unpinned.append({
                     "address": addr,
                     "class": w.get("class", ""),
@@ -2573,7 +2712,7 @@ end"""
 
         return results
 
-    def check_installation(self, home: Optional[Path] = None) -> Dict[str, Any]:
+    def check_installation(self, home: Optional[Path] = None, fix: bool = False) -> Dict[str, Any]:
         """Checks what install.sh set up and returns each problem with a concrete fix."""
         home = Path(home) if home else Path.home()
         root = self.root_dir.resolve()
@@ -2613,20 +2752,29 @@ end"""
             if state != "ok":
                 problems.append({"problem": f"Plugin {src.name} link is {state} in {plugins_dir}", "fix": reinstall})
 
-        # Check for deprecated / orphaned omni.* plugin links in plugins_dir (e.g. omni.mac-dock)
+        # Check for known deprecated plugin links in plugins_dir (omni.mac-dock)
+        deprecated_plugins = {"omni.mac-dock"}
         if plugins_dir.is_dir():
-            valid_names = {src.name for src in (root / "plugins").glob("omni.*")} | {"shared"}
-            for p_link in plugins_dir.glob("omni.*"):
-                if p_link.name not in valid_names:
-                    if p_link.is_symlink() or p_link.exists():
+            for dep_name in deprecated_plugins:
+                p_link = plugins_dir / dep_name
+                if p_link.is_symlink() or p_link.exists():
+                    if fix:
                         try:
-                            p_link.unlink()
-                            _debug(f"Removed deprecated plugin symlink: {p_link}")
+                            if p_link.is_symlink() or p_link.is_file():
+                                p_link.unlink()
+                            elif p_link.is_dir():
+                                shutil.rmtree(p_link)
+                            _debug(f"Removed deprecated plugin link: {p_link}")
                         except OSError as _e:
                             problems.append({
-                                "problem": f"Deprecated plugin link {p_link.name} remains in {plugins_dir}",
-                                "fix": f"rm -f {p_link}"
+                                "problem": f"Deprecated plugin link {dep_name} remains in {plugins_dir}",
+                                "fix": f"rm -rf {p_link}"
                             })
+                    else:
+                        problems.append({
+                            "problem": f"Deprecated plugin link {dep_name} exists in {plugins_dir}",
+                            "fix": f"rm -rf {p_link} 或执行 omni-profile doctor --fix"
+                        })
 
         # Shared design dir: plugins resolve ../shared/<file> through it, so it
         # must be linked next to the per-plugin links.
@@ -2688,7 +2836,7 @@ end"""
         info["problems"] = problems
         return info
 
-    def doctor(self) -> Dict[str, Any]:
+    def doctor(self, fix: bool = False) -> Dict[str, Any]:
         """Runs comprehensive diagnostics on daemon, sockets, live binds, and state consistency."""
         report: Dict[str, Any] = {
             "healthy": True,
@@ -2803,7 +2951,10 @@ end"""
             _debug(f"pinned-windows query failed: {_e}")
 
         # 4. Installation self-check (CLI link, plugin links, systemd unit, token copies)
-        install = self.check_installation()
+        try:
+            install = self.check_installation(fix=fix)
+        except TypeError:
+            install = self.check_installation()
         report["install"] = install
         for item in install["problems"]:
             report["issues"].append(item["problem"])
@@ -2857,7 +3008,7 @@ end"""
                     f"Profile '{p_id}' overrides protected system key {mod} {key} ({reason})")
                 report["fixes"].append(
                     f"从 '{p_id}' 移除 {mod} {key} 绑定，或改用其他组合键")
-        except Exception as e:
+        except (OSError, ValueError, KeyError) as e:
             _debug(f"protected-bindings scan failed: {e}")
 
         # App rules skipped at load for unsafe regex (hand-edited / legacy files
@@ -2868,7 +3019,7 @@ end"""
                     f"App rule '{bad['class']}' skipped: unsafe regex ({bad['reason']})")
                 report["fixes"].append(
                     "修改该规则的正则（去掉分组后的量词）或改用 exact/prefix 匹配")
-        except Exception as e:
+        except (OSError, ValueError, re.error) as e:
             _debug(f"invalid app-rules scan failed: {e}")
 
         if report["issues"]:
@@ -2884,8 +3035,8 @@ end"""
                 continue
             try:
                 report["takeovers"][m] = self.mode_diff(m, live_natives)
-            except Exception as e:
-                # Broad: per-mode diff failure is recorded, not fatal; the
+            except (OSError, ValueError, subprocess.SubprocessError, KeyError) as e:
+                # Per-mode diff failure is recorded, not fatal; the
                 # report must cover every mode even if one diff crashes.
                 report["takeovers"][m] = {"mode": m, "error": str(e)}
 

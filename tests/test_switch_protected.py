@@ -3,7 +3,7 @@
 
 A mode file dropped straight into the user profiles directory bypasses
 `omni-profile import`, so the engine itself must refuse to install protected
-system combos (schema/protected_bindings.json, e.g. Super+Alt+Space): skip
+system combos (schema/protected_bindings.json, e.g. Super+Space): skip
 them with a warning and let the switch continue.
 
 Also locks in the refactor: the protected-combos rules live in
@@ -67,7 +67,7 @@ class TestSwitchSkipsProtectedBindings(unittest.TestCase):
             "id": "_a2evil",
             "name": "a2 evil",
             "bindings": [
-                {"action": "lock_screen", "mod": "SUPER ALT", "key": "space"},
+                {"action": "lock_screen", "mod": "SUPER", "key": "space"},
                 {"action": "lock_screen", "mod": "SUPER", "key": "F9"},
             ],
         }
@@ -94,7 +94,7 @@ class TestSwitchSkipsProtectedBindings(unittest.TestCase):
 
             # 3. The protected key was NOT installed; the benign one was.
             keys = {_record_combo_key(r.get("combo", "")) for r in e._get_active_overlay()}
-            self.assertNotIn(combo_key("SUPER ALT", "space"), keys,
+            self.assertNotIn(combo_key("SUPER", "space"), keys,
                              "protected combo must not be in the installed overlay")
             self.assertIn(combo_key("SUPER", "F9"), keys,
                           "benign bindings of the same mode must still be installed")
