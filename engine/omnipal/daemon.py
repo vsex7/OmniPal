@@ -93,7 +93,7 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                     print(f"🔄 Socket connected: verified overlay bindings missing for '{curr_mode}'. Re-applying...", flush=True)
                     engine.switch_mode(curr_mode)
                     eff_mode = engine.get_effective_window_mode()
-                    if eff_mode == "floating":
+                    if eff_mode in ("floating", "scrolling"):
                         engine._set_applied_window_mode("tiled")
                         engine._apply_window_policy(force=True)
                     else:
@@ -129,8 +129,8 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                                 engine._snapshot_baseline_bindings(force=True)
                                 engine.apply_fixed_bindings()
                             eff_mode = engine.get_effective_window_mode()
-                            if eff_mode == "floating":
-                                print("🔄 Hyprland config reload detected. Re-applying floating window rule...", flush=True)
+                            if eff_mode in ("floating", "scrolling"):
+                                print(f"🔄 Hyprland config reload detected. Re-applying {eff_mode} window rule...", flush=True)
                                 engine._set_applied_window_mode("tiled")
                                 engine._apply_window_policy(force=True)
                         elif line.startswith("openwindow>>"):
@@ -233,7 +233,7 @@ def run_daemon():
         engine.set_persistence(True, profile=cur_mode)
 
     # Enforce active window policy on startup
-    if engine.get_effective_window_mode() == "floating":
+    if engine.get_effective_window_mode() in ("floating", "scrolling"):
         try:
             engine._apply_window_policy(force=True)
         except Exception as _e:
@@ -258,7 +258,7 @@ def run_daemon():
                 pass  # best-effort cleanup
             curr = engine.get_state().get("mode", "omarchy")
             cur_app = engine._get_applied_window_mode()
-            if curr != "omarchy" or cur_app == "floating" or engine._get_active_overlay():
+            if curr != "omarchy" or cur_app in ("floating", "scrolling") or engine._get_active_overlay():
                 # Do not sync persistence on shutdown: exit must not rewrite the last chosen profile.
                 engine.restore(sync_persistence=False)
 

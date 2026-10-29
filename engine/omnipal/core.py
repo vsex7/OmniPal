@@ -19,7 +19,7 @@ from engine.omnipal.version import (__version__)
 from engine.omnipal.paths import (APPLIED_WINDOW_MODE_FILE, APP_RULE_STATE_FILE, BASELINE_FILE, FLOATED_BY_OMNIPAL_FILE, OVERLAY_FILE, PID_FILE, SNAP_FILE, SNAP_LAYOUTS_FILE, STATE_FILE, _resolve_run_dir, app_rules_file_path, persistence_file_path, resolve_user_profiles_dir)
 from engine.omnipal.util import (LUA_RESTORE_BASELINE, _KEEP, _debug, _escape_lua_string, _sig_combo, atomic_write_json, bind_key_name, bind_signature, combo_signature, compositor_mutation_disabled, engine_lock, find_duplicate_binds, format_combo, log_policy_write, lua_str, notify_user, write_state_json)
 from engine.omnipal.hypr_ipc import (_dedupe_binds_lua, _ensure_hyprland_instance, _native_stash_lua, _native_unstash_lua, find_socket2_path)
-from engine.omnipal.profiles import (FORWARD_ACTION, MIGRATION_FALLBACK_MODE, OWN_SIZE_CLASSES, RETIRED_MODES, combo_key, find_protected_violations, forward_for_class, forward_lua, is_special_window, load_fixed_bindings, load_protected_combos, load_terminal_patterns, normalize_window_policy, parse_forward)
+from engine.omnipal.profiles import (FORWARD_ACTION, MIGRATION_FALLBACK_MODE, OWN_SIZE_CLASSES, RETIRED_MODES, VALID_WINDOW_POLICIES, combo_key, find_protected_violations, forward_for_class, forward_lua, is_special_window, load_fixed_bindings, load_protected_combos, load_terminal_patterns, normalize_window_policy, parse_forward)
 
 LUA_DISPATCHERS = {
     "close_window": "hl.dsp.window.close()",
@@ -350,7 +350,7 @@ class OmniPalEngine:
         """Returns the enabled persisted window policy for daemon/startup use, or None."""
         status = self.get_persistence_status()
         policy = status.get("window_policy")
-        if status["enabled"] and policy in ("follow-profile", "tiled", "floating"):
+        if status["enabled"] and policy in VALID_WINDOW_POLICIES:
             return policy
         return None
 
@@ -1624,7 +1624,8 @@ end
                 print(f"Warning: Compositor rejected window policy '{norm}'; previous policy restored", file=sys.stderr)
                 return False
             if self.get_persistence_status()["enabled"]:
-                self.set_persistence(True, window_policy=norm, source=source)
+                cur_persisted_profile = self.get_persisted_profile()
+                self.set_persistence(True, profile=cur_persisted_profile, window_policy=norm, source=source)
             return True
 
     def get_state(self) -> Dict[str, Any]:
