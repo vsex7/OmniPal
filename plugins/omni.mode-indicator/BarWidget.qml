@@ -64,12 +64,18 @@ Panel {
     : ""
 
   property var profiles: Model.fallbackProfiles()
-  // 菜单顺序与术语表一致：跟随模式（默认）/ 平铺 / 浮动；图标取自 Model.windowPolicies()
-  readonly property var policyOptions: ["follow-profile", "tiled", "floating"].map(function(id) {
+  function effWindowModeLabel(mode) {
+    if (mode === "floating") return "浮动"
+    if (mode === "scrolling") return "滚动"
+    return "平铺"
+  }
+  // 菜单顺序与术语表一致：跟随模式（默认）/ 平铺 / 滚动 / 浮动；图标取自 Model.windowPolicies()
+  readonly property var policyOptions: ["follow-profile", "tiled", "scrolling", "floating"].map(function(id) {
     var all = Model.windowPolicies()
     var icon = ""
     for (var i = 0; i < all.length; i++) if (all[i].id === id) icon = all[i].icon || ""
-    return { id: id, name: id === "follow-profile" ? "跟随模式" : (id === "tiled" ? "平铺" : "浮动"), icon: icon }
+    var name = id === "follow-profile" ? "跟随模式" : (id === "tiled" ? "平铺" : (id === "scrolling" ? "滚动" : "浮动"))
+    return { id: id, name: name, icon: icon }
   })
 
   function loadActionHints(rawText) {
@@ -418,7 +424,7 @@ Panel {
       ? ("OmniPal: " + root.currentName + (root.autoActive ? "\n" + root.autoText : "")
          + "\n生效快捷键: " + root.activeBindingsCount
          + "\n窗口策略: " + Model.resolvePolicyName(root.windowPolicy) + (root.policyOverridden ? "（已覆盖）" : "")
-         + " · 生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
+         + " · 生效: " + root.effWindowModeLabel(root.effectiveWindowMode)
          + "\n左键: 轮转模式 | 右键: 快捷控制面板 | 中键: 设置")
       : "OmniPal Engine 未运行\n左键: 启动/切换 | 右键: 快捷控制面板"
 
@@ -572,7 +578,7 @@ Panel {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
-            text: (root.policyOverridden ? "已覆盖 · " : "") + "生效: " + (root.effectiveWindowMode === "floating" ? "浮动" : "平铺")
+            text: (root.policyOverridden ? "已覆盖 · " : "") + "生效: " + root.effWindowModeLabel(root.effectiveWindowMode)
             color: root.policyOverridden ? Commons.Color.accent : Qt.darker(Commons.Color.popups.text, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.body
