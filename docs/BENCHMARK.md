@@ -1,5 +1,7 @@
 # OmniPal 性能基准测试与测量报告 (Benchmark Report)
 
+> ⚠️ **数据口径提醒**：下方实测数据来自早期版本（当时 Windows / mac 模式分别为 13 / 12 项绑定；现行 v1.9.0 为 16 / 34 项）。绝对数值仅供量级参考，v1.9.0 发布前需在真机按现行 profile 重新测量（见 issue #23 真机验收）。发布门禁以 `scripts/release-check.sh` 的 10ms 预算为准。
+
 本文档记录 OmniPal 核心运行时在真实 Omarchy (Arch Linux + Hyprland 0.56.2) 环境下的毫秒级延迟测量结果与评测方法。
 
 ---

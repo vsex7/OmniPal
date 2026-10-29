@@ -249,7 +249,7 @@
       "category": "navigation",
       "description": "已由 Omarchy 4.5 原生 Dock 替代，保留此动作以兼容用户自定义旧配置",
       "dispatcher": "exec",
-      "default_arg": "omarchy-shell -q omarchy.dock refresh"
+      "default_arg": "omarchy dock autohide toggle"
     },
     {
       "id": "omni_settings",

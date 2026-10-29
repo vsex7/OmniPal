@@ -11,7 +11,7 @@
 | **操作系统** | Arch Linux / Omarchy | 目前深度针对 Omarchy 发行版架构优化 |
 | **合成器 (WM)** | Hyprland >= 0.56.2 | 必须支持 Lua 脚本引擎 (`hyprctl eval`) |
 | **显示服务** | Wayland 原生 | 不支持 X11 / Xwayland 独立窗管 |
-| **Shell 框架** | Quickshell (Omarchy Shell) | 用于宿主运行 6 个 Quickshell 插件 |
+| **Shell 框架** | Quickshell (Omarchy Shell) | 用于宿主运行 5 个 Quickshell 插件 |
 | **Python 运行时** | Python >= 3.10 | 标准库即可，无任何三方 pip 依赖 |
 
 ---

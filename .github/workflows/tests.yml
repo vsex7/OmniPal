@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,4 +22,30 @@ jobs:
       - name: Run tests (hyprctl stubbed)
         env:
           OMNIPAL_FAKE_HYPRCTL: "1"
+        run: python -m unittest discover -s tests -v
+
+  # The reference-dependent tests (qmllint, fixed entries free in Omarchy's
+  # default binds, profile collisions with those defaults, the real Omarchy
+  # menu template) silently skip without an Omarchy checkout, so run them in
+  # a dedicated job that provides one via OMARCHY_REF.
+  omarchy-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: omacom/omarchy
+          path: .omarchy-ref
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install qmllint
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-declarative-dev-tools
+      - name: Run tests against the real Omarchy reference
+        env:
+          OMNIPAL_FAKE_HYPRCTL: "1"
+          OMARCHY_REF: ${{ github.workspace }}/.omarchy-ref
+          OMARCHY_SHELL: ${{ github.workspace }}/.omarchy-ref/shell
         run: python -m unittest discover -s tests -v

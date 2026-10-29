@@ -1,22 +1,9 @@
 """Hyprland IPC helpers: socket discovery, native-bind stash/unstash Lua."""
 
-import atexit
-import datetime
-import json
-import contextlib
-import fcntl
-import io
 import os
-import re
-import shutil
-import signal
-import socket
-import subprocess
 import sys
-import threading
-import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from engine.omnipal.util import (_FLAG_OPTS, _sig_combo, bind_key_name, find_duplicate_binds, lua_str)
 

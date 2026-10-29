@@ -1,22 +1,17 @@
 """Small shared helpers: Lua escaping, JSON atomic writes, locks, debug."""
 
-import atexit
 import datetime
 import json
 import contextlib
 import fcntl
-import io
 import os
-import re
 import shutil
-import signal
-import socket
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from engine.omnipal.paths import (LOCK_FILE, _resolve_run_dir, policy_audit_log_path)
 

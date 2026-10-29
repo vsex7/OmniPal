@@ -815,7 +815,7 @@ def main():
     p_diff.set_defaults(func=cmd_diff)
 
     # menu
-    p_menu = subparsers.add_parser("menu", help="在 Omarchy 菜单（Super+Alt+Space）Setup 下注册/移除「快捷键模式」")
+    p_menu = subparsers.add_parser("menu", help="在 Omarchy 菜单（Super+Space）Setup 下注册/移除「快捷键模式」")
     p_menu.add_argument("menu_action", choices=["install", "uninstall", "status"])
     p_menu.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_menu.set_defaults(func=cmd_menu)

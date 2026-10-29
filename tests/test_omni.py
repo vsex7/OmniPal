@@ -18,6 +18,12 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Reference checkout of the Omarchy repo used by the reference-dependent
+# tests (qmllint, default-bind collisions, fixed-entry freeness). Point
+# OMARCHY_REF at any clone (CI checks out omacom/omarchy); the historical
+# default is the maintainer's local reference clone.
+OMARCHY_REF = Path(os.environ.get("OMARCHY_REF", "/workspace/ref/omarchy"))
+
 import shutil as _shutil
 # Test isolation: by default, unit tests prepend tests/fakebin to PATH so tests
 # run safely in CI or without altering the developer's live Hyprland desktop.
@@ -1152,14 +1158,20 @@ class TestWindowPolicyAndModeIndicator(BaseOmniTestCase):
 
     def test_qml_syntax_via_qmllint(self):
         """Lints every plugin QML against the Omarchy shell (qs.*) + Quickshell stubs."""
-        if not os.path.exists("/usr/lib/qt6/bin/qmllint"):
+        qmllint_bin = os.environ.get("QMLLINT", "")
+        if not qmllint_bin and os.path.exists("/usr/lib/qt6/bin/qmllint"):
+            qmllint_bin = "/usr/lib/qt6/bin/qmllint"
+        if not qmllint_bin:
+            qmllint_bin = shutil.which("qmllint") or ""
+        if not qmllint_bin:
             self.skipTest("qmllint not installed on system")
-        shells = [os.environ.get("OMARCHY_SHELL", ""), "/workspace/ref/omarchy/shell",
+        shells = [os.environ.get("OMARCHY_SHELL", ""), str(OMARCHY_REF / "shell"),
                   "/usr/share/omarchy/shell"]
         if not any(s and os.path.isdir(os.path.join(s, "Commons")) for s in shells):
             self.skipTest("Omarchy shell source (qs.Commons/qs.Ui) not available")
+        env = dict(os.environ, QMLLINT=qmllint_bin)
         p = subprocess.run(["bash", str(PROJECT_ROOT / "scripts" / "qmllint.sh")],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=env)
         self.assertEqual(p.returncode, 0, f"qmllint failed: {p.stdout}{p.stderr}")
 
     def test_corrupted_state_policy_recovery(self):
@@ -2080,7 +2092,7 @@ class TestNativeConflicts(unittest.TestCase):
         """Every OmniPal combo that collides with an Omarchy default bind gets unbound when live."""
         import re, glob
         from engine.engine import format_combo, combo_signature
-        ref = Path("/workspace/ref/omarchy/default/hypr/bindings")
+        ref = OMARCHY_REF / "default" / "hypr" / "bindings"
         if not ref.is_dir():
             self.skipTest("Omarchy reference bindings not available")
         native = set()
@@ -2125,7 +2137,7 @@ class TestFixedEntryPoints(unittest.TestCase):
     def test_fixed_combos_free_in_omarchy_defaults(self):
         import re, glob
         from engine.engine import combo_signature
-        ref = Path("/workspace/ref/omarchy/default/hypr")
+        ref = OMARCHY_REF / "default" / "hypr"
         if not ref.is_dir():
             self.skipTest("Omarchy reference not available")
         native = set()
@@ -2518,7 +2530,7 @@ class TestNoDuplicateNativeBinds(unittest.TestCase):
         for _ in range(38):
             self.fc.add("SUPER + RETURN", "Terminal")
         self.assertEqual(find_duplicate_binds(self.fc.binds), {self.sig("SUPER + RETURN"): 38})
-        self.engine.check_installation = lambda: {"problems": []}
+        self.engine.check_installation = lambda fix=False: {"problems": []}
         rep = self.engine.doctor()
         self.assertFalse(rep["healthy"])
         self.assertEqual(rep["duplicate_binds"]["count"], 38)
@@ -2814,10 +2826,13 @@ class TestOmniPalFloatedTracking(unittest.TestCase):
         calls = []
         import subprocess
         orig_run = subprocess.run
+        # _hypr_dispatch now honors dry-run by not dispatching at all, so this
+        # flow test (which mocks hyprctl) must run with dry-run off.
+        _dry = os.environ.pop("OMNIPAL_DRY_RUN", None)
 
         def mock_run(cmd, *a, **kw):
             calls.append(list(cmd))
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
 
         e.get_windows = lambda: [
             {"address": "0xpop1", "class": "antigravity", "title": "Antigravity", "pinned": True},
@@ -2831,8 +2846,12 @@ class TestOmniPalFloatedTracking(unittest.TestCase):
             res = e.unpin()
             self.assertEqual(len(res["unpinned"]), 1)
             self.assertEqual(res["unpinned"][0]["address"], "0xpop1")
-            self.assertIn(["hyprctl", "dispatch", "pin", "address:0xpop1"], calls)
-            self.assertIn(["hyprctl", "dispatch", "tagwindow", "-pop", "address:0xpop1"], calls)
+            # Lua-first dispatch: the hl.dsp.* expressions go through hyprctl
+            # dispatch and succeed on the mocked `ok` reply, so the legacy
+            # dispatcher form is not needed.
+            flat = [" ".join(c) for c in calls]
+            self.assertTrue(any("hl.dsp.window.pin" in c and "0xpop1" in c for c in flat), calls)
+            self.assertTrue(any("hl.dsp.window.tag" in c and "-pop" in c for c in flat), calls)
 
             calls.clear()
             res2 = e.unpin(address="0xpop2")
@@ -2851,14 +2870,17 @@ class TestOmniPalFloatedTracking(unittest.TestCase):
             self.assertIn("并未处于置顶状态", res4["message"])
             self.assertEqual(calls, [])
 
-            # Dispatch failure: returncode != 0 must not count as unpinned
+            # Dispatch failure: hyprctl printing an error while still exiting
+            # 0 must not count as unpinned (success is the `ok` output only)
             def mock_fail(cmd, *a, **kw):
-                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="error")
+                return subprocess.CompletedProcess(cmd, 0, stdout="error: no such dispatcher", stderr="")
             subprocess.run = mock_fail
             res5 = e.unpin(address="0xpop1")
             self.assertEqual(len(res5["unpinned"]), 0)
         finally:
             subprocess.run = orig_run
+            if _dry is not None:
+                os.environ["OMNIPAL_DRY_RUN"] = _dry
 
 
 class TestOmarchy45Alignment(unittest.TestCase):
@@ -2913,3 +2935,188 @@ class TestOmarchy45Alignment(unittest.TestCase):
         self.assertTrue(_is_valid_workspace_id("2"))
 
 
+
+
+class TestWorkspaceLayoutRestoreRound(BaseOmniTestCase):
+    """Regression tests for the v1.9.0 layout-restore review fixes."""
+
+    def setUp(self):
+        super().setUp()
+        self.engine = OmniPalEngine(PROJECT_ROOT)
+
+    def test_disable_float_rules_restores_all_saved_not_current(self):
+        """Floating applied on ws1/ws3 must be restored even when ws2 is active;
+        ws2 (no record, user-set scrolling) must be left completely alone."""
+        e = self.engine
+        with tempfile.TemporaryDirectory() as tmp:
+            state_home = Path(tmp)
+            layouts = state_home / "omarchy" / "workspace-layouts"
+            layouts.mkdir(parents=True)
+            (layouts / "1.lua").write_text('o.workspace_mode({ workspace = "1", mode = "floating" })\n', encoding="utf-8")
+            (layouts / "2.lua").write_text('o.workspace_mode({ workspace = "2", mode = "scrolling" })\n', encoding="utf-8")
+            (layouts / "3.lua").write_text('o.workspace_mode({ workspace = "3", mode = "floating" })\n', encoding="utf-8")
+            e._saved_workspace_layouts = {"1": "dwindle", "3": "scrolling"}
+            captured = []
+            e._eval_lua_strict = lambda code: captured.append(code) or True
+            with unittest.mock.patch.dict(os.environ, {"XDG_STATE_HOME": tmp}):
+                self.assertFalse(e._disable_float_rules())
+            lua = captured[0]
+            self.assertIn('workspace = "1", mode = "dwindle"', lua)
+            self.assertIn('workspace = "3", mode = "scrolling"', lua)
+            self.assertNotIn('workspace = "2"', lua)
+            self.assertIn("set_enabled(false)", lua)
+            # ws1 back to the default layout -> its file is removed
+            self.assertFalse((layouts / "1.lua").exists())
+            # ws3 restored to scrolling -> file records scrolling
+            self.assertIn('mode = "scrolling"', (layouts / "3.lua").read_text(encoding="utf-8"))
+            # ws2 has no record -> file untouched
+            self.assertIn('mode = "scrolling"', (layouts / "2.lua").read_text(encoding="utf-8"))
+            self.assertEqual(e._saved_workspace_layouts, {})
+
+    def test_failed_restore_does_not_rewrite_layout_files(self):
+        """If the Lua restore fails and the reload fallback also fails, the
+        layout files and the saved records must stay as they were."""
+        e = self.engine
+        with tempfile.TemporaryDirectory() as tmp:
+            layouts = Path(tmp) / "omarchy" / "workspace-layouts"
+            layouts.mkdir(parents=True)
+            f3 = layouts / "3.lua"
+            f3.write_text('o.workspace_mode({ workspace = "3", mode = "floating" })\n', encoding="utf-8")
+            e._saved_workspace_layouts = {"3": "scrolling"}
+            e._eval_lua_strict = lambda code: False
+            e._reload_config_only = lambda *a, **k: False
+            with unittest.mock.patch.dict(os.environ, {"XDG_STATE_HOME": tmp}):
+                self.assertIsNone(e._disable_float_rules())
+            self.assertIn('mode = "floating"', f3.read_text(encoding="utf-8"))
+            self.assertEqual(e._saved_workspace_layouts, {"3": "scrolling"})
+
+    def test_originally_floating_workspace_is_not_recorded(self):
+        from engine.omnipal.core import _sanitize_saved_workspace_layouts
+        self.assertEqual(
+            _sanitize_saved_workspace_layouts({"1": "floating", "2": "scrolling", "-3": "dwindle", "4": "bogus"}),
+            {"2": "scrolling"})
+
+        e = self.engine
+        with tempfile.TemporaryDirectory() as tmp:
+            layouts = Path(tmp) / "omarchy" / "workspace-layouts"
+            layouts.mkdir(parents=True)
+            (layouts / "4.lua").write_text('o.workspace_mode({ workspace = "4", mode = "floating" })\n', encoding="utf-8")
+            (layouts / "5.lua").write_text('o.workspace_mode({ workspace = "5", mode = "scrolling" })\n', encoding="utf-8")
+            fd, sock_path = tempfile.mkstemp(prefix="omnipal-fake-socket2-")
+            os.close(fd)
+            orig_sock = _engine_core.find_socket2_path
+            _engine_core.find_socket2_path = lambda: Path(sock_path)
+            try:
+                e._eval_lua = lambda code: True
+                e._float_existing_windows = lambda: None
+                e._clear_floated = lambda: None
+                e._ensure_hyprbars_if_floating = lambda: None
+                e.get_effective_window_mode = lambda *a, **k: "floating"
+                e._get_applied_window_mode = lambda: "tiled"
+                with unittest.mock.patch.dict(os.environ, {"XDG_STATE_HOME": tmp}):
+                    e.get_active_workspace_info = lambda: {"id": 4}
+                    self.assertTrue(e._apply_window_policy(force=True))
+                    self.assertNotIn("4", e._saved_workspace_layouts)
+                    e.get_active_workspace_info = lambda: {"id": 5}
+                    e._set_applied_window_mode("tiled")
+                    self.assertTrue(e._apply_window_policy(force=True))
+                    self.assertEqual(e._saved_workspace_layouts.get("5"), "scrolling")
+            finally:
+                _engine_core.find_socket2_path = orig_sock
+                Path(sock_path).unlink(missing_ok=True)
+
+    def test_save_layouts_state_creates_missing_state_file(self):
+        e = self.engine
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = Path(tmp) / "state.json"
+            self.assertFalse(state_file.exists())
+            with unittest.mock.patch.object(_engine_core, "STATE_FILE", state_file):
+                e._saved_workspace_layouts = {"1": "scrolling"}
+                e._save_workspace_layouts_state()
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(data["saved_workspace_layouts"], {"1": "scrolling"})
+            self.assertEqual(list(Path(tmp).glob("*.tmp")), [])
+
+    def test_workspace_layouts_dir_handles_empty_xdg_state_home(self):
+        e = self.engine
+        with unittest.mock.patch.dict(os.environ, {"XDG_STATE_HOME": ""}):
+            self.assertEqual(e._workspace_layouts_dir(),
+                             Path.home() / ".local" / "state" / "omarchy" / "workspace-layouts")
+        with unittest.mock.patch.dict(os.environ, {"XDG_STATE_HOME": "/tmp/xstate"}):
+            self.assertEqual(e._workspace_layouts_dir(),
+                             Path("/tmp/xstate") / "omarchy" / "workspace-layouts")
+
+    def test_layout_file_write_validates_layout_name(self):
+        e = self.engine
+        with tempfile.TemporaryDirectory() as tmp:
+            with unittest.mock.patch.dict(os.environ, {"XDG_STATE_HOME": tmp}):
+                e._write_workspace_layout_file("1", 'dwindle" }); evil((')
+                self.assertFalse((Path(tmp) / "omarchy" / "workspace-layouts" / "1.lua").exists())
+                e._write_workspace_layout_file("1", "scrolling")
+                content = (Path(tmp) / "omarchy" / "workspace-layouts" / "1.lua").read_text(encoding="utf-8")
+            self.assertIn('mode = "scrolling"', content)
+            self.assertNotIn("evil", content)
+
+    def test_hypr_dispatch_dry_run_never_executes(self):
+        e = self.engine
+        with unittest.mock.patch.object(subprocess, "run", side_effect=AssertionError("dispatch attempted")):
+            self.assertTrue(e._hypr_dispatch('hl.dsp.window.pin({ window = "address:0x1" })', ["pin", "address:0x1"]))
+
+    def test_hypr_dispatch_requires_ok_output(self):
+        e = self.engine
+        _dry = os.environ.pop("OMNIPAL_DRY_RUN", None)
+        try:
+            def fake_error(cmd, *a, **kw):
+                return subprocess.CompletedProcess(cmd, 0, stdout="error: unknown dispatcher", stderr="")
+            with unittest.mock.patch.object(subprocess, "run", fake_error):
+                self.assertFalse(e._hypr_dispatch('hl.dsp.window.pin({ window = "address:0x1" })', ["pin", "address:0x1"]))
+
+            def fake_ok(cmd, *a, **kw):
+                return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+            with unittest.mock.patch.object(subprocess, "run", fake_ok):
+                self.assertTrue(e._hypr_dispatch('hl.dsp.window.pin({ window = "address:0x1" })', ["pin", "address:0x1"]))
+        finally:
+            if _dry is not None:
+                os.environ["OMNIPAL_DRY_RUN"] = _dry
+
+    def test_ensure_hyprbars_uses_config_only_reload(self):
+        e = self.engine
+        reloads = []
+        e._reload_config_only = lambda *a, **k: reloads.append(1) or True
+
+        def fake_run(cmd, *a, **kw):
+            return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
+        with unittest.mock.patch.object(subprocess, "run", fake_run):
+            e._ensure_hyprbars_if_floating()
+        self.assertEqual(reloads, [1])
+
+    def test_small_review_fixes(self):
+        root = Path(__file__).resolve().parent.parent
+        actions = json.loads((root / "schema" / "actions.json").read_text(encoding="utf-8"))["actions"]
+        dock = next(a for a in actions if a["id"] == "toggle_dock")
+        self.assertEqual(dock["default_arg"], "omarchy dock autohide toggle")
+        windows = json.loads((root / "profiles" / "windows.json").read_text(encoding="utf-8"))
+        self.assertFalse(any(b.get("action") == "lock_screen" for b in windows["bindings"]))
+        changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertNotIn("Super+Alt+Space / Omarchy 菜单", changelog)
+        self.assertIn("Super+Space / Omarchy 菜单", changelog)
+        core_src = (root / "engine" / "omnipal" / "core.py").read_text(encoding="utf-8")
+        self.assertIn("install = self.check_installation(fix=fix)", core_src)
+        self.assertNotIn("except TypeError:\n            install = self.check_installation()", core_src)
+        cli_src = (root / "bin" / "omni-profile").read_text(encoding="utf-8")
+        self.assertNotIn("Super+Alt+Space", cli_src)
+
+    def test_mode_indicator_fallback_matches_profiles(self):
+        """Model.js fallbackProfiles is a copy of profiles/*.json shown when
+        the engine is down; its counts/descriptions must not drift again."""
+        import re
+        root = Path(__file__).resolve().parent.parent
+        model_src = (root / "plugins" / "omni.mode-indicator" / "Model.js").read_text(encoding="utf-8")
+        block = model_src.split("function fallbackProfiles()", 1)[1].split("function ", 1)[0]
+        fallback = {m.group(1): m for m in re.finditer(
+            r'"id": "(windows|mac|omarchy)",\s*"name": "[^"]*",\s*"description": "([^"]*)",\s*"bindings_count": (\d+)', block)}
+        self.assertEqual(set(fallback), {"windows", "mac", "omarchy"})
+        for mode, m in fallback.items():
+            profile = json.loads((root / "profiles" / f"{mode}.json").read_text(encoding="utf-8"))
+            self.assertEqual(int(m.group(3)), len(profile.get("bindings", [])), mode)
+            self.assertEqual(m.group(2), profile.get("description"), mode)

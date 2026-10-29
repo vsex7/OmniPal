@@ -18,18 +18,21 @@
 - 新命令 `omni-profile send <MOD> <KEY> [--class <类名>]`，手动把快捷键发给当前窗口。
 
 ### 🐛 修复
+- **切回平铺时的工作区布局恢复**：按保存记录逐个恢复所有曾被设为浮动的工作区（不再只处理当前工作区、误伤无记录的工作区）；原本就是浮动的工作区不记录、不恢复；布局名写入 Omarchy 状态文件前做白名单校验（仅 `dwindle`/`scrolling`/`floating`），且仅在 Lua 生效后才落盘，写入改为原子替换，记录在状态文件不存在时也会创建。`_hypr_dispatch` 改为以 `hyprctl` 输出 `ok` 判成功、dry-run 下不再真实执行 dispatch；标题栏插件补加载改用 config-only 重载，避免整份重载清掉 OmniPal 注入的快捷键。Windows 模式删掉与 Omarchy 自带锁屏重复的 `Super+Ctrl+L`；兼容保留的 `toggle_dock` 改为真正切换 Dock 自动隐藏（`omarchy dock autohide toggle`）。
 - **持久化与 restore**：`omni-profile restore`（以及状态栏/设置等同路径）在持久化启用时会把 `persistence.json` 的 profile 同步为 `omarchy`，与 `switch`/`cycle` 一致；守护进程退出时的 cleanup restore 不会改写持久化，以免重启后丢上次模式。`persist enable` 未指定模式时优先快照当前模式，不再沿用过期的已持久化 profile。
 - **速查表可读性**：mac 模式 19 个快捷键转发各自具名（如「关闭标签页（发送 Ctrl+W）」），不再 19 行重名；同一动作的多个组合键合并为一行（如「SUPER+SLASH / SUPER+ALT+SLASH」）；新增 `app` 分类中文名「应用快捷键转发」。
 - **`omni-profile diff`**：读不到 Hyprland 快捷键且无快照时显示「无法判断」，不再输出「会接管 0 个原生快捷键」。
+- **数据与文档漂移清理**：`omni-profile menu` 帮助里误写的菜单键 `Super+Alt+Space` 更正为 `Super+Space`；状态栏 fallback 的模式绑定数与描述同步现行 profile（Windows 16 / macOS 34），并新增防漂移测试以 profile 为准校验；`docs/REFERENCE.md` 补齐 `send`/`diff`/`rules`/`export`/`import`/`menu`/`onboarding`/`daemon` 8 个子命令，插件数修正为 5 个；清理引擎拆分后遗留的未用 import。
 
 ### 🔧 变更
+- **CI 真跑参考校验**：新增 `omarchy-reference` CI 任务，检出 `omacom/omarchy` 并通过 `OMARCHY_REF` 注入测试，使 qmllint 与「固定入口空闲 / 与 Omarchy 默认键冲突解绑」等依赖参考源码的测试不再静默跳过；测试矩阵补上 Python 3.10，与文档声明的最低版本对齐。
 - **Omarchy 4.5 深度协同与版本升级**：
   - 插件声明 `minOmarchy` 提高至 `4.5.0`，全面对接 Omarchy 4.5 原生桌面特性。
   - 窗口策略对接官方 `o.workspace_mode` 与顶栏/Dock 状态刷新；浮动前记录工作区原有的平铺/滚动布局，切回或 restore 时精准恢复，杜绝强行将用户的自定义布局（如 `scrolling`）冲为 `dwindle`。
   - 快捷键转发对齐 Omarchy 同款 `send_key_state` 50ms 脉冲与 `terminal` 窗口 tag 识别，杜绝快速连按卡键。
   - 释放 `mac.json` 中的 `Super+,` 给 Omarchy 4.5 核心的通知操作（2FA 验证码快速复制等）；OmniPal 控制中心固定为 `Super+Alt+I`。
   - 清理 `mac.json` 中被 Omarchy 4.5 原生实现的重复快捷键（`Super+Q` 关闭窗口、`Super+Space` 应用启动器、`Super+A` 全选转发、`Super+M` 最小化）。
-- **系统保护键位**：新增 `schema/protected_bindings.json`（如 Super+Alt+Space / Omarchy 菜单），模式文件覆盖时 `check_consistency.py` 与 `omni-profile import` 直接报错，`doctor` 点名指出违规的模式与键位；mac 模式文件管理器改 Super+Alt+E。
+- **系统保护键位**：新增 `schema/protected_bindings.json`（如 Super+Space / Omarchy 菜单），模式文件覆盖时 `check_consistency.py` 与 `omni-profile import` 直接报错，`doctor` 点名指出违规的模式与键位；mac 模式文件管理器改 Super+Alt+E。
 - **绑定级 `name`**：模式文件 binding 的可选 `name` 同时用于 Hyprland 绑定描述，`hyprctl binds` 与速查表显示一致。
 - 全局窗口策略保留：跟随模式（默认）/ 平铺 / 浮动，`omni-profile window-policy` 查看、`window-policy set <follow-profile|tiled|floating>` 设置；状态栏右键菜单「窗口策略」三行（标注「当前」）、设置模式页选择器、模式卡片「已覆盖：全局平铺/浮动」、doctor「⚠️ 已覆盖」提示；IPC `setWindowPolicy` / `getWindowPolicy`；随配置持久化记住（`persist enable --policy`）。不再在启动时清除已保存的 `window_policy`。
 - mac 模式开启时会暂时停用 Omarchy 原生的 Super+W、Super+数字绑定；还原或切到别的模式时会执行 `hyprctl reload` 把它们找回来。

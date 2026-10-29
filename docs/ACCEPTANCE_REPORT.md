@@ -1,6 +1,6 @@
 # OmniPal v1.0.0 真机验收报告 (Acceptance Report)
 
-验收基准：[`ROADMAP_TO_V1.md`](file:///home/abyss/Projects/OmniPal/docs/ROADMAP_TO_V1.md) 第 5 节真机验收清单  
+验收基准：[`ROADMAP_TO_V1.md`](ROADMAP_TO_V1.md) 第 5 节真机验收清单
 验收时间：2026-09-14 07:24 +08:00  
 验收环境：Omarchy (Arch Linux 6.13.5) / Hyprland 0.56.2 / Quickshell  
 

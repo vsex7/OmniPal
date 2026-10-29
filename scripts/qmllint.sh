@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Lint OmniPal plugin QML against the real Omarchy Shell Commons/Ui modules.
-#   OMARCHY_SHELL  path to omarchy's shell/ dir (default: /workspace/ref/omarchy/shell,
-#                  then /usr/share/omarchy/shell, then $OMARCHY_PATH/shell)
+#   OMARCHY_SHELL  path to omarchy's shell/ dir (default: $OMARCHY_REF/shell,
+#                  then /workspace/ref/omarchy/shell, then /usr/share/omarchy/shell,
+#                  then $OMARCHY_PATH/shell)
+#   OMARCHY_REF    path to an Omarchy repo checkout (CI sets this)
 #   QMLLINT        qmllint binary (default /usr/lib/qt6/bin/qmllint)
 # qs.* resolves through a generated import farm: <tmp>/qs/{Commons,Ui} -> $OMARCHY_SHELL/*.
 # Quickshell itself is not installed on CI boxes, so tools/qmlstubs carries hand-written
@@ -13,7 +15,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 QMLLINT="${QMLLINT:-/usr/lib/qt6/bin/qmllint}"
 VERBOSE=0; [[ "${1:-}" == "--verbose" ]] && { VERBOSE=1; shift; }
 if [[ -z "${OMARCHY_SHELL:-}" ]]; then
-  for c in /workspace/ref/omarchy/shell /usr/share/omarchy/shell "${OMARCHY_PATH:-/nonexistent}/shell"; do
+  for c in "${OMARCHY_REF:-/nonexistent}/shell" /workspace/ref/omarchy/shell /usr/share/omarchy/shell "${OMARCHY_PATH:-/nonexistent}/shell"; do
     [[ -f "$c/Commons/qmldir" ]] && { OMARCHY_SHELL="$c"; break; }
   done
 fi

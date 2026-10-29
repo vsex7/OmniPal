@@ -15,7 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from engine import onboarding  # noqa: E402
 
-OMARCHY_TEMPLATE = Path("/workspace/ref/omarchy/config/omarchy/extensions/omarchy-menu.jsonc")
+OMARCHY_TEMPLATE = Path(os.environ.get("OMARCHY_REF", "/workspace/ref/omarchy")) / "config" / "omarchy" / "extensions" / "omarchy-menu.jsonc"
 PROFILES = [
     {"id": "windows", "name": "Windows 11 习惯模式", "description": "d"},
     {"id": "mac", "name": "macOS 习惯模式", "description": ""},

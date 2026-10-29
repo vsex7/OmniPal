@@ -1,22 +1,13 @@
 """Daemon entry points: socket watcher, persisted-profile restore, run_daemon."""
 
 import atexit
-import datetime
-import json
-import contextlib
-import fcntl
-import io
 import os
-import re
-import shutil
 import signal
 import socket
-import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Optional
 
 from engine.omnipal.paths import (PID_FILE, STATE_FILE, _resolve_run_dir)
 from engine.omnipal.util import (_debug)

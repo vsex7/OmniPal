@@ -1,10 +1,8 @@
 """OmniPalEngine: the in-memory keybinding overlay engine."""
 
-import atexit
 import datetime
 import json
 import contextlib
-import fcntl
 import io
 import os
 import re
@@ -13,7 +11,6 @@ import signal
 import socket
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -81,6 +78,32 @@ def _is_valid_workspace_id(ws_id: Any) -> bool:
         return val >= 1
     except (ValueError, TypeError):
         return False
+
+
+# Omarchy executes the per-workspace layout state files as Lua, so a layout
+# name must never be interpolated into them (or into eval'd Lua) unchecked.
+_VALID_WORKSPACE_LAYOUTS = frozenset({"dwindle", "scrolling", "floating"})
+
+
+def _validated_workspace_layout(value: Any) -> str:
+    """Returns the layout name if it is on the allowlist, else ""."""
+    layout = str(value or "").strip().lower()
+    return layout if layout in _VALID_WORKSPACE_LAYOUTS else ""
+
+
+def _sanitize_saved_workspace_layouts(raw: Any) -> Dict[str, str]:
+    """Keeps only restorable saved layouts: valid workspace, allowlisted layout.
+
+    A workspace whose original layout was "floating" has nothing to restore
+    (switching back to tiled must not force it to a tiled layout), so such
+    entries are dropped instead of being recorded as e.g. "dwindle"."""
+    out: Dict[str, str] = {}
+    if isinstance(raw, dict):
+        for ws_id, layout in raw.items():
+            valid_layout = _validated_workspace_layout(layout)
+            if _is_valid_workspace_id(ws_id) and valid_layout and valid_layout != "floating":
+                out[str(ws_id)] = valid_layout
+    return out
 
 
 def _strip_regex_literals(pattern: str) -> str:
@@ -158,7 +181,7 @@ class OmniPalEngine:
                     if pol:
                         self.window_policy = pol
                     if isinstance(_st.get("saved_workspace_layouts"), dict):
-                        self._saved_workspace_layouts = dict(_st["saved_workspace_layouts"])
+                        self._saved_workspace_layouts = _sanitize_saved_workspace_layouts(_st["saved_workspace_layouts"])
             except (OSError, ValueError) as _e:
                 # Corrupt/unreadable state file: fall back to default policy.
                 _debug(f"ignoring unreadable state file: {_e}")
@@ -705,7 +728,6 @@ class OmniPalEngine:
         for b in (self.baseline_bindings or {}).values():
             baseline.setdefault(combo_signature(b.get("combo", "")), []).append(b)
         source = "live" if live else ("baseline" if baseline else "none")
-        fixed = self.fixed_combos()
         bindings = ([] if mode == "omarchy" else self._without_fixed(self.profiles[mode].get("bindings", [])))
         entries = [(b, False) for b in bindings] + [(b, True) for b in self.fixed_bindings]
         out, seen = [], set()
@@ -1095,7 +1117,6 @@ end
                         active_ws_ids.add(ws["id"])
             except (OSError, ValueError, subprocess.SubprocessError) as _e:
                 _debug(f"monitors query failed: {_e}")
-                pass
 
             if not active_ws_ids:
                 try:
@@ -1106,7 +1127,6 @@ end
                         active_ws_ids.add(act["id"])
                 except (OSError, ValueError, subprocess.SubprocessError) as _e:
                     _debug(f"activeworkspace query failed: {_e}")
-                    pass
 
             # Only windows OmniPal floated (tracked when we cascaded them). Windows that were
             # already floating before the policy, OWN_SIZE apps, dialogs and specials stay floating.
@@ -1201,29 +1221,118 @@ end
                 if ws_id:
                     cmd.append(str(ws_id))
                 res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=0.5)
-                out = res.stdout.strip()
-                if out:
-                    return out
+                layout = _validated_workspace_layout(res.stdout.strip())
+                if layout:
+                    return layout
             except (OSError, subprocess.SubprocessError) as _e:
                 _debug(f"workspace layout query failed: {_e}")
         return "dwindle"
 
-    def _save_workspace_layouts_state(self) -> None:
-        """Persists the saved workspace layouts to STATE_FILE."""
-        if not STATE_FILE.exists():
+    def _workspace_layouts_dir(self) -> Path:
+        """Omarchy's per-workspace layout state directory (single source for the path).
+
+        An empty XDG_STATE_HOME counts as unset; honoring it literally would
+        produce a relative path and scatter state files into the CWD."""
+        xdg_state = os.environ.get("XDG_STATE_HOME")
+        base = Path(xdg_state) if xdg_state else Path.home() / ".local" / "state"
+        return base / "omarchy" / "workspace-layouts"
+
+    def _write_workspace_layout_file(self, ws_id: str, mode: str) -> None:
+        """Atomically records one workspace's layout in Omarchy's state file.
+
+        Both values are allowlist-validated first: the file is later executed
+        as Lua by Omarchy, so unvalidated content would be code injection."""
+        layout = _validated_workspace_layout(mode)
+        if not _is_valid_workspace_id(ws_id) or not layout:
             return
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                data["saved_workspace_layouts"] = self._saved_workspace_layouts
-                with open(STATE_FILE, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
-        except (OSError, ValueError) as _e:
-            _debug(f"Failed to persist saved_workspace_layouts: {_e}")
+            modes_dir = self._workspace_layouts_dir()
+            modes_dir.mkdir(parents=True, exist_ok=True)
+            mode_file = modes_dir / f"{ws_id}.lua"
+            tmp_file = mode_file.with_name(f"{mode_file.name}.{os.getpid()}.tmp")
+            tmp_file.write_text(f'o.workspace_mode({{ workspace = "{ws_id}", mode = "{layout}" }})\n', encoding="utf-8")
+            tmp_file.replace(mode_file)
+        except OSError as _e:
+            _debug(f"Failed to write workspace layout file for {ws_id}: {_e}")
+
+    def _sync_workspace_layout_file(self, ws_id: str, layout: str, default_layout: str) -> None:
+        """Mirrors a restored layout to its state file: the default layout is
+        represented by the absence of a file, anything else is written."""
+        if not _is_valid_workspace_id(ws_id):
+            return
+        if layout == default_layout:
+            try:
+                mode_file = self._workspace_layouts_dir() / f"{ws_id}.lua"
+                if mode_file.exists():
+                    mode_file.unlink()
+            except OSError as _e:
+                _debug(f"Failed to remove workspace layout file for {ws_id}: {_e}")
+        else:
+            self._write_workspace_layout_file(ws_id, layout)
+
+    def _current_workspace_layout(self, ws_id: str) -> str:
+        """The workspace's layout before OmniPal touches it, from Omarchy's
+        state file first, then its CLI; "" when neither reports a valid one."""
+        mode_file = self._workspace_layouts_dir() / f"{ws_id}.lua"
+        if mode_file.exists():
+            try:
+                m = re.search(r'mode\s*=\s*"([a-z]+)"', mode_file.read_text(encoding="utf-8"))
+                if m:
+                    layout = _validated_workspace_layout(m.group(1))
+                    if layout:
+                        return layout
+            except OSError:
+                pass
+        if shutil.which("omarchy-hyprland-workspace-layout-current"):
+            try:
+                res = subprocess.run(["omarchy-hyprland-workspace-layout-current", ws_id], capture_output=True, text=True, timeout=0.5, check=False)
+                if res.returncode == 0:
+                    layout = _validated_workspace_layout(res.stdout.strip())
+                    if layout:
+                        return layout
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return _validated_workspace_layout(self.get_workspace_layout(ws_id))
+
+    def _default_workspace_layout(self) -> str:
+        """Omarchy's default workspace layout, allowlist-validated."""
+        if shutil.which("omarchy-hyprland-workspace-layout-default"):
+            try:
+                res = subprocess.run(["omarchy-hyprland-workspace-layout-default"], capture_output=True, text=True, timeout=0.5, check=False)
+                if res.returncode == 0:
+                    layout = _validated_workspace_layout(res.stdout.strip())
+                    if layout and layout != "floating":
+                        return layout
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return "dwindle"
+
+    def _save_workspace_layouts_state(self) -> None:
+        """Persists the saved workspace layouts to STATE_FILE atomically.
+
+        Creates the state file when it does not exist yet (previously the
+        records were silently dropped in that case), preserving any other
+        state keys already stored in it."""
+        data: Dict[str, Any] = {}
+        if STATE_FILE.exists():
+            try:
+                with open(STATE_FILE, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    data = loaded
+            except (OSError, ValueError) as _e:
+                _debug(f"Failed to read state before persisting saved_workspace_layouts: {_e}")
+                return
+        data["saved_workspace_layouts"] = _sanitize_saved_workspace_layouts(self._saved_workspace_layouts)
+        if not atomic_write_json(STATE_FILE, data):
+            _debug("Failed to persist saved_workspace_layouts")
 
     def _ensure_hyprbars_if_floating(self) -> None:
-        """Ensures the hyprbars plugin is loaded when floating layout is applied."""
+        """Ensures the hyprbars plugin is loaded when floating layout is applied.
+
+        Uses a config-only reload: a full `hyprctl reload` wipes OmniPal's
+        injected binds and relies on the daemon noticing the reload to put
+        them back (with no daemon running, the binds are simply lost)."""
         if not shutil.which("hyprctl"):
             return
         try:
@@ -1232,7 +1341,7 @@ end
                 plugins = json.loads(res.stdout)
                 has_hyprbars = any(p.get("name") == "hyprbars" for p in plugins if isinstance(p, dict))
                 if not has_hyprbars:
-                    subprocess.run(["hyprctl", "reload"], capture_output=True, timeout=1.0, check=False)
+                    self._reload_config_only()
         except (OSError, ValueError, subprocess.SubprocessError) as _e:
             _debug(f"check hyprbars failed: {_e}")
 
@@ -1254,29 +1363,14 @@ end
             if not force and cur_applied == "floating":
                 return True
             if valid_ws and ws_id not in self._saved_workspace_layouts:
-                modes_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy" / "workspace-layouts"
-                mode_file = modes_dir / f"{ws_id}.lua"
-                cur_layout = ""
-                if mode_file.exists():
-                    try:
-                        m = re.search(r'mode\s*=\s*"([a-z]+)"', mode_file.read_text(encoding="utf-8"))
-                        if m:
-                            cur_layout = m.group(1)
-                    except OSError:
-                        pass
-                if not cur_layout and shutil.which("omarchy-hyprland-workspace-layout-current"):
-                    try:
-                        res = subprocess.run(["omarchy-hyprland-workspace-layout-current", ws_id], capture_output=True, text=True, timeout=0.5, check=False)
-                        if res.returncode == 0 and res.stdout.strip():
-                            cur_layout = res.stdout.strip()
-                    except (OSError, subprocess.SubprocessError):
-                        pass
-                if not cur_layout or cur_layout == "floating":
-                    cur_layout = self.get_workspace_layout(ws_id) or "dwindle"
-                    if cur_layout == "floating":
-                        cur_layout = "dwindle"
-                self._saved_workspace_layouts[ws_id] = cur_layout
-                self._save_workspace_layouts_state()
+                # Record the layout to restore when switching back to tiled.
+                # A workspace that was already floating (e.g. the user set it
+                # with Super+L) is NOT recorded: it was floating before
+                # OmniPal and must stay floating afterwards.
+                cur_layout = self._current_workspace_layout(ws_id)
+                if cur_layout and cur_layout != "floating":
+                    self._saved_workspace_layouts[ws_id] = cur_layout
+                    self._save_workspace_layouts_state()
 
             # Rules are kept in the Lua registry so tiled mode can disable them without a reload.
             lua_code = (
@@ -1313,13 +1407,7 @@ end
                 self._set_applied_window_mode("floating")
                 self._float_existing_windows()
                 if valid_ws:
-                    try:
-                        modes_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy" / "workspace-layouts"
-                        modes_dir.mkdir(parents=True, exist_ok=True)
-                        mode_file = modes_dir / f"{ws_id}.lua"
-                        mode_file.write_text(f'o.workspace_mode({{ workspace = "{ws_id}", mode = "floating" }})\n', encoding="utf-8")
-                    except OSError as _e:
-                        _debug(f"Failed to record floating workspace layout: {_e}")
+                    self._write_workspace_layout_file(ws_id, "floating")
                     self._ensure_hyprbars_if_floating()
                 self._notify_omarchy_layout()
             return ok
@@ -1343,63 +1431,71 @@ end
             return True
 
     def _disable_float_rules(self) -> Optional[bool]:
-        """Turns the floating rules off. Returns False if done in place (no reload), True if it had
-        to fall back to a config-only reload (Lua state rebuilt), None if both failed."""
-        ws_info = self.get_active_workspace_info()
-        ws_id = str(ws_info.get("id", "")) if ws_info else ""
-        valid_ws = _is_valid_workspace_id(ws_id)
-        target_layout = self._saved_workspace_layouts.pop(ws_id, None) or ""
-        self._save_workspace_layouts_state()
+        """Turns the floating rules off and restores every workspace layout
+        OmniPal previously floated. Returns False if done in place (no
+        reload), True if it had to fall back to a config-only reload (Lua
+        state rebuilt), None if both failed.
 
-        default_mode = "dwindle"
-        if shutil.which("omarchy-hyprland-workspace-layout-default"):
-            try:
-                res = subprocess.run(["omarchy-hyprland-workspace-layout-default"], capture_output=True, text=True, timeout=0.5, check=False)
-                if res.returncode == 0 and res.stdout.strip():
-                    default_mode = res.stdout.strip()
-            except (OSError, subprocess.SubprocessError):
-                pass
+        Restoration is driven by _saved_workspace_layouts, NOT by whichever
+        workspace happens to be active now: floating may have been applied
+        on workspace 1 while the user has since moved to workspace 2, and a
+        workspace with no record (e.g. one the user set to scrolling with
+        Super+L in the meantime) must be left completely alone."""
+        default_mode = self._default_workspace_layout()
+        restores = _sanitize_saved_workspace_layouts(self._saved_workspace_layouts)
 
-        if not target_layout:
-            target_layout = default_mode
-
-        escaped_target = _escape_lua_string(target_layout)
-
+        restore_calls = " ".join(
+            f'o.workspace_mode({{ workspace = "{ws_id}", mode = "{layout}" }});'
+            for ws_id, layout in sorted(restores.items(), key=lambda kv: int(kv[0]))
+        )
         lua = (
             'local R = debug.getregistry(); '
-            'if type(o) == "table" and type(o.workspace_mode) == "function" then '
-            '  local ws = (type(hl) == "table" and type(hl.get_active_workspace) == "function") and hl.get_active_workspace() or nil; '
-            '  local gl = (type(hl) == "table" and type(hl.get_config) == "function" and hl.get_config("general.layout")); '
-            '  if type(gl) ~= "string" or gl == "" then gl = "dwindle" end; '
-            f'  local target_mode = "{escaped_target}" ~= "" and "{escaped_target}" or gl; '
-            '  if ws and ws.id and tonumber(ws.id) and tonumber(ws.id) >= 1 then '
-            '    o.workspace_mode({ workspace = tostring(ws.id), mode = target_mode }) '
-            '  end '
-            'end; '
-            'local t = R.omnipal_float_rules; '
+            + (f'if type(o) == "table" and type(o.workspace_mode) == "function" then {restore_calls} end; ' if restore_calls else '')
+            + 'local t = R.omnipal_float_rules; '
             'if t then '
             '  for _, r in ipairs(t) do r:set_enabled(false) end '
             'end'
         )
         ok = self._eval_lua_strict(lua)
-        if valid_ws:
-            modes_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy" / "workspace-layouts"
-            mode_file = modes_dir / f"{ws_id}.lua"
-            try:
-                if target_layout == default_mode:
-                    if mode_file.exists():
-                        mode_file.unlink()
-                else:
-                    modes_dir.mkdir(parents=True, exist_ok=True)
-                    mode_file.write_text(f'o.workspace_mode({{ workspace = "{ws_id}", mode = "{target_layout}" }})\n', encoding="utf-8")
-            except OSError as _e:
-                _debug(f"Failed to restore workspace layout file: {_e}")
-        self._notify_omarchy_layout()
-
         if ok:
+            # Only persist the restore once it actually took effect: a
+            # layout that was never applied must not be saved (Omarchy's own
+            # tools follow the same rule).
+            for ws_id, layout in restores.items():
+                self._sync_workspace_layout_file(ws_id, layout, default_mode)
+            self._saved_workspace_layouts.clear()
+            self._save_workspace_layouts_state()
+            self._notify_omarchy_layout()
             return False
         print("Disabling float rules in place failed; falling back to config reload", file=sys.stderr)
-        return True if self._reload_config_only() else None
+        # The reload re-reads the per-workspace state files, so they have to
+        # be synced first — but if the reload fails too, roll the files back
+        # so a restore that never took effect is not left saved on disk.
+        layouts_dir = self._workspace_layouts_dir()
+        previous_files: Dict[str, Optional[str]] = {}
+        for ws_id in restores:
+            mode_file = layouts_dir / f"{ws_id}.lua"
+            try:
+                previous_files[ws_id] = mode_file.read_text(encoding="utf-8") if mode_file.exists() else None
+            except OSError:
+                previous_files[ws_id] = None
+        for ws_id, layout in restores.items():
+            self._sync_workspace_layout_file(ws_id, layout, default_mode)
+        if self._reload_config_only():
+            self._saved_workspace_layouts.clear()
+            self._save_workspace_layouts_state()
+            self._notify_omarchy_layout()
+            return True
+        for ws_id, previous in previous_files.items():
+            mode_file = layouts_dir / f"{ws_id}.lua"
+            try:
+                if previous is None:
+                    mode_file.unlink(missing_ok=True)
+                else:
+                    mode_file.write_text(previous, encoding="utf-8")
+            except OSError as _e:
+                _debug(f"Failed to roll back workspace layout file for {ws_id}: {_e}")
+        return None
 
     def _notify_omarchy_layout(self) -> None:
         """Notifies Omarchy shell to refresh dock and workspaces widgets if available."""
@@ -2395,30 +2491,31 @@ end
             return None
 
     def _hypr_dispatch(self, lua_cmd: str, legacy_args: List[str]) -> bool:
-        """Dispatches a command via Lua API (hl.dsp.*) first, falling back to legacy hyprctl dispatch."""
-        if compositor_mutation_disabled():
-            if shutil.which("hyprctl") and legacy_args:
-                try:
-                    res = subprocess.run(["hyprctl", "dispatch"] + legacy_args, capture_output=True, timeout=0.5, check=False)
-                    return res.returncode == 0
-                except (OSError, subprocess.SubprocessError):
-                    return False
-            return True
+        """Dispatches a command via Lua API (hl.dsp.*) first, falling back to legacy hyprctl dispatch.
 
-        if lua_cmd and shutil.which("hyprctl"):
+        Success is judged by hyprctl's output, not its exit code: hyprctl can
+        print an error and still exit 0, and trusting the exit code made
+        callers (e.g. unpin) report success for dispatches that never ran.
+        Only an exact `ok` reply counts, same as _eval_lua_strict."""
+        if compositor_mutation_disabled():
+            # Dry run means "do not mutate the compositor" — never dispatch
+            # for real here (the previous code did exactly that).
+            return True
+        if not shutil.which("hyprctl"):
+            return False
+
+        def _dispatch(args: List[str]) -> bool:
             try:
-                res = subprocess.run(["hyprctl", "dispatch", lua_cmd], capture_output=True, text=True, timeout=0.5, check=False)
-                if res.returncode == 0:
-                    return True
-            except (OSError, subprocess.SubprocessError):
-                pass
-        if legacy_args and shutil.which("hyprctl"):
-            try:
-                res = subprocess.run(["hyprctl", "dispatch"] + legacy_args, capture_output=True, timeout=0.5, check=False)
-                return res.returncode == 0
+                res = subprocess.run(["hyprctl", "dispatch"] + args, capture_output=True, text=True, timeout=0.5, check=False)
+                return res.returncode == 0 and res.stdout.strip() == "ok"
             except (OSError, subprocess.SubprocessError) as _e:
-                _debug(f"hyprctl dispatch {legacy_args} failed: {_e}")
+                _debug(f"hyprctl dispatch {args} failed: {_e}")
                 return False
+
+        if lua_cmd and _dispatch([lua_cmd]):
+            return True
+        if legacy_args:
+            return _dispatch(legacy_args)
         return False
 
     def unpin(self, address: Optional[str] = None, all_windows: bool = False) -> Dict[str, Any]:
@@ -2951,10 +3048,9 @@ end"""
             _debug(f"pinned-windows query failed: {_e}")
 
         # 4. Installation self-check (CLI link, plugin links, systemd unit, token copies)
-        try:
-            install = self.check_installation(fix=fix)
-        except TypeError:
-            install = self.check_installation()
+        # Pass fix= directly: a try/except TypeError fallback here would also
+        # swallow a genuine TypeError raised inside check_installation.
+        install = self.check_installation(fix=fix)
         report["install"] = install
         for item in install["problems"]:
             report["issues"].append(item["problem"])

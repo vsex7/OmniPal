@@ -76,20 +76,23 @@ function resolveName(item) {
   return DEFAULT_NAMES[key] || item.id || "未知模式";
 }
 
+// Fallback shown only when the engine is unreachable. This is a copy of the
+// profiles/ data (the single source of truth); test_omni.py asserts the
+// counts and descriptions stay in sync with profiles/*.json.
 function fallbackProfiles() {
   return [
     {
       "id": "windows",
       "name": "Windows 11 习惯模式",
-      "description": "还原 Windows 11 常用快捷键（Alt+F4 关闭窗口、Super+方向键贴靠、Super+E 文件管理器、Super+L 锁屏等）",
-      "bindings_count": 14,
+      "description": "还原 Windows 11 常用快捷键（Alt+F4 关闭窗口、Super+方向键贴靠、Super+E 文件管理器等；锁屏沿用 Omarchy 自带的 Super+Ctrl+L）",
+      "bindings_count": 16,
       "display": { "icon": "⊞", "brief": "WIN", "color": "#3892d6" }
     },
     {
       "id": "mac",
       "name": "macOS 习惯模式",
-      "description": "还原 macOS 常用快捷键（Super+Q 关闭窗口、Super+Space 启动器、Super+Shift+4 区域截图、Super+Ctrl+Q 锁屏等）",
-      "bindings_count": 19,
+      "description": "还原 macOS 常用快捷键（Cmd 键转发、Super+Shift+4 区域截图、Super+Ctrl+Q 锁屏、Super+Up 任务概览等）",
+      "bindings_count": 34,
       "display": { "icon": "◆", "brief": "MAC", "color": "#d8dee9" }
     },
     {

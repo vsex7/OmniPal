@@ -1,7 +1,7 @@
 {
   "id": "windows",
   "name": "Windows 11 习惯模式",
-  "description": "还原 Windows 11 常用快捷键（Alt+F4 关闭窗口、Super+方向键贴靠、Super+E 文件管理器、Super+L 锁屏等）",
+  "description": "还原 Windows 11 常用快捷键（Alt+F4 关闭窗口、Super+方向键贴靠、Super+E 文件管理器等；锁屏沿用 Omarchy 自带的 Super+Ctrl+L）",
   "version": "1.0.0",
   "display": {
     "icon": "⊞",
@@ -43,11 +43,6 @@
       "action": "file_manager",
       "mod": "SUPER",
       "key": "E"
-    },
-    {
-      "action": "lock_screen",
-      "mod": "SUPER CTRL",
-      "key": "L"
     },
     {
       "action": "clipboard_history",

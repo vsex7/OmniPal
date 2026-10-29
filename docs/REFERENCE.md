@@ -53,7 +53,7 @@ bash scripts/install.sh
 安装程序会自动执行：
 - 校验 JSON Schema、按键定义与所有 Quickshell 插件完整性
 - 创建 CLI 软链接至 `~/.local/bin/omni-profile`
-- 挂载全套 6 个 Quickshell 插件至 `~/.config/omarchy/plugins/`
+- 挂载全套 5 个 Quickshell 插件至 `~/.config/omarchy/plugins/`
 - 配置可选的 systemd 用户常驻单元 `omnipal.service`
 
 ### 2. 命令行使用
@@ -80,7 +80,7 @@ omni-profile cheatsheet
 # 窗口智能吸附（支持 left/right/up/down/center/third-left/third-right/two-thirds-left/two-thirds-right）
 omni-profile snap center
 
-# 列出规范吸附布局编目（6 模板 × 30 分区，--json 机器可读输出）
+# 列出规范吸附布局编目（6 模板 × 37 分区，--json 机器可读输出）
 omni-profile snap-layouts
 
 # 执行系统健康诊断与一致性校验
@@ -109,6 +109,31 @@ omni-profile persist disable
 
 # 瞬间还原至 Omarchy 原生快捷键
 omni-profile restore
+
+# 把一组快捷键转发给当前窗口（终端自动改为 Ctrl+Shift，如 omni-profile send CTRL W）
+omni-profile send <修饰键> <按键> [--class <窗口类名>]
+
+# 列出某个模式会接管哪些 Omarchy 原生快捷键（及它们原来的功能，--json 机器可读输出）
+omni-profile diff <模式>
+
+# 按应用自动切换模式的规则管理（详见 docs/APP_RULES.md）
+omni-profile rules list
+omni-profile rules add <应用类名> <模式>
+omni-profile rules remove <应用类名>
+omni-profile rules test <应用类名>
+
+# 导出 / 导入自定义模式（导入含自定义命令的模式时需确认，或加 -y）
+omni-profile export <模式>
+omni-profile import <文件> [-y]
+
+# 在 Omarchy 菜单（Super+Space）的 Setup 下注册/移除「快捷键模式」、查看状态
+omni-profile menu install|uninstall|status
+
+# 首次上手指南：查看状态 / 下次登录再显示 / 标记已显示（插件调用）
+omni-profile onboarding status|reset|claim
+
+# 前台运行守护进程（监听 Hyprland 事件、配置重载后自动恢复模式；通常由 systemd 服务启动）
+omni-profile daemon
 ```
 
 ### 3. Quickshell 交互呼出
