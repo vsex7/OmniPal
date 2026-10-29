@@ -26,7 +26,7 @@ HARD='already been assigned|Duplicate|syntax|\[unqualified\]|\[unresolved-type\]
 # Known false positives: Style.font/spacing are untyped QtObject groups in Commons/Style.qml,
 # so member access on them can't be checked statically. In Qt 6.12+, qmllint also warns
 # about OmniTheme type when not declared in an explicit qmldir.
-IGNORE='Member "[A-Za-z]+" not found on type "QObject"|Type "OmniTheme" of property "theme" not found|Property "theme" has incomplete type "OmniTheme"|OmniTheme was not found'
+IGNORE='Member "[A-Za-z]+" not found on type "QObject"'
 files=("$@"); [[ ${#files[@]} -eq 0 ]] && mapfile -t files < <(find "$ROOT/plugins" -path '*/omni.*/*.qml' | sort)
 fail=0
 for f in "${files[@]}"; do

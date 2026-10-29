@@ -3,7 +3,7 @@
   "id": "omni.settings",
   "name": "OmniPal Settings",
   "version": "1.8.0",
-  "minOmarchy": "4.0.4",
+  "minOmarchy": "4.5.0",
   "author": "OmniPal",
   "license": "MIT",
   "description": "OmniPal 模式设置与配置面板。支持快捷切换习惯模式、查看各模式按键覆盖状态、控制守护进程。",

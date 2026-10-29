@@ -19,6 +19,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import shutil as _shutil
+# Test isolation: by default, unit tests prepend tests/fakebin to PATH so tests
+# run safely in CI or without altering the developer's live Hyprland desktop.
+# Set OMNIPAL_FAKE_HYPRCTL=0 to run tests against the live running compositor.
 if not _shutil.which("hyprctl") or os.environ.get("OMNIPAL_FAKE_HYPRCTL") != "0":
     os.environ["PATH"] = str(Path(__file__).resolve().parent / "fakebin") + os.pathsep + os.environ.get("PATH", "")
 if not os.environ.get("XDG_RUNTIME_DIR") or not os.path.isdir(os.environ["XDG_RUNTIME_DIR"]):
@@ -1614,8 +1617,10 @@ class TestForwardShortcut(unittest.TestCase):
         for b in fw:
             self.assertIn(f"hl.unbind({lua_str(b['combo'])})", lua)
         self.assertNotIn("omni-profile send", lua)  # no external process per key
-        self.assertIn("hl.dsp.send_key_state", lua)
-        self.assertIn("send_shortcut", lua)
+        self.assertIn("if hl.dsp and hl.dsp.send_key_state and hl.timer then", lua)
+        self.assertIn("hl.dispatch(hl.dsp.send_key_state({ mods = m, key = k, state = 'down' }))", lua)
+        self.assertIn("hl.timer(function() hl.dispatch(hl.dsp.send_key_state({ mods = m, key = k, state = 'up' })) end, { timeout = 50, type = 'oneshot' })", lua)
+        self.assertIn("hl.dispatch(hl.dsp.send_shortcut({ mods = m, key = k }))", lua)
         self.assertIn('["alacritty"] = true', lua)
 
     def test_bad_forward_is_skipped(self):
@@ -1887,7 +1892,7 @@ class TestSettingsPanelKeys(unittest.TestCase):
 
     def test_manifests_declare_min_omarchy(self):
         for mf in (PROJECT_ROOT / "plugins").glob("omni.*/manifest.json"):
-            self.assertEqual(json.loads(mf.read_text(encoding="utf-8")).get("minOmarchy"), "4.0.4", mf)
+            self.assertEqual(json.loads(mf.read_text(encoding="utf-8")).get("minOmarchy"), "4.5.0", mf)
 
 
 class TestOmarchyVersionGate(unittest.TestCase):
@@ -1912,12 +1917,12 @@ class TestOmarchyVersionGate(unittest.TestCase):
                     os.environ[k] = v
 
     def test_statuses(self):
-        self.assertEqual(self._check("4.0.4")["status"], "ok")
-        self.assertEqual(self._check("4.1.0-2")["status"], "ok")
-        self.assertEqual(self._check("4.0.3")["status"], "too_old")
+        self.assertEqual(self._check("4.5.0")["status"], "ok")
+        self.assertEqual(self._check("4.5.1-2")["status"], "ok")
+        self.assertEqual(self._check("4.4.9")["status"], "too_old")
         r = self._check(None)
         self.assertEqual(r["status"], "unknown")
-        self.assertEqual(r["minimum"], "4.0.4")
+        self.assertEqual(r["minimum"], "4.5.0")
 
     def test_install_warns_on_unknown_and_points_to_doctor(self):
         sh = (PROJECT_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
@@ -2838,6 +2843,20 @@ class TestOmniPalFloatedTracking(unittest.TestCase):
             res3 = e.unpin(all_windows=True)
             self.assertEqual(len(res3["unpinned"]), 2)
             self.assertEqual({x["address"] for x in res3["unpinned"]}, {"0xpop1", "0xpop2"})
+
+            # Address that is not pinned: must NOT call dispatch pin (no reverse-pinning)
+            calls.clear()
+            res4 = e.unpin(address="0xnorm")
+            self.assertEqual(len(res4["unpinned"]), 0)
+            self.assertIn("并未处于置顶状态", res4["message"])
+            self.assertEqual(calls, [])
+
+            # Dispatch failure: returncode != 0 must not count as unpinned
+            def mock_fail(cmd, *a, **kw):
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="error")
+            subprocess.run = mock_fail
+            res5 = e.unpin(address="0xpop1")
+            self.assertEqual(len(res5["unpinned"]), 0)
         finally:
             subprocess.run = orig_run
 

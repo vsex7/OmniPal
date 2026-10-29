@@ -72,6 +72,13 @@ echo "✅ CLI 链接已创建: ${BIN_TARGET}"
 OMARCHY_PLUGINS_DIR="${HOME}/.config/omarchy/plugins"
 track_mkdir "${OMARCHY_PLUGINS_DIR}"
 echo "🧩 部署 OmniPal Quickshell 插件..."
+# 清理旧版本废弃的插件软链接（如 omni.mac-dock 已由 Omarchy 4.5 原生 Dock 替代）
+for deprecated_plugin in omni.mac-dock; do
+    if [ -L "${OMARCHY_PLUGINS_DIR}/${deprecated_plugin}" ] || [ -f "${OMARCHY_PLUGINS_DIR}/${deprecated_plugin}" ]; then
+        rm -f "${OMARCHY_PLUGINS_DIR}/${deprecated_plugin}"
+        echo "  🧹 已清理旧版废弃插件链接: ${deprecated_plugin}"
+    fi
+done
 for p_path in "${PROJECT_ROOT}/plugins"/omni.*; do
     if [ -d "${p_path}" ]; then
         p_name="$(basename "${p_path}")"

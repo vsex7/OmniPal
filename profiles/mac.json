@@ -20,11 +20,6 @@
       "key": "F"
     },
     {
-      "action": "minimize_window",
-      "mod": "SUPER",
-      "key": "M"
-    },
-    {
       "action": "screenshot_region",
       "mod": "SUPER SHIFT",
       "key": "4"

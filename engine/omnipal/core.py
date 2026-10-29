@@ -139,6 +139,7 @@ class OmniPalEngine:
         self.snap_layouts: List[Dict[str, Any]] = []
         self._last_summon_proc = None
         self.window_policy: str = "follow-profile"
+        self._saved_workspace_layouts: Dict[str, str] = {}
         self._ensure_run_dir()
         if STATE_FILE.exists():
             try:
@@ -1164,6 +1165,33 @@ end
         except (OSError, subprocess.SubprocessError) as e:
             print(f"unfloat failed: {e}", file=sys.stderr)
 
+    def get_active_workspace_info(self) -> Dict[str, Any]:
+        """Queries the active workspace from Hyprland safely."""
+        try:
+            _ensure_hyprland_instance()
+            res = subprocess.run(["hyprctl", "activeworkspace", "-j"], capture_output=True, text=True, check=False, timeout=0.5)
+            if res.returncode == 0 and res.stdout.strip():
+                data = json.loads(res.stdout)
+                return data if isinstance(data, dict) else {}
+        except (OSError, ValueError, subprocess.SubprocessError) as _e:
+            _debug(f"activeworkspace query failed: {_e}")
+        return {}
+
+    def get_workspace_layout(self, ws_id: Optional[str] = None) -> str:
+        """Returns the current workspace layout mode via Omarchy 4.5 CLI or general.layout fallback."""
+        if shutil.which("omarchy-hyprland-workspace-layout-current"):
+            try:
+                cmd = ["omarchy-hyprland-workspace-layout-current"]
+                if ws_id:
+                    cmd.append(str(ws_id))
+                res = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=0.5)
+                out = res.stdout.strip()
+                if out:
+                    return out
+            except (OSError, subprocess.SubprocessError) as _e:
+                _debug(f"workspace layout query failed: {_e}")
+        return "dwindle"
+
     def _apply_window_policy(self, force: bool = False) -> bool:
         """Applies the current effective window policy (tiled vs floating) to Hyprland."""
         _ensure_hyprland_instance()
@@ -1174,28 +1202,43 @@ end
         target_mode = self.get_effective_window_mode()
         cur_applied = self._get_applied_window_mode()
 
+        ws_info = self.get_active_workspace_info()
+        ws_id = str(ws_info.get("id", "")) if ws_info else ""
+
         if target_mode == "floating":
             if not force and cur_applied == "floating":
                 return True
+            if ws_id and ws_id not in self._saved_workspace_layouts:
+                cur_layout = self.get_workspace_layout(ws_id)
+                if cur_layout and cur_layout != "floating":
+                    self._saved_workspace_layouts[ws_id] = cur_layout
+
             # Rules are kept in the Lua registry so tiled mode can disable them without a reload.
             lua_code = (
                 'local R = debug.getregistry(); '
+                'local used_omarchy_mode = false; '
                 'if type(o) == "table" and type(o.workspace_mode) == "function" then '
                 '  local ws = (type(hl) == "table" and type(hl.get_active_workspace) == "function") and hl.get_active_workspace() or nil; '
-                '  if ws and ws.id then o.workspace_mode({ workspace = tostring(ws.id), mode = "floating" }) end '
+                '  if ws and ws.id then '
+                '    o.workspace_mode({ workspace = tostring(ws.id), mode = "floating" }); '
+                '    used_omarchy_mode = true '
+                '  end '
                 'end; '
-                'if R.omnipal_float_rules then '
-                'for _, r in ipairs(R.omnipal_float_rules) do r:set_enabled(true) end '
-                'elseif type(hl) == "table" and type(hl.window_rule) == "function" then '
-                'R.omnipal_float_rules = { '
-                'hl.window_rule({ match = {}, float = true }), '
-                'hl.window_rule({ match = { class = ".*" }, float = true }), '
-                'hl.window_rule({ match = { tag = "chromium-based-browser" }, float = true }), '
-                'hl.window_rule({ match = { tag = "terminal" }, float = true }) } '
-                'elseif type(o) == "table" and type(o.window) == "function" then '
-                'o.window(".*", { float = true }); '
-                'o.window({ tag = "chromium-based-browser" }, { float = true }); '
-                'o.window({ tag = "terminal" }, { float = true }) '
+                'R.omnipal_used_omarchy_mode = used_omarchy_mode; '
+                'if not used_omarchy_mode then '
+                '  if R.omnipal_float_rules then '
+                '    for _, r in ipairs(R.omnipal_float_rules) do r:set_enabled(true) end '
+                '  elseif type(hl) == "table" and type(hl.window_rule) == "function" then '
+                '    R.omnipal_float_rules = { '
+                '      hl.window_rule({ match = {}, float = true }), '
+                '      hl.window_rule({ match = { class = ".*" }, float = true }), '
+                '      hl.window_rule({ match = { tag = "chromium-based-browser" }, float = true }), '
+                '      hl.window_rule({ match = { tag = "terminal" }, float = true }) } '
+                '  elseif type(o) == "table" and type(o.window) == "function" then '
+                '    o.window(".*", { float = true }); '
+                '    o.window({ tag = "chromium-based-browser" }, { float = true }); '
+                '    o.window({ tag = "terminal" }, { float = true }) '
+                '  end '
                 'end'
             )
             ok = self._eval_lua(lua_code)
@@ -1228,16 +1271,24 @@ end
     def _disable_float_rules(self) -> Optional[bool]:
         """Turns the floating rules off. Returns False if done in place (no reload), True if it had
         to fall back to a config-only reload (Lua state rebuilt), None if both failed."""
+        ws_info = self.get_active_workspace_info()
+        ws_id = str(ws_info.get("id", "")) if ws_info else ""
+        target_layout = self._saved_workspace_layouts.pop(ws_id, None) or ""
+        escaped_target = _escape_lua_string(target_layout)
+
         lua = (
             'local R = debug.getregistry(); '
             'if type(o) == "table" and type(o.workspace_mode) == "function" then '
             '  local ws = (type(hl) == "table" and type(hl.get_active_workspace) == "function") and hl.get_active_workspace() or nil; '
-            '  local gl = (type(hl) == "table" and type(hl.get_config) == "function" and hl.get_config("general.layout")) or "dwindle"; '
-            '  if ws and ws.id then o.workspace_mode({ workspace = tostring(ws.id), mode = gl }) end '
+            '  local gl = (type(hl) == "table" and type(hl.get_config) == "function" and hl.get_config("general.layout")); '
+            '  if type(gl) ~= "string" or gl == "" then gl = "dwindle" end; '
+            f'  local target_mode = "{escaped_target}" ~= "" and "{escaped_target}" or gl; '
+            '  if ws and ws.id then o.workspace_mode({ workspace = tostring(ws.id), mode = target_mode }) end '
             'end; '
             'local t = R.omnipal_float_rules; '
-            'if not t then error("omnipal: no float rules") end; '
-            'for _, r in ipairs(t) do r:set_enabled(false) end'
+            'if t then '
+            '  for _, r in ipairs(t) do r:set_enabled(false) end '
+            'end'
         )
         if self._eval_lua_strict(lua):
             return False
@@ -1692,6 +1743,7 @@ end
                     self._unfloat_existing_windows()
                     self._set_applied_window_mode("tiled")
                     self._notify_omarchy_layout()
+                    self._saved_workspace_layouts.clear()
             if not policy_restored:
                 print("Warning: Restore window policy reload failed; retaining active overlay for retry", file=sys.stderr)
                 return False
@@ -2250,9 +2302,14 @@ end
             addr_norm = address.lower().strip()
             if not addr_norm.startswith("0x"):
                 addr_norm = "0x" + addr_norm
-            target_windows = [w for w in windows if str(w.get("address", "")).lower() == addr_norm]
-            if not target_windows:
+            matched = [w for w in windows if str(w.get("address", "")).lower() == addr_norm]
+            if not matched:
                 return {"unpinned": [], "message": f"未找到地址为 {address} 的窗口"}
+            win = matched[0]
+            if not win.get("pinned", False):
+                cls_str = f" [{win.get('class')}]" if win.get('class') else ""
+                return {"unpinned": [], "message": f"窗口{cls_str} ({address}) 当前并未处于置顶状态，无需取消置顶"}
+            target_windows = [win]
         else:
             # Active window or single pinned window fallback
             active = self.get_active_window()
@@ -2278,7 +2335,10 @@ end
                 continue
             win_arg = f"address:{addr}"
             try:
-                subprocess.run(["hyprctl", "dispatch", "pin", win_arg], capture_output=True, timeout=0.5, check=False)
+                res = subprocess.run(["hyprctl", "dispatch", "pin", win_arg], capture_output=True, text=True, timeout=0.5, check=False)
+                if res.returncode != 0:
+                    _debug(f"Failed to unpin {addr}: rc={res.returncode} {res.stderr}")
+                    continue
                 subprocess.run(["hyprctl", "dispatch", "tagwindow", "-pop", win_arg], capture_output=True, timeout=0.5, check=False)
                 unpinned.append({
                     "address": addr,
@@ -2553,6 +2613,21 @@ end"""
             if state != "ok":
                 problems.append({"problem": f"Plugin {src.name} link is {state} in {plugins_dir}", "fix": reinstall})
 
+        # Check for deprecated / orphaned omni.* plugin links in plugins_dir (e.g. omni.mac-dock)
+        if plugins_dir.is_dir():
+            valid_names = {src.name for src in (root / "plugins").glob("omni.*")} | {"shared"}
+            for p_link in plugins_dir.glob("omni.*"):
+                if p_link.name not in valid_names:
+                    if p_link.is_symlink() or p_link.exists():
+                        try:
+                            p_link.unlink()
+                            _debug(f"Removed deprecated plugin symlink: {p_link}")
+                        except OSError as _e:
+                            problems.append({
+                                "problem": f"Deprecated plugin link {p_link.name} remains in {plugins_dir}",
+                                "fix": f"rm -f {p_link}"
+                            })
+
         # Shared design dir: plugins resolve ../shared/<file> through it, so it
         # must be linked next to the per-plugin links.
         shared_src = root / "plugins" / "shared"
@@ -2724,7 +2799,7 @@ end"""
                         "title": short_t,
                         "address": addr
                     })
-        except Exception as _e:
+        except (OSError, ValueError, subprocess.SubprocessError) as _e:
             _debug(f"pinned-windows query failed: {_e}")
 
         # 4. Installation self-check (CLI link, plugin links, systemd unit, token copies)

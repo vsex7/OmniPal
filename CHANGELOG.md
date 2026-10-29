@@ -7,6 +7,7 @@
 ## [v1.9.0] - 未发布（草稿）
 
 ### ✨ 新功能
+- **解除窗口置顶**：新增 `omni-profile unpin [address] [--all]` 命令与 `doctor` 置顶窗口（Pinned）诊断，精确解除 `Super+O`（`omarchy-hyprland-window-pop`）导致的跨工作区强制置顶，防止反向置顶并校验底层返回码。
 - **上手指南**：安装后第一次登录自动打开一次速查表，显示三步指南（选模式 / 记住三个固定快捷键 / 在设置里调窗口策略或按应用自动切换）。只显示一次（`~/.config/omnipal/onboarding.json`），之后在速查表按 G 或菜单里重新打开；`omni-profile onboarding reset` 可让它下次登录再出现。安装脚本结束时列出三个固定快捷键。
 - **Omarchy 菜单「快捷键模式」**：Super+Alt+Space → Setup → 快捷键模式，可切换模式、打开设置、速查表、上手指南。通过 Omarchy 官方用户扩展 `~/.config/omarchy/extensions/omarchy-menu.jsonc` 注册，只写一个带标记的区块；`omni-profile menu install|uninstall|status`，安装/卸载脚本自动调用，导入模式后自动刷新。
 - **接管的原生快捷键**：设置的模式卡片和速查表列出该模式接管的 Omarchy 原生快捷键与「原来的功能」，固定入口单独标注；读不到 Hyprland 快捷键时显示灰色提示（数据来自 `omni-profile doctor --json` 的 `takeovers`）。
@@ -22,6 +23,12 @@
 - **`omni-profile diff`**：读不到 Hyprland 快捷键且无快照时显示「无法判断」，不再输出「会接管 0 个原生快捷键」。
 
 ### 🔧 变更
+- **Omarchy 4.5 深度协同与版本升级**：
+  - 插件声明 `minOmarchy` 提高至 `4.5.0`，全面对接 Omarchy 4.5 原生桌面特性。
+  - 窗口策略对接官方 `o.workspace_mode` 与顶栏/Dock 状态刷新；浮动前记录工作区原有的平铺/滚动布局，切回或 restore 时精准恢复，杜绝强行将用户的自定义布局（如 `scrolling`）冲为 `dwindle`。
+  - 快捷键转发对齐 Omarchy 同款 `send_key_state` 50ms 脉冲与 `terminal` 窗口 tag 识别，杜绝快速连按卡键。
+  - 释放 `mac.json` 中的 `Super+,` 给 Omarchy 4.5 核心的通知操作（2FA 验证码快速复制等）；OmniPal 控制中心固定为 `Super+Alt+I`。
+  - 清理 `mac.json` 中被 Omarchy 4.5 原生实现的重复快捷键（`Super+Q` 关闭窗口、`Super+Space` 应用启动器、`Super+A` 全选转发、`Super+M` 最小化）。
 - **系统保护键位**：新增 `schema/protected_bindings.json`（如 Super+Alt+Space / Omarchy 菜单），模式文件覆盖时 `check_consistency.py` 与 `omni-profile import` 直接报错，`doctor` 点名指出违规的模式与键位；mac 模式文件管理器改 Super+Alt+E。
 - **固定入口统一修饰键**：三个固定入口统一为 Super+Alt（速查表 Super+Ctrl+/ → Super+Alt+/）。
 - **绑定级 `name`**：模式文件 binding 的可选 `name` 同时用于 Hyprland 绑定描述，`hyprctl binds` 与速查表显示一致。
@@ -30,6 +37,7 @@
 - mac 模式不再用 Super+数字切换工作区，改用 Super+Ctrl+←/→。
 
 ### 🗑️ 移除
+- **omni.mac-dock 插件**：移除自带的底部 Dock 插件（净删约 500 行代码），直接复用 Omarchy 4.5 原生 Quickshell 底部 Dock；安装/卸载与 doctor 自动清理旧版遗留链接；schema 中保留 toggle_dock 动作兼容用户自定义旧配置。
 - CLI：删除已弃用的 `window-mode` 子命令与 `window-policy tiled|tile|floating|float|follow-profile|follow|follow_profile` 简写；规范写法 `window-policy set <follow-profile|tiled|floating>` 保留。
 - 本地使用统计：删除 `stats` 子命令、引擎中的统计收集与 `stats.json` 读写、设置中的「统计」页与「重置统计数据」确认。
 - 状态栏右键菜单删除「切换下一模式」（左键单击即轮转）。

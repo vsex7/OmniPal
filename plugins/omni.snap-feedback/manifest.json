@@ -3,7 +3,7 @@
   "id": "omni.snap-feedback",
   "name": "OmniPal Snap Feedback",
   "version": "1.8.0",
-  "minOmarchy": "4.0.4",
+  "minOmarchy": "4.5.0",
   "author": "OmniPal",
   "license": "MIT",
   "description": "窗口分屏/贴靠动效反馈 HUD。在分屏或最大化时展示平滑的高亮过渡指示，提供类似 Windows 11 的视觉反馈。",

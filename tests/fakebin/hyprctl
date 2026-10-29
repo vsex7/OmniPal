@@ -6,6 +6,7 @@ case "$1" in
   cursorpos) echo '960, 540' ;;
   monitors) echo '[{"id":0,"name":"FAKE-1","x":0,"y":0,"width":1920,"height":1080,"scale":1.0,"focused":true,"transform":0,"reserved":[0,0,0,0],"activeWorkspace":{"id":1}}]' ;;
   clients|binds) echo '[]' ;;
+  activeworkspace) echo '{"id":1,"name":"1","windows":1}' ;;
   activewindow) echo '{"address":"0xfake","at":[0,0],"size":[800,600],"floating":false,"monitor":0,"workspace":{"id":1},"class":"fake"}' ;;
   *) echo ok ;;
 esac
