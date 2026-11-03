@@ -178,9 +178,38 @@ Panel {
     }
   }
 
+  property bool dockAutohide: false
+  property bool barHidden: false
+
+  Process {
+    id: dockProbe
+    command: ["omarchy-dock", "autohide"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: function() {
+        var raw = String(text || "").trim()
+        root.dockAutohide = (raw === "on")
+      }
+    }
+  }
+
+  Process {
+    id: barProbe
+    command: ["sh", "-c", "omarchy-toggle-enabled bar-off && echo off || echo on"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: function() {
+        var raw = String(text || "").trim()
+        root.barHidden = (raw === "off")
+      }
+    }
+  }
+
   Component.onCompleted: {
     listProcess.running = true
     hintsProcess.running = true
+    dockProbe.running = true
+    barProbe.running = true
   }
 
   function runCmd(cmd) {
@@ -201,6 +230,8 @@ Panel {
     if (opened) {
       if (!listProcess.running) listProcess.running = true
       if (!hintsProcess.running) hintsProcess.running = true
+      dockProbe.running = true
+      barProbe.running = true
       root.cursorActive = false
       root.cursorIndex = 0
     }
@@ -211,7 +242,9 @@ Panel {
     { icon: Icons.glyph.cheat, label: "速查表", hintKey: "cheat_sheet", run: "cheat", closes: true },
     { icon: Icons.glyph.cheat, label: "首次使用引导", hintKey: "", run: "guide", closes: true },
     { icon: Icons.glyph.snap, label: "贴靠布局", hintKey: "snap_layouts", run: "snap", closes: true },
-    { icon: Icons.glyph.overview, label: "概览", hintKey: "task_view", run: "overview", closes: true }
+    { icon: Icons.glyph.overview, label: "概览", hintKey: "task_view", run: "overview", closes: true },
+    { icon: Icons.glyph.dock, label: "Dock 栏 (底栏)", hintKey: "", run: "dock", closes: false },
+    { icon: Icons.glyph.bar, label: "顶部状态栏", hintKey: "", run: "bar", closes: true }
   ]
   readonly property var systemRows: [
     { icon: Icons.glyph.restore, label: "还原 Omarchy 原生模式", hintKey: "", run: "restore", closes: false },
@@ -230,6 +263,8 @@ Panel {
     else if (row.run === "guide") root.openGuide()
     else if (row.run === "snap") root.triggerSnap()
     else if (row.run === "overview") root.openOverview()
+    else if (row.run === "dock") root.toggleDock()
+    else if (row.run === "bar") root.toggleBar()
     else if (row.run === "restore") root.requestRestore()
     else if (row.run === "doctor") root.runDoctor()
     else if (row.run === "settings") root.openSettings()
@@ -383,6 +418,18 @@ Panel {
 
   function runDoctor() {
     runCmd("which omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1 && omarchy-launch-floating-terminal-with-presentation 'omni-profile doctor' || (which xdg-terminal-exec >/dev/null 2>&1 && xdg-terminal-exec -e omni-profile doctor || omni-profile doctor)")
+  }
+
+  function toggleDock() {
+    root.dockAutohide = !root.dockAutohide
+    runCmd("omarchy-dock autohide toggle")
+    dockProbe.running = true
+  }
+
+  function toggleBar() {
+    root.barHidden = !root.barHidden
+    runCmd("omarchy-toggle-bar")
+    barProbe.running = true
   }
 
   IpcHandler {
@@ -635,7 +682,11 @@ Panel {
               required property int index
               row: modelData
               rowIndex: root.actionBase + index
-              hint: modelData.hintKey ? (root.actionHints[modelData.hintKey] || "") : ""
+              hint: modelData.run === "dock"
+                ? (root.dockAutohide ? "自动隐藏" : "常驻")
+                : (modelData.run === "bar"
+                   ? (root.barHidden ? "已隐藏" : "正常")
+                   : (modelData.hintKey ? (root.actionHints[modelData.hintKey] || "") : ""))
             }
           }
         }

@@ -44,6 +44,8 @@ var glyph = {
   dot: "󰝥",
   keyboard: "󰌌",
   book: "󰂺",
+  dock: "󱂩",
+  bar: "󰈈",
 }
 
 function mode(id) {
