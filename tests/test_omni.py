@@ -2279,7 +2279,8 @@ class TestSettingsSingleEntry(unittest.TestCase):
                         "omni-profile restore",
                         "omni-profile doctor", "omni-profile snap layouts",
                         "omni.overview", "omni.cheat-sheet", '\\"guide\\":true',
-                        '"速查表"', '"概览"', '"贴靠布局"',
+                        '"速查表"', '"概览"', '"贴靠布局"', '"窗口标题栏"', '"Dock 栏 (底栏)"',
+                        "omni-profile titlebars toggle", "omarchy-dock autohide toggle",
                         "还原 Omarchy 原生模式", "PanelSectionHeader", "PanelSeparator",
                         "restoreArmed", "Safety.CONFIRM_MS", "root.undoMode = root.currentMode"):
             self.assertIn(present, self.bar, present)

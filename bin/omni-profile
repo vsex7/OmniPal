@@ -442,6 +442,24 @@ def cmd_unpin(engine: OmniPalEngine, args):
             t = f" - {item.get('title')}" if item.get('title') else ""
             print(f"  • [{item.get('class')}]{t} ({item.get('address')})")
 
+def cmd_titlebars(engine: OmniPalEngine, args):
+    action = getattr(args, "action", None) or "toggle"
+    if action == "status":
+        st = engine.get_titlebars_status()
+        if getattr(args, "json", False):
+            print(json.dumps({"enabled": st}))
+        else:
+            print("开启" if st else "关闭")
+    elif action == "on":
+        ok = engine.set_titlebars(True)
+        print("✅ 窗口标题栏已开启" if ok else "❌ 开启失败")
+    elif action == "off":
+        ok = engine.set_titlebars(False)
+        print("✅ 窗口标题栏已关闭" if ok else "❌ 关闭失败")
+    elif action == "toggle":
+        new_st = engine.toggle_titlebars()
+        print(f"✅ 窗口标题栏已{'开启' if new_st else '关闭'}")
+
 def cmd_list(engine: OmniPalEngine, args):
     profiles = engine.list_profiles()
     if args.json:
@@ -892,6 +910,12 @@ def main():
     p_unpin.add_argument("--all", action="store_true", help="取消当前所有窗口的置顶状态")
     p_unpin.add_argument("--json", action="store_true", help="以 JSON 格式输出")
     p_unpin.set_defaults(func=cmd_unpin)
+
+    # titlebars
+    p_tb = subparsers.add_parser("titlebars", aliases=["titlebar"], help="查看或切换窗口标题栏（开启/关闭）")
+    p_tb.add_argument("action", nargs="?", choices=["on", "off", "toggle", "status"], default="toggle", help="操作（默认 toggle）")
+    p_tb.add_argument("--json", action="store_true", help="以 JSON 格式输出")
+    p_tb.set_defaults(func=cmd_titlebars)
 
     args = parser.parse_args()
     if not args.command:

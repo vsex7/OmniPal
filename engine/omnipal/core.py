@@ -2653,6 +2653,63 @@ end
 
         return {"unpinned": unpinned, "message": "成功" if unpinned else "未执行取消置顶"}
 
+    def get_titlebars_status(self) -> bool:
+        """Checks if hyprbars (window titlebars) is currently enabled in Hyprland."""
+        _ensure_hyprland_instance()
+        try:
+            res = subprocess.run(
+                ["hyprctl", "getoption", "plugin:hyprbars:enabled"],
+                capture_output=True, text=True, check=False, timeout=2.0
+            )
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("bool:"):
+                    return "true" in line.lower()
+        except (OSError, subprocess.SubprocessError) as _e:
+            _debug(f"Failed to check titlebars option: {_e}")
+        return False
+
+    def set_titlebars(self, enabled: bool) -> bool:
+        """Enables or disables window titlebars via Hyprland Lua eval."""
+        if enabled:
+            lua = (
+                'local paths = require("default.hypr.paths"); '
+                'local colors = {}; '
+                'local file = io.open(paths.home .. "/.local/state/omarchy/current/theme/colors.toml", "r"); '
+                'if file then '
+                '  for line in file:lines() do '
+                '    local key, value = line:match("^%s*([%w_]+)%s*=%s*\\"#(%x%x%x%x%x%x)\\""); '
+                '    if key then colors[key] = "rgb(" .. value .. ")" end '
+                '  end '
+                '  file:close() '
+                'end; '
+                'local background = colors.background or "rgb(1a1b26)"; '
+                'local titlebar = colors.lighter_background or colors.selection or background; '
+                'local foreground = colors.foreground or "rgb(c0caf5)"; '
+                'local window = [[window = "address:%WINDOW%"]]; '
+                'hl.config({ plugin = { hyprbars = { enabled = true, bar_height = 30, bar_color = titlebar, '
+                'col = { text = foreground }, bar_text_font = "monospace", bar_text_size = 12, '
+                'bar_text_weight = "normal", bar_text_align = "left", bar_buttons_alignment = "right", '
+                'bar_part_of_window = true, bar_precedence_over_border = true, bar_padding = 10, '
+                'bar_button_padding = 8, button_rounding = 0, icon_on_hover = false, '
+                'inactive_button_color = titlebar, '
+                'on_double_click = "hyprctl dispatch \\\'hl.dsp.window.fullscreen({ mode = \\\"maximized\\\", action = \\\"toggle\\\", " .. window .. " })\\\'" } } }); '
+                'for _, button in ipairs({ '
+                '{ icon = "×", action = "hyprctl dispatch \\\'hl.dsp.window.close({ " .. window .. " })\\\'" }, '
+                '{ icon = "□", action = "hyprctl dispatch \\\'hl.dsp.window.fullscreen({ mode = \\\"maximized\\\", action = \\\"toggle\\\", " .. window .. " })\\\'" }, '
+                '{ icon = "−", action = "omarchy-hyprland-window-minimize %WINDOW%" } }) do '
+                'hl.plugin.hyprbars.add_button({ bg_color = titlebar, fg_color = foreground, size = 20, icon = button.icon, action = button.action }) end'
+            )
+            return self._eval_lua(lua)
+        else:
+            return self._eval_lua('hl.config({ plugin = { hyprbars = { enabled = false } } })')
+
+    def toggle_titlebars(self) -> bool:
+        """Toggles window titlebars and returns the new state."""
+        cur = self.get_titlebars_status()
+        self.set_titlebars(not cur)
+        return not cur
+
     def snap(self, zone: str, target_address: Optional[str] = None, no_hud: bool = False) -> bool:
         """Triggers visual snap feedback and dispatches the corresponding window management action."""
         zone = zone.lower().strip()
