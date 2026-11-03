@@ -103,7 +103,7 @@ def _native_stash_lua(combo: str, natives: List[Dict[str, Any]], expected: int) 
 
 
 def _native_unstash_lua(combo: str, present: Optional[int] = 0) -> str:
-    """Lua that rebinds a combo's stashed native handlers; raises if the stash is gone.
+    """Lua that rebinds a combo's stashed native handlers; safe no-op if the stash is gone.
 
     Idempotent: `present` binds still live on the combo (None = unknown, assume at most one) are
     unbound first, so the result is exactly the stashed natives and never a duplicate."""
@@ -111,11 +111,11 @@ def _native_unstash_lua(combo: str, present: Optional[int] = 0) -> str:
     n = 1 if present is None else max(0, int(present))
     pre = "".join(f'hl.unbind({c}); ' for _ in range(n))
     return (f'do local R = debug.getregistry(); local S = R.omnipal_stash and R.omnipal_stash[{c}]; '
-            f'if not S then error("omnipal: no stashed native for " .. {c}) end; '
+            f'if S then '
             f'for _, e in ipairs(S) do if e.h == nil then error("omnipal: lost native handler") end end; '
             f'{pre}'
             f'for _, e in ipairs(S) do if e.h == nil then error("omnipal: lost native handler") end; '
-            f'hl.bind({c}, e.h, e.o) end; R.omnipal_stash[{c}] = nil end')
+            f'hl.bind({c}, e.h, e.o) end; R.omnipal_stash[{c}] = nil end end')
 
 
 def _dedupe_binds_lua(details: Dict[Tuple[int, str], List[Dict[str, Any]]]) -> List[str]:
