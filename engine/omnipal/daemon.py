@@ -121,6 +121,11 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                                 continue
                             last_reload_time = now
                             time.sleep(0.1)  # Debounce settle time
+                            eff_mode = engine.get_effective_window_mode()
+                            if eff_mode in ("floating", "scrolling"):
+                                print(f"🔄 Hyprland config reload detected. Re-applying {eff_mode} window rule...", flush=True)
+                                engine._set_applied_window_mode("tiled")
+                                engine._apply_window_policy(force=True)
                             curr_mode = resolve_reapply_mode(engine)
                             if curr_mode != "omarchy":
                                 print(f"🔄 Hyprland config reload detected. Re-applying {curr_mode} overlay...", flush=True)
@@ -128,11 +133,6 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                             else:
                                 engine._snapshot_baseline_bindings(force=True)
                                 engine.apply_fixed_bindings()
-                            eff_mode = engine.get_effective_window_mode()
-                            if eff_mode in ("floating", "scrolling"):
-                                print(f"🔄 Hyprland config reload detected. Re-applying {eff_mode} window rule...", flush=True)
-                                engine._set_applied_window_mode("tiled")
-                                engine._apply_window_policy(force=True)
                         elif line.startswith("openwindow>>"):
                             eff_mode = engine.get_effective_window_mode()
                             if eff_mode == "floating":
@@ -224,6 +224,13 @@ def run_daemon():
     elif persisted_status.get("enabled"):
         engine.set_persistence(True, source="daemon-startup")
 
+    # Enforce active window policy on startup before restoring profile bindings
+    if engine.get_effective_window_mode() in ("floating", "scrolling"):
+        try:
+            engine._apply_window_policy(force=True)
+        except Exception as _e:
+            _debug(f"startup window-policy apply failed: {_e}")
+
     if persisted_mode and persisted_mode != "omarchy":
         restore_persisted_profile(engine)
     elif persisted_mode == "omarchy":
@@ -231,15 +238,6 @@ def run_daemon():
     elif persisted_status.get("enabled"):
         cur_mode = engine.get_state().get("mode") or "windows"
         engine.set_persistence(True, profile=cur_mode)
-
-    # Enforce active window policy on startup
-    if engine.get_effective_window_mode() in ("floating", "scrolling"):
-        try:
-            engine._apply_window_policy(force=True)
-        except Exception as _e:
-            # Broad: startup policy enforcement is best-effort; the daemon
-            # must stay up even if the compositor misbehaves.
-            _debug(f"startup window-policy apply failed: {_e}")
 
     stop_event = threading.Event()
     worker = threading.Thread(target=_watch_hyprland_socket2, args=(engine, stop_event), daemon=True)
