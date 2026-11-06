@@ -204,10 +204,10 @@ class PluginWiringTest(unittest.TestCase):
     def test_cheat_sheet_and_settings_use_takeovers(self):
         cs = (PROJECT_ROOT / "plugins" / "omni.cheat-sheet" / "CheatSheet.qml").read_text(encoding="utf-8")
         st = (PROJECT_ROOT / "plugins" / "omni.settings" / "SettingsPanel.qml").read_text(encoding="utf-8")
-        for src in (cs, st):
-            self.assertIn('import "Takeovers.js" as Takeovers', src)
-            self.assertIn("doctor --json", src)
-            self.assertIn("原来的功能：", src)
+        self.assertIn('import "Takeovers.js" as Takeovers', cs)
+        self.assertIn("doctor --json", cs)
+        self.assertIn("原来的功能：", cs)
+        self.assertIn("doctor --json", st)
         self.assertIn("onboarding claim --json", cs)
         self.assertIn("guideShown", cs)
 

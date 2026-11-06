@@ -44,6 +44,30 @@
       "default_arg": "omarchy-hyprland-window-minimize"
     },
     {
+      "id": "toggle_desktop",
+      "name": "显示桌面 / 最小化所有窗口",
+      "category": "window",
+      "description": "最小化当前工作区所有窗口显示桌面，再次按下还原（对齐 Windows 的 Win+D）",
+      "dispatcher": "exec",
+      "default_arg": "omni-profile desktop toggle"
+    },
+    {
+      "id": "move_window_monitor_left",
+      "name": "移动窗口至左侧显示器",
+      "category": "window",
+      "description": "将当前活动窗口移动至左侧显示器（对齐 Windows 的 Win+Shift+Left）",
+      "dispatcher": "movewindow",
+      "default_arg": "mon:l"
+    },
+    {
+      "id": "move_window_monitor_right",
+      "name": "移动窗口至右侧显示器",
+      "category": "window",
+      "description": "将当前活动窗口移动至右侧显示器（对齐 Windows 的 Win+Shift+Right）",
+      "dispatcher": "movewindow",
+      "default_arg": "mon:r"
+    },
+    {
       "id": "snap_left",
       "name": "窗口向左吸附/平铺",
       "category": "snap",
@@ -290,6 +314,46 @@
       "description": "呼出多任务概览与窗口空间切换器",
       "dispatcher": "exec",
       "default_arg": "omarchy-shell shell toggle omni.overview"
+    },
+    {
+      "id": "omarchy_quake",
+      "name": "Quake 智能体终端",
+      "category": "omarchy",
+      "description": "随时随地呼出全能 AI 编码与系统助理终端（Omarchy 4.5 原生）",
+      "dispatcher": "__lua",
+      "default_arg": ""
+    },
+    {
+      "id": "omarchy_superwhisper",
+      "name": "Superwhisper 语音输入",
+      "category": "omarchy",
+      "description": "全局极速语音转文字与听写助理（Omarchy 4.5 原生）",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-dictation"
+    },
+    {
+      "id": "omarchy_input_method",
+      "name": "切换输入法",
+      "category": "omarchy",
+      "description": "无缝循环切换系统输入法（Omarchy 4.5 原生）",
+      "dispatcher": "__lua",
+      "default_arg": ""
+    },
+    {
+      "id": "omarchy_workspace_layout",
+      "name": "切换工作区布局",
+      "category": "omarchy",
+      "description": "在平铺 (Tiled)、滚动 (Scrolling)、浮动 (Floating) 间切换（Omarchy 4.5 原生）",
+      "dispatcher": "__lua",
+      "default_arg": ""
+    },
+    {
+      "id": "omarchy_wallpaper_switcher",
+      "name": "壁纸切换器",
+      "category": "omarchy",
+      "description": "快速切换与挑选桌面壁纸（Omarchy 4.5 原生）",
+      "dispatcher": "exec",
+      "default_arg": "omarchy-theme-bg-switcher"
     }
   ]
 }

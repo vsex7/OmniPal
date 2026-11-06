@@ -659,6 +659,23 @@ class TestPersistenceManager(BaseOmniTestCase):
         self.assertIsNone(self.engine.get_persisted_profile())
         self.assertFalse(self.engine.get_persistence_status()["enabled"])
 
+    def test_titlebars_persistence(self):
+        """set_titlebars and toggle_titlebars must mirror into persistence.json."""
+        self.assertIsNone(self.engine.get_persisted_titlebars())
+        self.assertTrue(self.engine.set_titlebars(True))
+        self.assertTrue(self.engine.get_persisted_titlebars())
+        data = json.loads(self.persist_path.read_text(encoding="utf-8"))
+        self.assertTrue(data.get("titlebars"))
+
+        self.assertTrue(self.engine.set_titlebars(False))
+        self.assertFalse(self.engine.get_persisted_titlebars())
+        data = json.loads(self.persist_path.read_text(encoding="utf-8"))
+        self.assertFalse(data.get("titlebars"))
+
+        new_st = self.engine.toggle_titlebars()
+        self.assertTrue(new_st)
+        self.assertTrue(self.engine.get_persisted_titlebars())
+
     def test_restore_can_skip_persistence_sync(self):
         """Daemon shutdown restore must not overwrite the last chosen persisted profile."""
         self.assertTrue(self.engine.switch_mode("windows"))
@@ -1722,6 +1739,25 @@ class TestForwardShortcut(unittest.TestCase):
         windows = self.engine.get_windows()
         self.assertIsInstance(windows, list)
 
+    def test_toggle_desktop_roundtrip(self):
+        """Verifies toggle_desktop minimizes windows and restores them on second call."""
+        orig_get_active = self.engine.get_active_workspace_info
+        orig_get_windows = self.engine.get_windows
+        self.engine.get_active_workspace_info = lambda: {"id": 1, "name": "1"}
+        self.engine.get_windows = lambda: [
+            {"address": "0xaaa", "workspace": {"id": 1}, "pinned": False},
+            {"address": "0xbbb", "workspace": {"id": 1}, "pinned": False},
+        ]
+        try:
+            # 1. First toggle minimizes windows
+            self.assertTrue(self.engine.toggle_desktop())
+            # 2. Second toggle restores windows when workspace has no regular clients
+            self.engine.get_windows = lambda: []
+            self.assertTrue(self.engine.toggle_desktop())
+        finally:
+            self.engine.get_active_workspace_info = orig_get_active
+            self.engine.get_windows = orig_get_windows
+
     def test_snap_layouts_with_address_does_not_crash(self):
         """Verifies snap('layouts', '0x1234') executes cleanly without crashing."""
         from engine.engine import SNAP_FILE
@@ -2249,10 +2285,9 @@ class TestUiAutoOverrideText(unittest.TestCase):
         self.assertIn("active: root.engineRunning && root.autoActive", bar)
         self.assertIn("离开后回到", bar)
         st = (PROJECT_ROOT / "plugins/omni.settings/SettingsPanel.qml").read_text(encoding="utf-8")
-        self.assertIn("root.windowModeLabel(modeCard.modelData.windowMode)", st)
+        self.assertIn("root.windowModeLabel(", st)
         self.assertIn("Super+Ctrl+/", st)
         self.assertIn("已覆盖 · ", bar)
-        self.assertIn("（已覆盖：全局", st)
         self.assertIn("已覆盖 · ", st)
         for qml in (bar, st):
             self.assertNotIn("Style.font.caption", qml)
@@ -2266,11 +2301,11 @@ class TestSettingsSingleEntry(unittest.TestCase):
 
     def test_settings_window_policy_selector(self):
         for present in ('"omni-profile", "window-policy", "set", policy]', "policyOptions", "policyGroup",
-                        "policyOverridden", "已覆盖", '"follow-profile"', '"tiled"', '"scrolling"', '"floating"'):
+                        "policyOverridden", "已覆盖", '"follow-profile"', '"tiled"', '"floating"'):
             self.assertIn(present, self.st, present)
         for gone in ('"stats"', "statsProc", "resetStats", "askResetStats", "重置统计数据", "analyticsTab", "RankRow"):
             self.assertNotIn(gone, self.st, gone)
-        self.assertIn('["模式", "选项", "规则"]', self.st)
+        self.assertIn('["选项", "规则"]', self.st)
 
     def test_bar_menu_has_full_quick_controls(self):
         """User request: functions are back in the bar right-click menu (both places work)."""
@@ -2294,7 +2329,6 @@ class TestSettingsSingleEntry(unittest.TestCase):
 
     def test_restore_merged_into_omarchy_card(self):
         self.assertIn('if (targetMode === "omarchy") root.askRestore()', self.st)
-        self.assertIn("onClicked: root.selectMode(modeCard.modelData.id)", self.st)
         self.assertNotIn("restoreCardBody", self.st)
         for bad in ("恢复原生快捷键", "还原原生快捷键", "系统原生还原"):
             self.assertNotIn(bad, self.st)
@@ -3125,3 +3159,40 @@ class TestWorkspaceLayoutRestoreRound(BaseOmniTestCase):
             profile = json.loads((root / "profiles" / f"{mode}.json").read_text(encoding="utf-8"))
             self.assertEqual(int(m.group(3)), len(profile.get("bindings", [])), mode)
             self.assertEqual(m.group(2), profile.get("description"), mode)
+
+    def test_detect_platform_preference(self):
+        pref = self.engine.detect_platform_preference()
+        self.assertIn("vendor", pref)
+        self.assertIn("recommended_profile", pref)
+        self.assertIn(pref["recommended_profile"], ("windows", "mac", "omarchy"))
+
+        # Test Apple hardware heuristic
+        with unittest.mock.patch("pathlib.Path.exists", return_value=True):
+            with unittest.mock.patch("pathlib.Path.read_bytes", return_value=b"apple,t8103\x00apple,macmini\x00"):
+                mac_pref = self.engine.detect_platform_preference()
+                self.assertEqual(mac_pref["recommended_profile"], "mac")
+                self.assertIn("Apple", mac_pref["vendor"])
+
+    def test_cheatsheet_with_omarchy_core(self):
+        # Omarchy profile should naturally list native superpowers
+        om_sheet = self.engine.cheatsheet("omarchy")
+        actions = {r["action"] for r in om_sheet}
+        self.assertIn("omarchy_quake", actions)
+        self.assertIn("omarchy_superwhisper", actions)
+        self.assertIn("omarchy_input_method", actions)
+        self.assertIn("omarchy_workspace_layout", actions)
+        self.assertIn("cheat_sheet", actions)
+
+        # Windows profile with include_omarchy=True should include them
+        win_sheet = self.engine.cheatsheet("windows", include_omarchy=True)
+        win_actions = {r["action"] for r in win_sheet}
+        self.assertIn("omarchy_quake", win_actions)
+        self.assertIn("omarchy_superwhisper", win_actions)
+
+    def test_omarchy_apps_keep_own_size(self):
+        from engine.omnipal.profiles import OWN_SIZE_CLASSES, is_dialog_window
+        for app in ("monologue", "omacut", "signed", "disktree"):
+            self.assertTrue(self.engine.keeps_own_size(app), f"{app} must keep own size")
+            self.assertIn(app, OWN_SIZE_CLASSES)
+        self.assertTrue(is_dialog_window("signed", "Document Signature"))
+        self.assertTrue(is_dialog_window("monologue", "Audio Recorder"))

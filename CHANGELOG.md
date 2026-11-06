@@ -7,6 +7,15 @@
 ## [v1.9.0] - 未发布（草稿）
 
 ### ✨ 新功能
+- **窗口标题栏记忆持久化**：解决窗口标题栏开启/关闭状态记不住的问题；通过 `omni-profile titlebars on|off|toggle` 或设置面板切换时，自动持久化至独立的 `~/.config/omnipal/persistence.json`，在冷启动、Socket 重连与 `hyprctl reload` 时全自动精准恢复。
+- **Omarchy 4.5 核心原生与智能体速查**：
+  - 规避冲突：释放 Windows 模式下的 `Super+I` 留给 Omarchy 4.5 循环切换输入法，并加入受保护键位名单（`schema/protected_bindings.json`）。
+  - 速查表展示：在速查表（原生模式下或通过 `--with-omarchy`）中直接呈现 Omarchy 4.5 核心能力，涵盖 Quake 智能体终端（`Super+~`）、Superwhisper 语音听写（`Alt+Space`）、输入法切换（`Super+I`）、工作区布局循环（`Super+L`）、窗口最小化到 Dock（`Super+M`）、系统菜单（`Super+Space`）与壁纸切换（`Super+Alt+Space`）。
+  - 原生应用保护：为 Omarchy 4.5 原生套件（`Monologue` 录音、`Omacut` 剪辑、`Signed` 签名、`Disktree` 磁盘分析）加入 `OWN_SIZE_CLASSES` 与对话框保护白名单，在浮动策略下完整保持应用自身设计尺寸与比例。
+- **硬件平台智能探测与模式推荐**：`engine.detect_platform_preference()` 与 `omni-profile doctor` 自动探测硬件架构（DMI 厂商与 Asahi Linux Apple Silicon 设备树），在 Apple 设备上推荐 `mac` 模式，在通用 PC 上推荐 `windows` 模式，并在诊断中给出明确建议。
+- **系统经典肌肉记忆补齐**：
+  - Windows 模式补齐 `Win+D`（显示桌面 / 最小化当前工作区所有窗口，再次按下还原）、`Win+Shift+Left/Right`（移动窗口至左/右显示器）。
+  - macOS 模式补齐 `Cmd+Opt+D`（`toggle_dock`）与 `Cmd+H`（`minimize_window`）。
 - **解除窗口置顶**：新增 `omni-profile unpin [address] [--all]` 命令与 `doctor` 置顶窗口（Pinned）诊断，精确解除 `Super+O`（`omarchy-hyprland-window-pop`）导致的跨工作区强制置顶，防止反向置顶并校验底层返回码。
 - **上手指南**：安装后第一次登录自动打开一次速查表，显示三步指南（选模式 / 记住三个固定快捷键 / 在设置里调窗口策略或按应用自动切换）。只显示一次（`~/.config/omnipal/onboarding.json`），之后在速查表按 G 或菜单里重新打开；`omni-profile onboarding reset` 可让它下次登录再出现。安装脚本结束时列出三个固定快捷键。
 - **Omarchy 菜单「快捷键模式」**：Super+Space → Setup → 快捷键模式，可切换模式、打开设置、速查表、上手指南。通过 Omarchy 官方用户扩展 `~/.config/omarchy/extensions/omarchy-menu.jsonc` 注册，只写一个带标记的区块；`omni-profile menu install|uninstall|status`，安装/卸载脚本自动调用，导入模式后自动刷新。

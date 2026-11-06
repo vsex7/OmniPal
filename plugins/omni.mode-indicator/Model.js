@@ -22,9 +22,9 @@ var DEFAULT_COLORS = {
 };
 
 var DEFAULT_NAMES = {
-  "windows": "Windows 11 习惯模式",
-  "mac":     "macOS 习惯模式",
-  "omarchy": "Omarchy 原生模式"
+  "windows": "Windows 11",
+  "mac":     "macOS",
+  "omarchy": "原生"
 };
 
 function defaultIcon(id) {
@@ -69,11 +69,18 @@ function resolveColor(item) {
   return defaultColor(item.id || item.mode);
 }
 
-function resolveName(item) {
-  if (!item) return "Omarchy 原生模式";
-  if (item.name) return item.name;
+function resolveName(item, lang) {
+  var isEn = (lang === "en");
+  if (!item) return (isEn ? "Native" : "原生");
   var key = String(item.id || item.mode || "").toLowerCase();
-  return DEFAULT_NAMES[key] || item.id || "未知模式";
+  if (key === "omarchy") return (isEn ? "Native" : "原生");
+  if (key === "windows") return "Windows 11";
+  if (key === "mac") return "macOS";
+  if (item.name) {
+    if (isEn && (item.name === "原生" || item.name === "Omarchy 原生模式")) return "Native";
+    return item.name;
+  }
+  return DEFAULT_NAMES[key] || item.id || (isEn ? "Unknown Mode" : "未知模式");
 }
 
 // Fallback shown only when the engine is unreachable. This is a copy of the
@@ -83,21 +90,21 @@ function fallbackProfiles() {
   return [
     {
       "id": "windows",
-      "name": "Windows 11 习惯模式",
+      "name": "Windows 11",
       "description": "还原 Windows 11 常用快捷键（Alt+F4 关闭窗口、Super+方向键贴靠、Super+E 文件管理器等；锁屏沿用 Omarchy 自带的 Super+Ctrl+L）",
-      "bindings_count": 16,
+      "bindings_count": 18,
       "display": { "icon": "⊞", "brief": "WIN", "color": "#3892d6" }
     },
     {
       "id": "mac",
-      "name": "macOS 习惯模式",
+      "name": "macOS",
       "description": "还原 macOS 常用快捷键（Cmd 键转发、Super+Shift+4 区域截图、Super+Ctrl+Q 锁屏、Super+Up 任务概览等）",
-      "bindings_count": 34,
+      "bindings_count": 37,
       "display": { "icon": "◆", "brief": "MAC", "color": "#d8dee9" }
     },
     {
       "id": "omarchy",
-      "name": "Omarchy 原生模式",
+      "name": "原生",
       "description": "Omarchy 原生快捷键，不做任何覆盖，适合学习与对照",
       "bindings_count": 0,
       "display": { "icon": "⊡", "brief": "OMA", "color": "#a3be8c" }
@@ -149,12 +156,15 @@ function normalizePolicy(id) {
   return "follow-profile";
 }
 
-function resolvePolicyName(id) {
+function resolvePolicyName(id, lang) {
   var key = normalizePolicy(id);
+  var isEn = (lang === "en");
   for (var i = 0; i < DEFAULT_POLICIES.length; i++) {
-    if (DEFAULT_POLICIES[i].id === key) return DEFAULT_POLICIES[i].name;
+    if (DEFAULT_POLICIES[i].id === key) {
+      return (isEn && DEFAULT_POLICIES[i].english) ? DEFAULT_POLICIES[i].english : DEFAULT_POLICIES[i].name;
+    }
   }
-  return "平铺";
+  return (isEn ? "Tiled" : "平铺");
 }
 
 function resolvePolicyIcon(id) {
@@ -163,6 +173,78 @@ function resolvePolicyIcon(id) {
     if (DEFAULT_POLICIES[i].id === key) return DEFAULT_POLICIES[i].icon;
   }
   return "◫";
+}
+
+function effWindowModeLabel(mode, lang) {
+  var isEn = (lang === "en");
+  if (mode === "floating") return (isEn ? "Floating" : "浮动");
+  if (mode === "scrolling") return (isEn ? "Scrolling" : "滚动");
+  return (isEn ? "Tiled" : "平铺");
+}
+
+var TRANSLATIONS = {
+  // Modes & Profiles
+  "模式": "Profiles",
+  "原生": "Native",
+  "Omarchy 原生模式": "Omarchy Native",
+  "Windows 11": "Windows 11",
+  "macOS": "macOS",
+  "未知模式": "Unknown Mode",
+
+  // Window Policies & Window Modes
+  "窗口策略": "Window Policy",
+  "跟随模式": "Follow",
+  "平铺": "Tiled",
+  "浮动": "Floating",
+  "滚动": "Scrolling",
+  "生效": "Effective",
+  "生效：": "Effective: ",
+  "生效: ": "effective: ",
+  "已覆盖": "overridden",
+  "已覆盖 · ": "overridden · ",
+  "当前跟随 ": "Follows ",
+
+  // Quick Actions & System
+  "快捷入口": "Quick Actions",
+  "系统": "System",
+  "打开设置": "Open Settings",
+  "速查表": "Cheat Sheet",
+  "首次使用引导": "Onboarding Guide",
+  "贴靠布局": "Snap Layouts",
+  "概览": "Overview",
+  "窗口标题栏": "Window Titlebars",
+  "Dock 栏 (底栏)": "Dock",
+  "还原 Omarchy 原生模式": "Restore Native Keybindings",
+  "健康诊断": "System Diagnostics",
+  "环境自检 (Doctor)": "System Diagnostics (Doctor)",
+
+  // Status & Hints
+  "当前": "Current",
+  "自动": "Auto",
+  "离开后回到": "returns to",
+  "开启": "On",
+  "关闭": "Off",
+  "自动隐藏": "Autohide",
+  "常驻": "Docked",
+  "再按一次还原": "Click again to restore",
+  "再按一次关闭": "Press again to close",
+  "引擎": "Engine",
+  "引擎已停止": "Engine stopped",
+  "引擎未运行": "Engine not running",
+  "OmniPal Engine 未运行": "OmniPal Engine Stopped",
+  "原生零覆盖": "Zero native bindings overridden",
+  "项快捷键已覆盖": "active bindings",
+  "项快捷键": "bindings",
+  "Hyprland 连通": "Hyprland connected",
+  "未连接 Compositor": "Compositor disconnected",
+  "运行时内存热切换引擎在线": "Runtime in-memory hot-switch engine active"
+};
+
+function t(text, lang) {
+  if (lang === "en" && TRANSLATIONS[text]) {
+    return TRANSLATIONS[text];
+  }
+  return text;
 }
 
 function resolvePolicyDesc(id, currentMode) {

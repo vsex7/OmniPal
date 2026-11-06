@@ -7,8 +7,18 @@ var UNDO_MS = 5000;
 var CONFIRM_MS = 2000;
 var CLOSE_AGAIN_TEXT = "再按一次关闭";
 
-function switchedText(name) { return "已切换至 " + name + " · U 撤销"; }
-function undoneText(name) { return "已撤销 · 回到 " + name; }
+function switchedText(name, lang) {
+  if (lang === "en") return "Switched to " + name + " · U to undo";
+  return "已切换至 " + name + " · U 撤销";
+}
+function undoneText(name, lang) {
+  if (lang === "en") return "Undone · back to " + name;
+  return "已撤销 · 回到 " + name;
+}
+function closeAgainText(lang) {
+  if (lang === "en") return "Press again to close";
+  return CLOSE_AGAIN_TEXT;
+}
 
 // Returns true when `key` was already armed (=> perform the close now).
 function isArmed(armedKey, key) { return !!key && armedKey === key; }

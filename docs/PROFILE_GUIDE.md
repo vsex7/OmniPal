@@ -34,11 +34,13 @@ omni-profile import my-mac.json --id my-mac
   - `key`：Hyprland 的按键名，如 `Q`、`space`、`Left`、`comma`、`slash`。
   - `arg`：可选。对执行命令类的动作（如 `app_launcher`、`file_manager`），用它替换默认命令。
 
-同一个组合键不能绑两次，导入时会被拒绝。
+同一个组合键不能绑两次，导入时会被拒绝。此外：
+- **系统保护键位**：`Super+Space`（Omarchy 菜单）与 `Super+I`（Omarchy 4.5 输入法切换）受底层系统保护，自定义 Profile 不得占用或覆盖，否则导入会直接报错。
+- **全局固定入口**：`Super+Ctrl+/`（速查表）、`Super+Alt+I`（控制中心）、`Super+Alt+O`（多任务概览）由 OmniPal 全局注入，无论哪种模式下均始终生效。
 
 ## 可用的动作
 
-窗口：`close_window` `maximize_window` `restore_window` `toggle_floating`
+窗口：`close_window` `maximize_window` `restore_window` `toggle_floating` `minimize_window` `toggle_desktop` `move_window_monitor_left` `move_window_monitor_right` `toggle_dock`
 
 吸附：`snap_left` `snap_right` `snap_top` `snap_bottom` `snap_center` `snap_third_left` `snap_third_right` `snap_third_center` `snap_two_thirds_left` `snap_two_thirds_right` `snap_top_left` `snap_top_right` `snap_bottom_left` `snap_bottom_right` `snap_layouts`
 
@@ -48,7 +50,7 @@ omni-profile import my-mac.json --id my-mac
 
 OmniPal：`cheat_sheet` `omni_settings`
 
-完整说明见 `schema/actions.json`。
+完整说明见 `schema/actions.json`（共 44 个标准动作）。
 
 ## 分享给别人
 

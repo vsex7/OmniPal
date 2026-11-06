@@ -97,7 +97,7 @@ class TestCheatsheetMerge(unittest.TestCase):
 
     def test_fixed_entries_merged_with_profile_aliases(self):
         sheet = _engine().cheatsheet("windows")
-        for action in ("omni_settings",):
+        for action in ("task_view",):
             rows = [r for r in sheet if r["action"] == action]
             self.assertEqual(len(rows), 1, f"{action} should be a single merged row")
             self.assertIn("/", rows[0]["key"])

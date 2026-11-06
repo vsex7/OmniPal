@@ -8,6 +8,7 @@ import qs.Commons as Commons
 import qs.Ui
 import "Icons.js" as Icons
 import "Model.js" as Model
+import "I18n.js" as I18n
 
 // OmniPal 窗口贴靠反馈与 Snap Layouts 布局选择器 (omni.snap-feedback)
 //
@@ -37,6 +38,22 @@ Item {
   property bool interactive: false
   property string zone: "left"
   property string hoveredZone: ""
+  property string langPath: (Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")) + "/omnipal/language"
+  property string currentLang: "zh"
+  function t(text) { return I18n.t(text, root.currentLang) }
+
+  FileView {
+    id: langFile
+    path: root.langPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: {
+      var txt = (text() || "").trim().toLowerCase()
+      if (txt === "en" || txt === "zh") root.currentLang = txt
+    }
+    onFileChanged: reload()
+  }
 
   // Native chrome straight from qs.Commons (no null-guards: the Omarchy shell is the only host).
   //   flyout card  = [menu] surface (like omarchy.emojis / menu overlays)
@@ -572,7 +589,7 @@ Item {
 
               Text {
                 visible: root.interactive
-                text: "按回车、点击或按对应数字直接贴靠"
+                text: root.t("按回车、点击或按对应数字直接贴靠")
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
                 color: Util.alpha(Color.foreground, 0.6)
@@ -662,7 +679,7 @@ Item {
             }
 
             Text {
-              text: "贴靠布局"
+              text: root.t("贴靠布局")
               font.family: Style.font.family
               font.pixelSize: Style.font.body
               color: root.theme.textStrong
@@ -719,7 +736,7 @@ Item {
                 spacing: 4
 
                 Text {
-                  text: root.focusedTemplateIndex === -1 ? "1~6 模板" : ("模板 [" + (root.focusedTemplateIndex + 1) + "] 就绪")
+                  text: root.focusedTemplateIndex === -1 ? root.t("1~6 模板") : (root.currentLang === "en" ? ("Template [" + (root.focusedTemplateIndex + 1) + "] Ready") : ("模板 [" + (root.focusedTemplateIndex + 1) + "] 就绪"))
                   font.family: Style.font.family
                   font.pixelSize: Style.font.body
                   color: root.focusedTemplateIndex !== -1 ? root.snapColor : Util.alpha(Color.foreground, 0.70)
@@ -977,14 +994,15 @@ Item {
               text: {
                 if (root.hoveredZone !== "") {
                   var zInfo = Model.ZONES[root.hoveredZone]
-                  return "落点: " + (zInfo ? zInfo.label : root.hoveredZone) + " · 点击或回车贴靠"
+                  var lbl = zInfo ? zInfo.label : root.hoveredZone
+                  return root.currentLang === "en" ? ("Target: " + lbl + " · Click or Enter to snap") : ("落点: " + lbl + " · 点击或回车贴靠")
                 }
                 if (root.focusedTemplateIndex !== -1) {
                   var curT = root.effectiveTemplates[root.focusedTemplateIndex]
                   var sc = (curT && curT.slots) ? curT.slots.length : 2
-                  return "模板 [" + (root.focusedTemplateIndex + 1) + "]: 按 1–" + sc + " 贴靠 · 方向键导航 · Esc 返回"
+                  return root.currentLang === "en" ? ("Template [" + (root.focusedTemplateIndex + 1) + "]: Press 1–" + sc + " to snap · Arrow keys to navigate · Esc to back") : ("模板 [" + (root.focusedTemplateIndex + 1) + "]: 按 1–" + sc + " 贴靠 · 方向键导航 · Esc 返回")
                 }
-                return "按 1–6 快捷跳选 · 悬停桌面高亮轮廓 · Esc 退出"
+                return root.currentLang === "en" ? "Press 1–6 to select · Hover to highlight · Esc to exit" : "按 1–6 快捷跳选 · 悬停桌面高亮轮廓 · Esc 退出"
               }
               font.family: Style.font.family
               font.pixelSize: Style.font.body
@@ -1001,9 +1019,9 @@ Item {
 
             Repeater {
               model: [
-                { key: "1~6", desc: "模板" },
-                { key: "1~4", desc: "贴靠" },
-                { key: "Esc", desc: "退出" }
+                { key: "1~6", desc: root.t("模板") },
+                { key: "1~4", desc: root.t("贴靠") },
+                { key: "Esc", desc: root.t("退出") }
               ]
 
               // Key-hint chip: normal control fill/border tokens.

@@ -38,10 +38,12 @@ Panel {
   manageIpc: false
 
   property string statePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/omnipal/state.json"
+  property string langPath: (Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")) + "/omnipal/language"
   property string currentMode: "omarchy"
-  property string currentName: "Omarchy 原生模式"
+  property string currentName: "原生"
   readonly property string currentIcon: Icons.mode(root.currentMode)
   property string currentBrief: "OMA"
+  property string currentLang: "zh"
   property int activeBindingsCount: 0
   property bool engineRunning: false
   property string engineStatus: "native"
@@ -60,21 +62,23 @@ Panel {
   readonly property bool autoActive: root.autoInfo !== null
   readonly property bool policyOverridden: Model.normalizePolicy(root.windowPolicy) !== "follow-profile"
   readonly property string autoText: root.autoActive
-    ? ("自动 · 因为聚焦了 " + (root.autoInfo.app || "") + " · 离开后回到 " + root.modeNameOf(root.autoInfo.return_to || "omarchy"))
+    ? (root.currentLang === "en"
+       ? ("Auto · focused " + (root.autoInfo.app || "") + " · returns to " + Model.resolveName({ id: root.autoInfo.return_to || "omarchy" }, "en"))
+       : ("自动 · 因为聚焦了 " + (root.autoInfo.app || "") + " · 离开后回到 " + Model.resolveName({ id: root.autoInfo.return_to || "omarchy" }, "zh")))
     : ""
+
+  function t(text) { return Model.t(text, root.currentLang) }
 
   property var profiles: Model.fallbackProfiles()
   function effWindowModeLabel(mode) {
-    if (mode === "floating") return "浮动"
-    if (mode === "scrolling") return "滚动"
-    return "平铺"
+    return Model.effWindowModeLabel(mode, root.currentLang)
   }
-  // 菜单顺序与术语表一致：跟随模式（默认）/ 平铺 / 滚动 / 浮动；图标取自 Model.windowPolicies()
-  readonly property var policyOptions: ["follow-profile", "tiled", "scrolling", "floating"].map(function(id) {
+  // 菜单顺序与术语表一致：跟随模式（默认）/ 平铺 / 浮动；图标取自 Model.windowPolicies()
+  readonly property var policyOptions: ["follow-profile", "tiled", "floating"].map(function(id) {
     var all = Model.windowPolicies()
     var icon = ""
     for (var i = 0; i < all.length; i++) if (all[i].id === id) icon = all[i].icon || ""
-    var name = id === "follow-profile" ? "跟随模式" : (id === "tiled" ? "平铺" : (id === "scrolling" ? "滚动" : "浮动"))
+    var name = id === "follow-profile" ? "跟随模式" : (id === "tiled" ? "平铺" : "浮动")
     return { id: id, name: name, icon: icon }
   })
 
@@ -205,6 +209,24 @@ Panel {
     }
   }
 
+  FileView {
+    id: langFile
+    path: root.langPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: {
+      var raw = String(text() || "").trim().toLowerCase()
+      if (raw === "en" || raw === "zh") root.currentLang = raw
+    }
+  }
+
+  function toggleLanguage() {
+    var next = (root.currentLang === "zh" ? "en" : "zh")
+    root.currentLang = next
+    runCmd("mkdir -p ~/.config/omnipal && echo " + next + " > ~/.config/omnipal/language")
+  }
+
   Component.onCompleted: {
     listProcess.running = true
     hintsProcess.running = true
@@ -240,7 +262,7 @@ Panel {
   // ---- keyboard cursor (PanelKeyCatcher) ------------------------------------
   readonly property var actionRows: [
     { icon: Icons.glyph.cheat, label: "速查表", hintKey: "cheat_sheet", run: "cheat", closes: true },
-    { icon: Icons.glyph.cheat, label: "首次使用引导", hintKey: "", run: "guide", closes: true },
+    { icon: Icons.glyph.guide, label: "首次使用引导", hintKey: "", run: "guide", closes: true },
     { icon: Icons.glyph.snap, label: "贴靠布局", hintKey: "snap_layouts", run: "snap", closes: true },
     { icon: Icons.glyph.overview, label: "概览", hintKey: "task_view", run: "overview", closes: true },
     { icon: Icons.glyph.window, label: "窗口标题栏", hintKey: "", run: "titlebar", closes: false },
@@ -309,14 +331,14 @@ Panel {
 
   function modeNameOf(id) {
     for (var i = 0; i < root.profiles.length; i++)
-      if (root.profiles[i].id === id) return Model.resolveName(root.profiles[i])
+      if (root.profiles[i].id === id) return Model.resolveName(root.profiles[i], root.currentLang)
     return id
   }
 
   function switchModeWithUndo(modeId) {
     if (!modeId || modeId === root.currentMode) return
     root.undoMode = root.currentMode
-    root.toastText = Safety.switchedText(root.modeNameOf(modeId))
+    root.toastText = Safety.switchedText(root.modeNameOf(modeId), root.currentLang)
     toastTimer.restart()
     root.switchMode(modeId)
   }
@@ -325,7 +347,7 @@ Panel {
     if (!root.undoMode) return
     var m = root.undoMode
     root.undoMode = ""
-    root.toastText = Safety.undoneText(root.modeNameOf(m))
+    root.toastText = Safety.undoneText(root.modeNameOf(m), root.currentLang)
     toastTimer.restart()
     root.switchMode(m)
   }
@@ -352,10 +374,10 @@ Panel {
 
   function restoreBaseline() {
     root.undoMode = root.currentMode
-    root.toastText = Safety.switchedText("Omarchy 原生模式")
+    root.toastText = Safety.switchedText(root.currentLang === "en" ? "Native" : "原生", root.currentLang)
     toastTimer.restart()
     root.currentMode = "omarchy"
-    root.currentName = "Omarchy 原生模式"
+    root.currentName = "原生"
     root.currentBrief = "OMA"
     root.activeBindingsCount = 0
     root.effectiveWindowMode = Model.computeEffectiveMode(root.windowPolicy, "omarchy", root.profiles)
@@ -454,6 +476,8 @@ Panel {
     function getWindowPolicy(): string { return root.windowPolicy }
     function getEffectiveWindowMode(): string { return root.effectiveWindowMode }
     function setWindowPolicy(policy: string): void { root.setPolicy(policy, "ipc") }
+    function toggleLanguage(): void { root.toggleLanguage() }
+    function getLanguage(): string { return root.currentLang }
   }
 
   implicitWidth: button.implicitWidth
@@ -468,12 +492,12 @@ Panel {
     active: root.engineRunning && root.autoActive
     activeColor: Commons.Color.accent
     tooltipText: root.engineRunning
-      ? ("OmniPal: " + root.currentName + (root.autoActive ? "\n" + root.autoText : "")
-         + "\n生效快捷键: " + root.activeBindingsCount
-         + "\n窗口策略: " + Model.resolvePolicyName(root.windowPolicy) + (root.policyOverridden ? "（已覆盖）" : "")
-         + " · 生效: " + root.effWindowModeLabel(root.effectiveWindowMode)
-         + "\n左键: 轮转模式 | 右键: 快捷控制面板 | 中键: 设置")
-      : "OmniPal Engine 未运行\n左键: 启动/切换 | 右键: 快捷控制面板"
+      ? ("OmniPal: " + Model.resolveName({ id: root.currentMode, name: root.currentName }, root.currentLang) + (root.autoActive ? "\n" + root.autoText : "")
+         + "\n" + (root.currentLang === "en" ? "Active bindings: " : "生效快捷键: ") + root.activeBindingsCount
+         + "\n" + (root.currentLang === "en" ? "Window policy: " : "窗口策略: ") + Model.resolvePolicyName(root.windowPolicy, root.currentLang) + (root.policyOverridden ? (" (" + root.t("已覆盖") + ")") : "")
+         + " · " + (root.currentLang === "en" ? "Effective: " : "生效: ") + Model.effWindowModeLabel(root.effectiveWindowMode, root.currentLang)
+         + "\n" + (root.currentLang === "en" ? "Left: Cycle mode | Right: Quick menu | Middle: Settings" : "左键: 轮转模式 | 右键: 快捷控制面板 | 中键: 设置"))
+      : (root.currentLang === "en" ? "OmniPal Engine stopped\nLeft: Start/switch | Right: Quick menu" : "OmniPal Engine 未运行\n左键: 启动/切换 | 右键: 快捷控制面板")
 
     onPressed: function(b) {
       if (b === Qt.RightButton) {
@@ -519,14 +543,14 @@ Panel {
         PanelHero {
           id: hero
           foreground: Commons.Color.popups.text
-          title: root.engineRunning ? root.currentName : "OmniPal Engine 未运行"
-          detail: root.engineRunning ? root.currentBrief : ""
+          title: root.engineRunning ? Model.resolveName({ id: root.currentMode, name: root.currentName }, root.currentLang) : root.t("OmniPal Engine 未运行")
+          detail: ""
           meta: root.engineRunning
             ? (root.autoActive
                ? root.autoText
-               : ((root.activeBindingsCount > 0 ? (root.activeBindingsCount + " 项快捷键已覆盖") : "原生零覆盖")
-                  + "  •  " + (root.compositorConnected ? "Hyprland 连通" : "未连接 Compositor")))
-            : "引擎已停止"
+               : ((root.activeBindingsCount > 0 ? (root.activeBindingsCount + " " + root.t("项快捷键已覆盖")) : root.t("原生零覆盖"))
+                  + "  •  " + (root.compositorConnected ? root.t("Hyprland 连通") : root.t("未连接 Compositor"))))
+            : root.t("引擎已停止")
           iconComponent: Text {
             textFormat: Text.PlainText
             text: root.engineRunning ? root.currentIcon : Icons.glyph.pause
@@ -534,14 +558,75 @@ Panel {
             font.family: Style.font.family
             font.pixelSize: Style.font.display
           }
+          trailingControl: Component {
+            Row {
+              spacing: Style.space(6)
+              anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+
+              // 语言切换标识 (en / zh)，单击切换语言
+              BorderSurface {
+                id: langPill
+                implicitWidth: langText.implicitWidth + Style.space(12)
+                implicitHeight: langText.implicitHeight + Style.space(4)
+                anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+                color: langMouse.containsMouse ? Style.normalFillFor(Commons.Color.popups.text, Commons.Color.accent) : "transparent"
+                borderSpec: Border.controlSpec(langMouse.containsMouse ? "selected" : "normal", Commons.Color.popups.text, Commons.Color.accent)
+                radius: Style.cornerRadius
+
+                Text {
+                  id: langText
+                  textFormat: Text.PlainText
+                  anchors.centerIn: parent
+                  text: root.currentLang
+                  color: langMouse.containsMouse ? Commons.Color.accent : Commons.Color.popups.text
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                  font.weight: Font.Medium
+                }
+
+                MouseArea {
+                  id: langMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  acceptedButtons: Qt.LeftButton | Qt.RightButton
+                  z: 100001
+                  onClicked: root.toggleLanguage()
+                }
+              }
+
+              // 模式简写标识 (WIN / MAC / OMA)
+              BorderSurface {
+                id: briefPill
+                visible: root.engineRunning && root.currentBrief !== ""
+                implicitWidth: briefText.implicitWidth + Style.space(10)
+                implicitHeight: briefText.implicitHeight + Style.space(4)
+                anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+                color: "transparent"
+                borderSpec: Border.controlSpec("normal", Commons.Color.popups.text, Commons.Color.accent)
+                radius: Style.cornerRadius
+
+                Text {
+                  id: briefText
+                  textFormat: Text.PlainText
+                  anchors.centerIn: parent
+                  text: root.currentBrief
+                  color: Qt.darker(Commons.Color.popups.text, 1.4)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                  font.weight: Font.Medium
+                }
+              }
+            }
+          }
         }
 
         // Status line: foreground text, urgent only when something is wrong.
         Text {
           width: parent.width
           textFormat: Text.PlainText
-          text: (root.engineRunning ? "engine " + (root.engineStatus || "running") : "engine stopped")
-            + "  ·  " + (root.compositorConnected ? "hyprland connected" : "hyprland disconnected")
+          text: (root.engineRunning ? (root.t("引擎") + " " + (root.engineStatus || "running")) : root.t("引擎已停止"))
+            + "  ·  " + (root.compositorConnected ? root.t("Hyprland 连通") : root.t("未连接 Compositor"))
           color: (!root.engineRunning || !root.compositorConnected) ? Commons.Color.urgent : Qt.darker(Commons.Color.popups.text, 1.4)
           font.family: Style.font.family
           font.pixelSize: Style.font.body
@@ -565,7 +650,7 @@ Panel {
 
         // 2. 肌肉记忆模式选择区 (PROFILES)
         PanelSectionHeader {
-          text: "模式"
+          text: root.t("模式") // text: "模式"
           foreground: Commons.Color.popups.text
         }
 
@@ -585,7 +670,7 @@ Panel {
               width: parent.width
               leftAlign: true
               iconText: Icons.mode(modelData.id)
-              text: Model.resolveName(modelData)
+              text: Model.resolveName(modelData, root.currentLang)
               selected: isActive
               hasCursor: root.cursorActive && root.cursorIndex === index
               foreground: Commons.Color.popups.text
@@ -594,8 +679,8 @@ Panel {
 
               RowHint {
                 readonly property bool isReturn: root.autoActive && root.autoInfo.return_to === profileRow.modelData.id
-                text: profileRow.isActive ? (root.autoActive ? "自动" : "active")
-                  : (isReturn ? "离开后回到" : String(profileRow.modelData.bindings_count))
+                text: profileRow.isActive ? (root.autoActive ? root.t("自动") : "active")
+                  : (isReturn ? root.t("离开后回到") : String(profileRow.modelData.bindings_count))
                 color: (profileRow.isActive || isReturn) ? Commons.Color.accent : Qt.darker(Commons.Color.popups.text, 1.4)
               }
             }
@@ -611,7 +696,7 @@ Panel {
 
           PanelSectionHeader {
             id: wpHeader
-            text: "窗口策略"
+            text: root.t("窗口策略") // text: "窗口策略"
             foreground: Commons.Color.popups.text
             anchors.left: parent.left
             anchors.right: effPolicyBadge.left
@@ -625,7 +710,7 @@ Panel {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
-            text: (root.policyOverridden ? "已覆盖 · " : "") + "生效: " + root.effWindowModeLabel(root.effectiveWindowMode)
+            text: (root.policyOverridden ? (root.currentLang === "en" ? "overridden · " : "已覆盖 · ") : "") + (root.currentLang === "en" ? "effective: " : "生效: ") + Model.effWindowModeLabel(root.effectiveWindowMode, root.currentLang)
             color: root.policyOverridden ? Commons.Color.accent : Qt.darker(Commons.Color.popups.text, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.body
@@ -647,7 +732,7 @@ Panel {
               width: parent.width
               leftAlign: true
               iconText: modelData.icon || ""
-              text: modelData.name
+              text: Model.resolvePolicyName(modelData.id, root.currentLang)
               selected: isCurrent
               hasCursor: root.cursorActive && root.cursorIndex === root.policyBase + index
               foreground: Commons.Color.popups.text
@@ -656,7 +741,7 @@ Panel {
 
               RowHint {
                 visible: policyRow.isCurrent
-                text: "当前"
+                text: root.t("当前")
                 color: Commons.Color.accent
               }
             }
@@ -667,7 +752,7 @@ Panel {
 
         // 4. 快捷入口 (ACTIONS)
         PanelSectionHeader {
-          text: "快捷入口"
+          text: root.t("快捷入口") // text: "快捷入口"
           foreground: Commons.Color.popups.text
         }
 
@@ -683,9 +768,9 @@ Panel {
               row: modelData
               rowIndex: root.actionBase + index
               hint: modelData.run === "dock"
-                ? (root.dockAutohide ? "自动隐藏" : "常驻")
+                ? (root.dockAutohide ? root.t("自动隐藏") : root.t("常驻"))
                 : (modelData.run === "titlebar"
-                   ? (root.titlebarEnabled ? "开启" : "关闭")
+                   ? (root.titlebarEnabled ? root.t("开启") : root.t("关闭"))
                    : (modelData.hintKey ? (root.actionHints[modelData.hintKey] || "") : ""))
             }
           }
@@ -695,7 +780,7 @@ Panel {
 
         // 5. 系统 (SYSTEM)
         PanelSectionHeader {
-          text: "系统"
+          text: root.t("系统") // text: "系统"
           foreground: Commons.Color.popups.text
         }
 
@@ -711,7 +796,7 @@ Panel {
               row: modelData
               rowIndex: root.systemBase + index
               hint: modelData.run === "restore"
-                ? (root.currentMode === "omarchy" ? "当前" : (root.restoreArmed ? "再按一次还原" : ""))
+                ? (root.currentMode === "omarchy" ? root.t("当前") : (root.restoreArmed ? root.t("再按一次还原") : ""))
                 : ""
             }
           }
@@ -739,7 +824,7 @@ Panel {
     width: parent ? parent.width : implicitWidth
     leftAlign: true
     iconText: row.icon || ""
-    text: row.label || ""
+    text: root.t(row.label || "")
     foreground: Commons.Color.popups.text
     hasCursor: root.cursorActive && root.cursorIndex === rowIndex
     onHovered: function(on) { root.hoverRow(rowItem.rowIndex, on) }

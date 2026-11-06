@@ -52,7 +52,14 @@
 | 空间多工作区任务视图 | 16:9 画布卡片平铺全部工作区，窗口按矢量元数据映射真实相对位置，零截图、跨桌面键盘瞬移 | v1.3.0 已交付 |
 | 吸附布局一致性校验 | `check_consistency.py` 全面校验 `snap_layouts.json`：分区几何越界、图标/标签、模板唯一性与槽位合法性 | v1.3.0 已交付 |
 | 快捷键搜索 | 在 HUD (omni.cheat-sheet) 中支持全分类实时模糊检索 | v1.0.0 已交付 |
-| 配置持久化 | 默认记录最后使用的 Profile 与 Window Policy，仅写 `~/.config/omnipal/persistence.json`；`persist disable` 关闭重启恢复，卸载会清理该文件 | v1.4.0 引入，当前默认开启 |
+| 配置持久化 | 默认记录最后使用的 Profile、Window Policy 与 Titlebars 开关状态，仅写 `~/.config/omnipal/persistence.json`；`persist disable` 关闭重启恢复，卸载会清理该文件 | v1.4.0 引入，v1.9.0 完善标题栏记忆 |
+| 标题栏开关记忆 | 记住窗口标题栏开启/关闭状态并在重启/合成器重载时精准恢复，支持 CLI `titlebars` 控制 | v1.9.0 已交付 |
+| 显示桌面 / 切换桌面 | 最小化当前工作区所有窗口显示桌面，再次按下恢复（Win+D / `omni-profile desktop`） | v1.9.0 已交付 |
+| 跨显示器移动窗口 | Win+Shift+Left/Right 一键将当前窗口移动至左/右侧显示器 | v1.9.0 已交付 |
+| macOS 经典动作对齐 | Cmd+Opt+D 切换 Dock 自动隐藏，Cmd+H 最小化当前窗口 | v1.9.0 已交付 |
+| Omarchy 4.5 原生与智能体速查 | 在速查表与 CLI (`--with-omarchy`) 中直接呈现 Quake 智能体终端、Superwhisper 语音输入、输入法切换等核心能力 | v1.9.0 已交付 |
+| 硬件平台智能探测与推荐 | 自动探测 DMI 厂商与 Apple Silicon 设备树，智能推荐最佳模式方案 | v1.9.0 已交付 |
+| 原生应用自主尺寸保护 | Monologue、Omacut、Signed、Disktree 等官方原生套件免受浮动策略强行拉伸变形 | v1.9.0 已交付 |
 | 本地使用统计 | 已移除（v1.9.0）：不再收集或存储任何使用统计，`stats` 子命令已删除 | v1.5.0 引入，v1.9.0 移除 |
 
 ---

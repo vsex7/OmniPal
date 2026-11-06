@@ -44,6 +44,7 @@ var glyph = {
   dot: "󰝥",
   keyboard: "󰌌",
   book: "󰂺",
+  guide: "󰂺",
   dock: "󱂩",
   bar: "󰈈",
 }
@@ -62,8 +63,9 @@ function appForClass(cls) {
   if (/alacritty|kitty|foot|ghostty|terminal|wezterm/.test(c)) return glyph.terminal
   if (/code|cursor|zed|nvim/.test(c)) return glyph.code
   if (/settings|control|pavucontrol/.test(c)) return glyph.settings
-  if (/spotify|music|sound/.test(c)) return glyph.music
+  if (/spotify|music|sound|vlc|mpv|video|media|monologue|omacut/.test(c)) return glyph.music
   if (/discord|telegram|wechat|slack|qq|signal/.test(c)) return glyph.chat
   if (/image|gimp|photo|krita/.test(c)) return glyph.image
+  if (/steam|game/.test(c)) return glyph.focus
   return glyph.window
 }

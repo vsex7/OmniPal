@@ -126,7 +126,10 @@ def normalize_window_policy(policy: Optional[str]) -> Optional[str]:
     return WINDOW_POLICY_ALIASES.get(str(policy).lower().strip())
 
 # Apps that choose their own window size / aspect ratio: never resized by the floating policy.
-OWN_SIZE_CLASSES = ("scrcpy", "mpv", "imv", "vlc", "org.gnome.loupe", "feh")
+OWN_SIZE_CLASSES = (
+    "scrcpy", "mpv", "imv", "vlc", "org.gnome.loupe", "feh",
+    "monologue", "omacut", "signed", "disktree"
+)
 
 DIALOG_KEYWORDS = (
     "polkit",
@@ -139,6 +142,8 @@ DIALOG_KEYWORDS = (
     "steam_app_",
     "wlogout",
     "rofi",
+    "signed",
+    "monologue",
 )
 
 def is_pip_window(cls_name: str = "", title: str = "") -> bool:

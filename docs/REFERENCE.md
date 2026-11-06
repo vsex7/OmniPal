@@ -14,10 +14,13 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
   - 极速切换延迟 **< 5ms**，无屏幕闪烁，无需 reload 配置。
   - **绝不写入任何文件** 至 `~/.config/hypr/`，退出或还原时 100% 恢复基线状态（Hard Stop H-1/H-8 保证）。
 - **三大内置习惯模式 + 自定义配置支持**：
-  - **Windows 11 习惯模式 (`windows`)**：Alt+F4 关闭窗口、Win+方向键智能吸附、Win+E 文件管理器、Win+Tab 任务视图、Win+V 剪贴板、Win+I 设置中心等。
-  - **macOS 习惯模式 (`mac`)**：Super+Q 退出程序、Super+空格启动器、Super+Shift+3/4 截图、Super+Up 调度中心、Super+Opt+D 呼出 Dock、Super+, 偏好设置等。
-  - **Omarchy 原生模式 (`omarchy`)**：零拦截、零覆盖，纯粹的 Hyprland 原生平铺体验。
+  - **Windows 11 习惯模式 (`windows`，18 项覆盖)**：Alt+F4 关闭窗口、Win+D 显示桌面/最小化所有窗口、Win+方向键智能吸附、Win+Shift+Left/Right 跨显示器移动窗口、Win+E 文件管理器、Win+Tab 任务视图、Win+V 剪贴板、Win+Shift+S 区域截图、Win+Z 布局选择器等（Omarchy 4.5 原生预留 `Super+I` 供输入法切换，OmniPal 严守保护键位）。
+  - **macOS 习惯模式 (`mac`，37 项覆盖)**：Super+Q 退出程序、Super+空格启动器、Super+Shift+3/4 截图、Cmd+Opt+D 切换 Dock、Cmd+H 最小化窗口，配合精准无延迟的 Cmd→Ctrl 快捷键转发（Cmd+W 关标签页、Cmd+T 新建标签、Cmd+1~9 标签直达等，终端改发 Ctrl+Shift）。
+  - **Omarchy 原生模式 (`omarchy`，0 项覆盖)**：零拦截、零覆盖，纯粹的 Hyprland 原生平铺体验，并在速查表中直观展示 Omarchy 4.5 智能体与原生能力。
   - **用户自定义与覆盖模式**：支持 `~/.config/omnipal/profiles/*.json`，可任意添加专属模式（如 Vim 风格）或按 `id` 覆盖内置预设，支持自动无缝轮转。
+- **硬件平台智能识别与模式推荐**：
+  - `doctor` 与引擎内置 `detect_platform_preference()`，自动读取 DMI 与 Apple Silicon 设备树。
+  - Apple 硬件自动推荐 `mac` 方案，PC 硬件自动推荐 `windows` 方案。
 - **丰富窗口吸附布局（Rich Snap Layouts）**：
   - 提供 `left`、`right`、`up`、`down`、`center`（60%x70% 居中展示）、`third-left` / `third-right`（1/3 屏幕分屏）、`two-thirds-left` / `two-thirds-right`（2/3 屏幕分屏）。
   - 基于 Compositor 级 Lua 几何运算，自动扣除 Omarchy 顶栏 `reserved` 区域，执行延迟低于 1ms。
@@ -27,16 +30,16 @@ OmniPal 为习惯了 **Windows 11** 或 **macOS** 桌面快捷键与操作习惯
 - **内存级状态广播（tmpfs）**：
   - 运行时状态存储于 `/run/user/$UID/omnipal/state.json`。
   - Quickshell 插件通过 `Quickshell.Io.FileView` 响应更新，无需后台密集轮询。
-- **配置持久化（Persistence，默认开启）**：
-  - v1.9.0 起持久化默认开启：`switch` / `cycle` / `restore` / `window-policy set` 成功后，自动把当前模式（profile）与窗口策略（window policy）写入唯一文件 `~/.config/omnipal/persistence.json`（支持 `OMNIPAL_CONFIG_DIR` 重定向；字段：`enabled` / `profile` / `window_policy` / `updated_at`），重启后 daemon 据此恢复上次配置。可用 `omni-profile persist disable` 关闭（写入 `enabled:false` 标记，禁用后不再记录）。
-  - 持久化仅写该一个文件（纯本地，零上传）；`persist enable`（缺省记录当前模式，可指定模式名；非法模式将被拒绝）可重新开启并快照指定模式/策略。
+- **配置与标题栏持久化（Persistence，默认开启）**：
+  - v1.9.0 起持久化默认开启：`switch` / `cycle` / `restore` / `window-policy set` / `titlebars` 成功后，自动把当前模式（profile）、窗口策略（window policy）与窗口标题栏开关状态（titlebars）写入唯一文件 `~/.config/omnipal/persistence.json`（支持 `OMNIPAL_CONFIG_DIR` 重定向；字段：`enabled` / `profile` / `window_policy` / `titlebars` / `updated_at`），重启或合成器配置重载时 daemon 据此恢复上次配置。可用 `omni-profile persist disable` 关闭（写入 `enabled:false` 标记，禁用后不再记录）。
+  - 持久化仅写该一个文件（纯本地，零上传）；`persist enable`（缺省记录当前模式，可指定模式名与策略/标题栏）可重新开启并快照指定模式/策略/标题栏。
 - **全套 Quickshell 专属插件**：
   1. `omni.mode-indicator`：Omarchy Top Bar 托盘模式指示器与右键快捷控制面板。左键循环轮转模式、右键弹出精致快捷面板（模式一键切换、快捷入口、系统诊断与控制）、中键设置，深度集成 `PopupCard` 与焦点自动收起。
-  2. `omni.cheat-sheet`：快捷键 HUD 速查层，根据单一事实源动态渲染当前有效键位，支持按分类检索与按键说明。
-  3. `omni.settings`：图形化控制中心，可视化切换模式，预览按键覆盖并提供快捷动作。
+  2. `omni.cheat-sheet`：快捷键 HUD 速查层，根据单一事实源动态渲染当前有效键位，原生模式或加 `--with-omarchy` 自动展示 Omarchy 4.5 Quake 智能体终端、Superwhisper 语音输入等原生能力。
+  3. `omni.settings`：图形化控制中心，可视化切换模式与窗口策略，控制标题栏记忆，预览按键覆盖并提供快捷动作。
   4. `omni.snap-feedback`：分屏动效反馈 HUD，触发窗口吸附时在屏幕边缘渲染平滑高亮过渡动画。
   5. `omni.overview`：空间多工作区任务视图。工作区按 16:9 画布卡片自动平铺，窗口依 Compositor 矢量元数据（`hyprctl --batch`）映射真实相对位置，**严守 Hard Stop H-5，零像素截图**，支持 `1-9` 直达桌面、`Shift+1-9` 跨桌面瞬移与实时搜索。
-  （注：底部 Dock 由 Omarchy 4.5 官方原生提供并深度集成，无需第三方插件）。
+  （注：底部 Dock 由 Omarchy 4.5 官方原生提供并深度集成，无需第三方插件；`Monologue`、`Omacut`、`Signed` 等原生应用纳入自主尺寸保护）。
 
 ---
 
@@ -74,8 +77,18 @@ omni-profile switch mac
 # 轮转切换模式 (Omarchy -> Windows -> macOS -> 用户自定义 -> Omarchy)
 omni-profile cycle
 
-# 查看当前模式的快捷键速查表（终端高亮输出）
+# 查看当前模式的快捷键速查表（终端高亮输出；--with-omarchy 可并排查看 Omarchy 4.5 原生与智能体快捷键）
 omni-profile cheatsheet
+omni-profile cheatsheet windows --with-omarchy
+
+# 切换显示桌面 / 最小化当前工作区所有窗口（对齐 Windows 的 Win+D，再次按下恢复）
+omni-profile desktop
+
+# 窗口标题栏控制与记忆（支持 on / off / toggle / status，状态自动持久化记忆并跨重启恢复）
+omni-profile titlebars toggle
+omni-profile titlebars on
+omni-profile titlebars off
+omni-profile titlebars status
 
 # 窗口智能吸附（支持 left/right/up/down/center/third-left/third-right/two-thirds-left/two-thirds-right）
 omni-profile snap center
@@ -83,7 +96,7 @@ omni-profile snap center
 # 列出规范吸附布局编目（6 模板 × 37 分区，--json 机器可读输出）
 omni-profile snap-layouts
 
-# 执行系统健康诊断与一致性校验
+# 执行系统健康诊断与一致性校验（含硬件厂商探测与模式智能推荐）
 omni-profile doctor
 
 # 解除置顶固定窗口（支持当前焦点窗口、指定窗口地址或 --all 解除全部）
@@ -99,6 +112,7 @@ omni-profile persist status
 # 启用/重新启用持久化（缺省记录当前模式，可指定模式名；非法模式将被拒绝）
 omni-profile persist enable mac
 omni-profile persist enable mac --policy floating   # 同时记住窗口策略（follow-profile / tiled / scrolling / floating）
+omni-profile persist enable mac --titlebars on      # 同时记住标题栏状态（on / off）
 
 # 窗口策略：查看；设置为 跟随模式 / 平铺 / 滚动 / 浮动（平铺、滚动或浮动会覆盖各模式自带的设置，UI 标注「已覆盖」）
 omni-profile window-policy
@@ -162,12 +176,14 @@ omarchy-shell shell summon omni.snap-feedback '{"zone":"layouts"}'
 ```
 OmniPal/
 ├── schema/
-│   ├── actions.json          # 动作编目（单一事实源，定义 action_id、调度命令与默认参数）
+│   ├── actions.json          # 动作编目（单一事实源，收敛 44 个标准动作定义）
+│   ├── fixed_bindings.json   # 3 个全局固定快捷键（所有模式通用）
+│   ├── protected_bindings.json # 系统保护快捷键（Super+Space、Super+I，严禁模式覆盖）
 │   └── snap_layouts.json     # 吸附分区与布局模板编目（布局几何单一事实源）
 ├── profiles/
 │   ├── omarchy.json          # 原生模式（0 覆盖）
 │   ├── windows.json          # Windows 11 习惯模式（18 覆盖）
-│   └── mac.json              # macOS 习惯模式（21 覆盖）
+│   └── mac.json              # macOS 习惯模式（37 覆盖）
 ├── engine/
 │   └── engine.py             # 核心运行时引擎（Lua 批量求值、信号捕获与 tmpfs 广播）
 ├── bin/

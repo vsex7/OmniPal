@@ -10,15 +10,13 @@ import qs.Ui
 import "Icons.js" as Icons
 import "Safety.js" as Safety
 import "Takeovers.js" as Takeovers
+import "I18n.js" as I18n
 
 // OmniPal 设置与控制中心面板（omni.settings）
 //
 // 分类 Tab 导航的现代控制中心：
-// 唯一完整入口（设计评审第 4 项）：状态栏菜单只保留快速切换 + 「打开设置」，其余控制都在这里。
-// 1. 🎯 模式：动态枚举 profiles 一键热切换；选择「Omarchy 原生模式」即还原（经确认）；
-//    窗口策略（跟随模式 / 平铺 / 浮动，非跟随时标注「已覆盖」）
-// 2. ⚙️ 高级选项：可选配置持久化（显式开关）、贴靠布局菜单呼出、速查表
-// 3. 规则：按应用自动切换模式
+// 1. ⚙️ 高级选项：窗口策略（跟随模式 / 平铺 / 浮动）、可选配置持久化（显式开关）、贴靠布局菜单呼出、速查表
+// 2. 规则：按应用自动切换模式
 //
 // 架构铁律：本插件只做展示与触发，全部绑定/持久化操作均通过 omni-profile CLI
 // 交由 Engine 唯一执行，插件自身从不写任何 Hyprland 配置（AGENTS.md §2 / H-1）。
@@ -39,7 +37,7 @@ Item {
   readonly property string pluginId: (root.manifest && root.manifest.id) || "omni.settings"
 
   // ---------- 分类导航状态 ----------
-  // 0 = 模式 · 1 = 高级选项 · 2 = 使用洞察
+  // 0 = 选项 · 1 = 规则
   property int activeTab: 0
 
   // ---------- 应用规则（omni-profile rules ...，按应用自动切换模式） ----------
@@ -71,7 +69,7 @@ Item {
   // ---------- Engine 状态（tmpfs 单一事实源广播） ----------
   property string statePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/omnipal/state.json"
   property string currentMode: "omarchy"
-  property string currentName: "Omarchy 原生模式"
+  property string currentName: "原生"
   property int activeBindingsCount: 0
   property int enginePid: 0
   property string engineUpdatedAt: ""
@@ -86,6 +84,15 @@ Item {
   property string persistPath: ""
   property bool persistBusy: false
 
+  property string langPath: (Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")) + "/omnipal/language"
+  property string currentLang: "zh"
+  function t(text) { return I18n.t(text, root.currentLang) }
+  function toggleLanguage() {
+    var nextLang = root.currentLang === "en" ? "zh" : "en"
+    root.currentLang = nextLang
+    langFile.write(nextLang + "\n")
+  }
+
   // 模式元数据：唯一来源为 profiles/*.json（开窗时经 omni-profile list --json 加载），此处不再硬编码。
   property var modeItems: []
   // 各模式会接管哪些 Omarchy 原生快捷键（omni-profile doctor --json -> takeovers）
@@ -97,20 +104,26 @@ Item {
   // 应用规则自动切换标记（state.json auto）
   property var autoInfo: null
   // 固定入口（schema/fixed_bindings.json），所有模式通用
-  readonly property string fixedKeysText: "固定入口（所有模式通用）：Super+Ctrl+/ 速查表 · Super+Alt+I 控制中心 · Super+Alt+O 概览"
+  readonly property string fixedKeysText: root.currentLang === "en"
+    ? "Fixed shortcuts (all profiles): Super+Ctrl+/ Cheat Sheet · Super+Alt+I Settings · Super+Alt+O Overview"
+    : "固定入口（所有模式通用）：Super+Ctrl+/ 速查表 · Super+Alt+I 控制中心 · Super+Alt+O 概览"
 
   function windowModeLabel(m) {
+    if (root.currentLang === "en") {
+      if (m === "floating") return "Floating"
+      if (m === "scrolling") return "Scrolling"
+      return "Tiled"
+    }
     if (m === "floating") return "浮动"
     if (m === "scrolling") return "滚动"
     return "平铺"
   }
-  function policyLabel(p) { return p === "follow-profile" ? "跟随模式" : root.windowModeLabel(p) }
-  // 窗口策略取值（docs/GLOSSARY.md：跟随模式 / 平铺 / 滚动 / 浮动）
+  function policyLabel(p) { return p === "follow-profile" ? (root.currentLang === "en" ? "Follow" : "跟随模式") : root.windowModeLabel(p) }
+  // 窗口策略取值（docs/GLOSSARY.md：跟随模式 / 平铺 / 浮动）
   readonly property var policyOptions: [
-    { value: "follow-profile", label: "跟随模式" },
-    { value: "tiled", label: "平铺" },
-    { value: "scrolling", label: "滚动" },
-    { value: "floating", label: "浮动" }
+    { value: "follow-profile", label: root.policyLabel("follow-profile") },
+    { value: "tiled", label: root.policyLabel("tiled") },
+    { value: "floating", label: root.policyLabel("floating") }
   ]
   // 主题样式令牌：直接取 Omarchy Shell 的 qs.Commons（[menu] 表面，与 omarchy.menu /
   // omarchy.emojis 一致）。卡片/芯片用 Style 的 normal 控件 fill/border 令牌（见 Card 组件）。
@@ -136,10 +149,11 @@ Item {
   function open(payloadJson) {
     root.opened = true
     stateFile.reload()
+    langFile.reload()
     listProc.running = true
     persistProc.running = true
     doctorProc.running = true
-    if (root.activeTab === 2) rulesListProc.running = true
+    if (root.activeTab === 1) rulesListProc.running = true
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -241,7 +255,7 @@ Item {
     }
   }
 
-  // iOS / macOS 风格滑动开关：显式触发持久化开/关，完成后刷新状态
+  // 平滑滑动开关：显式触发持久化开/关，完成后刷新状态
   function togglePersist() {
     if (root.persistBusy) return
     root.persistBusy = true
@@ -285,7 +299,7 @@ Item {
     try {
       var d = JSON.parse(rawText)
       root.currentMode = d.mode || "omarchy"
-      root.currentName = d.name || "Omarchy 原生模式"
+      root.currentName = d.name || "原生"
       root.activeBindingsCount = d.active_bindings_count || 0
       root.enginePid = d.pid || 0
       root.engineUpdatedAt = d.updated_at || ""
@@ -320,7 +334,7 @@ Item {
   }
 
   onActiveTabChanged: {
-    if (root.activeTab === 2) rulesListProc.running = true
+    if (root.activeTab === 1) rulesListProc.running = true
   }
 
   Timer {
@@ -396,6 +410,19 @@ Item {
     onLoadFailed: {
       root.engineRunning = false
       stateRetryTimer.restart()
+    }
+    onFileChanged: reload()
+  }
+
+  FileView {
+    id: langFile
+    path: root.langPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: {
+      var txt = (text() || "").trim().toLowerCase()
+      if (txt === "en" || txt === "zh") root.currentLang = txt
     }
     onFileChanged: reload()
   }
@@ -546,7 +573,6 @@ Item {
           }
           var num = event.key - Qt.Key_1
           if (num >= 0 && num < 9 && num < root.modeItems.length) {
-            root.activeTab = 0
             root.switchModeWithUndo(root.modeItems[num].id)
             event.accepted = true
           } else if (event.key === Qt.Key_R && (event.modifiers & Qt.ShiftModifier)) {
@@ -559,10 +585,10 @@ Item {
             root.openCheatSheet()
             event.accepted = true
           } else if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier))) {
-            root.activeTab = (root.activeTab + 2) % 3
+            root.activeTab = (root.activeTab + 1) % 2
             event.accepted = true
           } else if (event.key === Qt.Key_Tab) {
-            root.activeTab = (root.activeTab + 1) % 3
+            root.activeTab = (root.activeTab + 1) % 2
             event.accepted = true
           }
         }
@@ -588,9 +614,9 @@ Item {
           anchors.fill: parent
           z: 10
           opened: root.confirmAction !== ""
-          message: "切换到 Omarchy 原生模式？将撤销全部快捷键覆盖。"
-          cancelText: "取消"
-          confirmText: "切换"
+          message: root.currentLang === "en" ? "Switch to Omarchy Native profile? All keybinding overrides will be revoked." : "切换到 Omarchy 原生模式？将撤销全部快捷键覆盖。"
+          cancelText: root.t("取消")
+          confirmText: root.t("切换")
           onCanceled: root.cancelConfirm()
           onConfirmed: root.acceptConfirm()
         }
@@ -607,7 +633,7 @@ Item {
             height: Style.space(32)
 
             Text {
-              text: "OmniPal 控制中心"
+              text: root.t("OmniPal 控制中心")
               font.family: Style.font.family
               font.pixelSize: Style.font.heading
               color: root.foreground
@@ -615,14 +641,48 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
             }
 
-            Text {
-              text: root.engineRunning ? "运行时内存热切换引擎在线" : "引擎未运行"
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              color: Util.alpha(root.foreground, 0.55)
+            Row {
+              spacing: Style.space(10)
               anchors.right: parent.right
-              anchors.rightMargin: Style.space(12)
               anchors.verticalCenter: parent.verticalCenter
+
+              // 语言切换标识 (en / zh)，单击切换语言
+              BorderSurface {
+                id: settingsLangPill
+                implicitWidth: settingsLangText.implicitWidth + Style.space(12)
+                implicitHeight: settingsLangText.implicitHeight + Style.space(4)
+                anchors.verticalCenter: parent.verticalCenter
+                color: settingsLangMouse.containsMouse ? Style.normalFillFor(root.foreground, root.accent) : "transparent"
+                borderSpec: Border.controlSpec(settingsLangMouse.containsMouse ? "selected" : "normal", root.foreground, root.accent)
+                radius: Style.cornerRadius
+
+                Text {
+                  id: settingsLangText
+                  textFormat: Text.PlainText
+                  anchors.centerIn: parent
+                  text: root.currentLang
+                  color: settingsLangMouse.containsMouse ? root.accent : root.foreground
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.body
+                  font.weight: Font.Medium
+                }
+
+                MouseArea {
+                  id: settingsLangMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.toggleLanguage()
+                }
+              }
+
+              Text {
+                text: root.engineRunning ? root.t("运行时内存热切换引擎在线") : root.t("引擎未运行")
+                font.family: Style.font.family
+                font.pixelSize: Style.font.body
+                color: Util.alpha(root.foreground, 0.55)
+                anchors.verticalCenter: parent.verticalCenter
+              }
             }
           }
 
@@ -630,8 +690,8 @@ Item {
           // Native ButtonGroup ("pick one of N"), same control the shell's own settings use.
           ButtonGroup {
             id: tabBar
-            readonly property var tabs: ["模式", "选项", "规则"]
-            options: tabs.map(function(t, i) { return { value: String(i), label: t } })
+            readonly property var tabs: ["选项", "规则"]
+            options: tabs.map(function(t, i) { return { value: String(i), label: root.t(t) } })
             value: String(root.activeTab)
             focusable: false
             foreground: root.foreground
@@ -656,8 +716,8 @@ Item {
                   verticalCenter: parent.verticalCenter
                 }
                 text: root.engineRunning
-                  ? ("Engine PID " + root.enginePid + " · 当前覆盖 " + root.activeBindingsCount + " 组快捷键 · " + root.currentName)
-                  : "Engine 未检测到运行 · 执行 omni-profile daemon 启动常驻"
+                  ? ("Engine PID " + root.enginePid + " · " + (root.currentLang === "en" ? ("Active: " + root.activeBindingsCount + " bindings") : ("当前覆盖 " + root.activeBindingsCount + " 组快捷键")) + " · " + (root.currentLang === "en" && root.currentName === "原生" ? "Native" : root.currentName))
+                  : (root.currentLang === "en" ? "Engine not detected · Run omni-profile daemon to start" : "Engine 未检测到运行 · 执行 omni-profile daemon 启动常驻")
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
                 color: root.engineRunning ? Qt.darker(root.foreground, 1.4) : root.dangerColor
@@ -678,215 +738,12 @@ Item {
           width: parent.width
           height: parent.height
 
-          // ===== Tab 0：模式 =====
-          Item {
-            id: profilesTab
-            anchors.fill: parent
-            opacity: root.activeTab === 0 ? 1.0 : 0.0
-            visible: root.activeTab === 0 || opacity > 0.0
-            Behavior on opacity { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutQuad } }
-
-            Flickable {
-              anchors.fill: parent
-              contentWidth: width
-              contentHeight: profilesCol.implicitHeight
-              clip: true
-              boundsBehavior: Flickable.StopAtBounds
-
-              Column {
-                id: profilesCol
-                width: parent.width
-                spacing: Style.space(12)
-
-                Text {
-                  text: "选择习惯按键模式 · 点击卡片或按数字键 1 ~ " + root.modeItems.length + " 一键热切换"
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.body
-                  color: Util.alpha(root.foreground, 0.7)
-                }
-
-                // Single-column selectable rows (plugins/menu/Menu.qml style):
-                // no row border, selected = fg@0.08 fill + accent text, glyph in fg.
-                Column {
-                  width: parent.width
-                  spacing: Style.space(3)
-
-                  Repeater {
-                    model: root.modeItems
-
-                    delegate: Rectangle {
-                      id: modeCard
-                      required property var modelData
-                      required property int index
-
-                      readonly property bool isActive: root.currentMode === modelData.id
-                      readonly property var takeover: root.takeoverOf(modelData.id)
-                      readonly property bool hot: modeCardHover.containsMouse
-                      readonly property color rowText: isActive ? root.accent : root.foreground
-                      width: parent.width
-                      height: Math.max(Style.space(50), modeCol.implicitHeight + Style.spacing.lg * 2)
-                      radius: Style.cornerRadius
-                      color: (isActive || hot) ? Util.alpha(root.foreground, 0.08) : "transparent"
-
-                      MouseArea {
-                        id: modeCardHover
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.selectMode(modeCard.modelData.id)
-                      }
-
-                      Text {
-                        id: modeBadge
-                        anchors { left: parent.left; leftMargin: Style.spacing.rowPaddingX; verticalCenter: parent.verticalCenter }
-                        width: Style.space(28)
-                        text: Icons.mode(modeCard.modelData.id)
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.iconLarge
-                        color: modeCard.rowText
-                      }
-
-                      Column {
-                        id: modeCol
-                        anchors {
-                          left: modeBadge.right; leftMargin: Style.spacing.lg
-                          right: modeKeycap.left; rightMargin: Style.spacing.lg
-                          verticalCenter: parent.verticalCenter
-                        }
-                        spacing: Style.spacing.xxs
-
-                        Text {
-                          id: modeNameText
-                          width: parent.width
-                          text: modeCard.modelData.name
-                          font.family: Style.font.menuFamily
-                          font.pixelSize: Style.font.body
-                          font.weight: Font.Medium
-                          color: modeCard.rowText
-                          elide: Text.ElideRight
-                        }
-
-                        Text {
-                          width: parent.width
-                          text: modeCard.modelData.count + " 组按键 · "
-                            + (modeCard.modelData.source === "user"
-                                ? (modeCard.modelData.override ? "用户自定义（覆盖内置）" : "用户自定义")
-                                : "内置")
-                            + " · " + root.windowModeLabel(modeCard.modelData.windowMode)
-                            + (root.policyOverridden ? "（已覆盖：全局" + root.windowModeLabel(root.windowPolicy) + "）" : "")
-                            + (modeCard.modelData.id === "omarchy" ? " · 选择即还原：撤销全部快捷键覆盖（Shift+R）" : "")
-                            + (modeCard.modelData.desc ? " · " + modeCard.modelData.desc : "")
-                          font.family: Style.font.family
-                          font.pixelSize: Style.font.body
-                          color: Qt.darker(root.foreground, 1.4)
-                          elide: Text.ElideRight
-                        }
-
-                        // 接管的原生快捷键：组合键 · 原来的功能，固定入口单独标注
-                        Repeater {
-                          model: modeCard.takeover.items.slice(0, 4)
-
-                          delegate: Text {
-                            required property var modelData
-                            width: modeCol.width
-                            textFormat: Text.PlainText
-                            text: modelData.combo + "　原来的功能：" + modelData.was
-                              + (modelData.fixed ? "　· 固定入口" : "")
-                            font.family: Style.font.family
-                            font.pixelSize: Style.font.body
-                            color: modelData.fixed ? root.accent : Commons.Color.muted
-                            elide: Text.ElideRight
-                          }
-                        }
-
-                        Text {
-                          visible: modeCard.takeover.items.length > 4 || modeCard.takeover.items.length === 0
-                          width: parent.width
-                          textFormat: Text.PlainText
-                          text: modeCard.takeover.items.length > 4
-                            ? "另有 " + (modeCard.takeover.items.length - 4) + " 个，完整列表见速查表"
-                            : (root.doctorData ? modeCard.takeover.hint : "正在读取接管的原生快捷键…")
-                          font.family: Style.font.family
-                          font.pixelSize: Style.font.body
-                          color: Commons.Color.muted
-                          elide: Text.ElideRight
-                        }
-                      }
-
-                      // Number hint (1..N) or plain "active" in accent; no pill.
-                      Text {
-                        id: modeKeycap
-                        anchors { right: parent.right; rightMargin: Style.spacing.rowPaddingX; verticalCenter: parent.verticalCenter }
-                        text: modeCard.isActive ? (root.autoInfo ? "自动" : "active") : String(modeCard.index + 1)
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.body
-                        color: modeCard.isActive ? root.accent : Qt.darker(root.foreground, 1.4)
-                      }
-                    }
-                  }
-                }
-
-                // 窗口策略：跟随模式 / 平铺 / 浮动；非跟随模式时标注「已覆盖」
-                Item {
-                  width: parent.width
-                  implicitHeight: Math.max(policyTitle.implicitHeight, policyBadge.implicitHeight)
-
-                  Text {
-                    id: policyTitle
-                    anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                    text: "窗口策略"
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                    font.weight: Font.Medium
-                    color: root.foreground
-                  }
-
-                  Text {
-                    id: policyBadge
-                    anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                    textFormat: Text.PlainText
-                    text: (root.policyOverridden ? "已覆盖 · " : "") + "生效："
-                      + root.windowModeLabel(root.policyOverridden ? root.windowPolicy : root.modeWindowModeOf(root.currentMode))
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.body
-                    color: root.policyOverridden ? root.accent : Qt.darker(root.foreground, 1.4)
-                  }
-                }
-
-                ButtonGroup {
-                  id: policyGroup
-                  width: parent.width
-                  focusable: false
-                  options: root.policyOptions
-                  value: root.windowPolicy
-                  foreground: root.foreground
-                  accent: root.accent
-                  background: "transparent"
-                  fontSize: Style.font.body
-                  onChanged: function(v) { root.setWindowPolicy(v) }
-                }
-
-                Text {
-                  width: parent.width
-                  textFormat: Text.PlainText
-                  text: root.policyOverridden
-                    ? "全局" + root.windowModeLabel(root.windowPolicy) + "，已覆盖各模式自带的平铺/浮动设置；选择「跟随模式」可恢复。"
-                    : "跟随模式：由当前模式决定平铺或浮动。"
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.body
-                  color: Qt.darker(root.foreground, 1.4)
-                  wrapMode: Text.Wrap
-                }
-              }
-            }
-          }
-
-          // ===== Tab 1：高级选项 =====
+          // ===== Tab 0：高级选项 =====
           Item {
             id: prefsTab
             anchors.fill: parent
-            opacity: root.activeTab === 1 ? 1.0 : 0.0
-            visible: root.activeTab === 1 || opacity > 0.0
+            opacity: root.activeTab === 0 ? 1.0 : 0.0
+            visible: root.activeTab === 0 || opacity > 0.0
             Behavior on opacity { NumberAnimation { duration: root.theme.duration(200); easing.type: Easing.OutQuad } }
 
             Flickable {
@@ -900,6 +757,76 @@ Item {
                 id: prefsCol
                 width: parent.width
                 spacing: Style.space(10)
+
+                // --- 窗口策略控制卡片 ---
+                Card {
+                  id: policyCard
+                  width: parent.width
+                  height: policyCardBody.implicitHeight + Style.space(28)
+
+                  Column {
+                    id: policyCardBody
+                    anchors {
+                      top: parent.top; topMargin: Style.space(14)
+                      left: parent.left; leftMargin: Style.space(14)
+                      right: parent.right; rightMargin: Style.space(14)
+                    }
+                    spacing: Style.space(8)
+
+                    Item {
+                      width: parent.width
+                      implicitHeight: Math.max(policyTitle.implicitHeight, policyBadge.implicitHeight)
+
+                      Text {
+                        id: policyTitle
+                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
+                        text: root.t("窗口策略")
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.body
+                        font.weight: Font.Medium
+                        color: root.foreground
+                      }
+
+                      Text {
+                        id: policyBadge
+                        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                        textFormat: Text.PlainText
+                        text: (root.policyOverridden ? (root.currentLang === "en" ? "overridden · " : "已覆盖 · ") : "") + (root.currentLang === "en" ? "Effective: " : "生效：")
+                          + root.windowModeLabel(root.policyOverridden ? root.windowPolicy : root.modeWindowModeOf(root.currentMode))
+                        font.family: Style.font.family
+                        font.pixelSize: Style.font.body
+                        color: root.policyOverridden ? root.accent : Qt.darker(root.foreground, 1.4)
+                      }
+                    }
+
+                    ButtonGroup {
+                      id: policyGroup
+                      width: parent.width
+                      focusable: false
+                      options: root.policyOptions
+                      value: root.windowPolicy
+                      foreground: root.foreground
+                      accent: root.accent
+                      background: "transparent"
+                      fontSize: Style.font.body
+                      onChanged: function(v) { root.setWindowPolicy(v) }
+                    }
+
+                    Text {
+                      width: parent.width
+                      textFormat: Text.PlainText
+                      text: root.policyOverridden
+                        ? (root.currentLang === "en"
+                           ? ("Global " + root.windowModeLabel(root.windowPolicy) + ", overrides per-profile window modes; select 'Follow' to restore.")
+                           : ("全局" + root.windowModeLabel(root.windowPolicy) + "，已覆盖各模式自带的平铺/浮动设置；选择「跟随模式」可恢复。"))
+                        : (root.currentLang === "en" ? "Follow: window mode is decided by current profile." : "跟随模式：由当前模式决定平铺或浮动。")
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.body
+                      color: Qt.darker(root.foreground, 1.4)
+                      wrapMode: Text.Wrap
+                    }
+                  }
+                }
 
                 // --- 可选配置持久化控制卡片 ---
                 Card {
@@ -934,7 +861,7 @@ Item {
                         }
                         Text {
                           anchors.verticalCenter: parent.verticalCenter
-                          text: "配置持久化（关机/重启记忆）"
+                          text: root.t("配置持久化（关机/重启记忆）")
                           font.family: Style.font.family
                           font.pixelSize: Style.font.body
                           color: root.foreground
@@ -955,7 +882,7 @@ Item {
 
                     Text {
                       width: parent.width
-                      text: "默认开启，关机或重启后自动恢复上次使用的模式与窗口策略；关闭时重启恢复默认。"
+                      text: root.t("默认开启，关机或重启后自动恢复上次使用的模式与窗口策略；关闭时重启恢复默认。")
                       font.family: Style.font.family
                       font.pixelSize: Style.font.body
                       color: Util.alpha(root.foreground, 0.7)
@@ -971,10 +898,12 @@ Item {
                         id: persistStatusText
                         anchors { fill: parent; leftMargin: Style.space(10); rightMargin: Style.space(10); topMargin: Style.space(6); bottomMargin: Style.space(6) }
                         text: root.persistBusy
-                          ? "正在同步持久化状态…"
+                          ? root.t("正在同步持久化状态…")
                           : (root.persistEnabled
-                              ? ("已启用 · 自动记忆关机前配置：" + root.modeNameOf(root.persistProfile) + "（" + root.persistProfile + "）" + (root.persistPolicy ? " · " + root.policyLabel(root.persistPolicy) : "") + (root.persistUpdatedAt ? " · 更新于 " + root.fmtTs(root.persistUpdatedAt) : ""))
-                              : "已禁用 · 关机/重启恢复默认，磁盘零残留")
+                              ? (root.currentLang === "en"
+                                  ? ("Enabled · Remembers config: " + (root.persistProfile === "omarchy" ? "Native" : root.modeNameOf(root.persistProfile)) + " (" + root.persistProfile + ")" + (root.persistPolicy ? " · " + root.policyLabel(root.persistPolicy) : "") + (root.persistUpdatedAt ? " · updated " + root.fmtTs(root.persistUpdatedAt) : ""))
+                                  : ("已启用 · 自动记忆关机前配置：" + root.modeNameOf(root.persistProfile) + "（" + root.persistProfile + "）" + (root.persistPolicy ? " · " + root.policyLabel(root.persistPolicy) : "") + (root.persistUpdatedAt ? " · 更新于 " + root.fmtTs(root.persistUpdatedAt) : "")))
+                              : root.t("已禁用 · 关机/重启恢复默认，磁盘零残留"))
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
                         color: root.persistEnabled ? root.okColor : Util.alpha(root.foreground, 0.65)
@@ -1010,7 +939,7 @@ Item {
                       }
                       Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "窗口贴靠快捷操作"
+                        text: root.t("窗口贴靠快捷操作")
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
                         color: root.foreground
@@ -1019,7 +948,7 @@ Item {
 
                     Text {
                       width: parent.width
-                      text: "无需记忆键位，随时呼出可视化贴靠布局菜单，纯键盘完成分屏贴靠。"
+                      text: root.t("无需记忆键位，随时呼出可视化贴靠布局菜单，纯键盘完成分屏贴靠。")
                       font.family: Style.font.family
                       font.pixelSize: Style.font.body
                       color: Util.alpha(root.foreground, 0.7)
@@ -1029,7 +958,7 @@ Item {
                     Button {
                       width: parent.width
                       iconText: Icons.glyph.snap
-                      text: "呼出贴靠布局菜单"
+                      text: root.t("呼出贴靠布局菜单")
                       bordered: true
                       active: true
                       foreground: root.foreground
@@ -1044,7 +973,7 @@ Item {
                 Button {
                   width: parent.width
                   iconText: Icons.glyph.cheat
-                  text: "快捷键速查表 (S)"
+                  text: root.t("快捷键速查表 (S)")
                   bordered: true
                   foreground: root.foreground
                   accent: root.accent
@@ -1065,12 +994,12 @@ Item {
             }
           }
 
-          // ===== Tab 2：应用规则（按应用自动切换模式） =====
+          // ===== Tab 1：应用规则（按应用自动切换模式） =====
           Item {
             id: rulesTab
             anchors.fill: parent
-            opacity: root.activeTab === 2 ? 1.0 : 0.0
-            visible: root.activeTab === 2 || opacity > 0.0
+            opacity: root.activeTab === 1 ? 1.0 : 0.0
+            visible: root.activeTab === 1 || opacity > 0.0
             Behavior on opacity { NumberAnimation { duration: root.theme.duration(140); easing.type: Easing.OutQuad } }
 
             Flickable {
@@ -1098,7 +1027,7 @@ Item {
                       spacing: Style.space(8)
                       Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "按应用自动切换"
+                        text: root.t("按应用自动切换")
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
                         color: root.foreground
@@ -1112,7 +1041,7 @@ Item {
                       }
                       Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: root.appRulesEnabled ? "已启用" : "已停用"
+                        text: root.appRulesEnabled ? root.t("已启用") : root.t("已停用")
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
                         color: Qt.darker(root.foreground, 1.4)
@@ -1123,13 +1052,13 @@ Item {
                       spacing: Style.space(6)
                       Text {
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "没有匹配时："
+                        text: root.t("没有匹配时：")
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
                         color: Util.alpha(root.foreground, 0.7)
                       }
                       Repeater {
-                        model: [{ id: "none", label: "手动选择的模式" }].concat(root.modeItems.map(function(m) { return { id: m.id, icon: Icons.mode(m.id), label: m.id } }))
+                        model: [{ id: "none", label: root.t("手动选择的模式") }].concat(root.modeItems.map(function(m) { return { id: m.id, icon: Icons.mode(m.id), label: (root.currentLang === "en" && m.name === "原生" ? "Native" : (m.name || m.id)) } }))
                         delegate: Chip {
                           id: defChip
                           required property var modelData
@@ -1174,7 +1103,7 @@ Item {
                         color: root.foreground
                       }
                       Text {
-                        text: ({ exact: "精确", prefix: "前缀", regex: "正则" })[ruleRow.modelData.match || "exact"]
+                        text: root.t(({ exact: "精确", prefix: "前缀", regex: "正则" })[ruleRow.modelData.match || "exact"])
                         font.family: Style.font.family
                         font.pixelSize: Style.font.body
                         color: Util.alpha(root.foreground, 0.55)
@@ -1192,8 +1121,8 @@ Item {
                       spacing: Style.space(6)
                       Repeater {
                         model: [
-                          { label: ruleRow.modelData.enabled === false ? "启用" : "停用", args: ["toggle", ruleRow.modelData["class"]], danger: false },
-                          { label: "删除", args: ["remove", ruleRow.modelData["class"]], danger: true }
+                          { label: ruleRow.modelData.enabled === false ? root.t("启用") : root.t("停用"), args: ["toggle", ruleRow.modelData["class"]], danger: false },
+                          { label: root.t("删除"), args: ["remove", ruleRow.modelData["class"]], danger: true }
                         ]
                         delegate: Chip {
                           id: ruleBtn
@@ -1212,7 +1141,7 @@ Item {
                   visible: root.appRules.length === 0
                   width: parent.width
                   horizontalAlignment: Text.AlignHCenter
-                  text: "还没有规则。下面填好窗口类名和模式就能添加，比如 code 对应 mac。"
+                  text: root.t("还没有规则。下面填好窗口类名和模式就能添加，比如 code 对应 mac。")
                   font.family: Style.font.family
                   font.pixelSize: Style.font.body
                   color: Util.alpha(root.foreground, 0.55)
@@ -1235,18 +1164,18 @@ Item {
                         width: Style.space(180)
                         text: root.newRuleClass
                         onTextEdited: root.newRuleClass = text
-                        placeholderText: "窗口类名"
+                        placeholderText: root.t("窗口类名")
                         foreground: root.foreground
                         accent: root.accent
                       }
                       Chip {
-                        text: "填入当前应用"
+                        text: root.t("填入当前应用")
                         anchors.verticalCenter: parent.verticalCenter
                         onClicked: activeWinProc.running = true
                       }
                       ButtonGroup {
                         anchors.verticalCenter: parent.verticalCenter
-                        options: [{ value: "exact", label: "精确" }, { value: "prefix", label: "前缀" }, { value: "regex", label: "正则" }]
+                        options: [{ value: "exact", label: root.t("精确") }, { value: "prefix", label: root.t("前缀") }, { value: "regex", label: root.t("正则") }]
                         value: root.newRuleMatch
                         foreground: root.foreground
                         background: "transparent"
@@ -1272,7 +1201,7 @@ Item {
                       }
                       Chip {
                         readonly property bool ready: root.newRuleClass.trim() !== "" && root.newRuleMode !== ""
-                        text: "添加"
+                        text: root.t("添加")
                         iconText: Icons.glyph.plus
                         active: ready
                         enabled: ready
@@ -1291,9 +1220,10 @@ Item {
                   width: parent.width
                   text: root.rulesError !== "" ? root.rulesError
                     : (root.appRuleMatch && root.appRuleMatch.window_class
-                      ? ("当前应用 " + root.appRuleMatch.window_class + "：" + (root.appRuleMatch.rule
-                          ? ("命中规则，切到 " + root.appRuleMatch.rule.mode) : "没有命中规则"))
-                      : "守护进程运行后，这里会显示当前应用匹配到的规则")
+                      ? (root.currentLang === "en"
+                          ? ("Active app " + root.appRuleMatch.window_class + ": " + (root.appRuleMatch.rule ? ("matched rule, switched to " + root.appRuleMatch.rule.mode) : "no rule matched"))
+                          : ("当前应用 " + root.appRuleMatch.window_class + "：" + (root.appRuleMatch.rule ? ("命中规则，切到 " + root.appRuleMatch.rule.mode) : "没有命中规则")))
+                      : (root.currentLang === "en" ? "Once daemon runs, active app matched rules will show here" : "守护进程运行后，这里会显示当前应用匹配到的规则"))
                   wrapMode: Text.WordWrap
                   font.family: Style.font.family
                   font.pixelSize: Style.font.body

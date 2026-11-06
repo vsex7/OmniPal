@@ -98,6 +98,9 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                         engine._apply_window_policy(force=True)
                     else:
                         engine._apply_window_policy(force=True)
+            persisted_tb = engine.get_persisted_titlebars()
+            if persisted_tb is not None:
+                engine.set_titlebars(persisted_tb, sync_persistence=False)
 
             while not stop_event.is_set():
                 try:
@@ -133,6 +136,9 @@ def _watch_hyprland_socket2(engine: OmniPalEngine, stop_event: threading.Event):
                             else:
                                 engine._snapshot_baseline_bindings(force=True)
                                 engine.apply_fixed_bindings()
+                            persisted_tb = engine.get_persisted_titlebars()
+                            if persisted_tb is not None:
+                                engine.set_titlebars(persisted_tb, sync_persistence=False)
                         elif line.startswith("openwindow>>"):
                             eff_mode = engine.get_effective_window_mode()
                             if eff_mode == "floating":
@@ -238,6 +244,15 @@ def run_daemon():
     elif persisted_status.get("enabled"):
         cur_mode = engine.get_state().get("mode") or "windows"
         engine.set_persistence(True, profile=cur_mode)
+
+    # Restore persisted titlebars choice if set
+    persisted_titlebars = engine.get_persisted_titlebars()
+    if persisted_titlebars is not None:
+        try:
+            print(f"📦 Restoring persisted window titlebars on startup: {'enabled' if persisted_titlebars else 'disabled'}", flush=True)
+            engine.set_titlebars(persisted_titlebars, sync_persistence=False)
+        except Exception as _e:
+            _debug(f"startup titlebars apply failed: {_e}")
 
     stop_event = threading.Event()
     worker = threading.Thread(target=_watch_hyprland_socket2, args=(engine, stop_event), daemon=True)

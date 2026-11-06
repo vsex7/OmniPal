@@ -24,6 +24,7 @@ var CATEGORY_LABELS = {
   app: "应用快捷键转发",
   tools: "效率工具",
   system: "会话与安全",
+  omarchy: "Omarchy 原生与智能体",
   omnipal: "OmniPal 固定入口（所有模式通用）",
   other: "其他"
 };

@@ -70,14 +70,14 @@ class TestFixedKey(unittest.TestCase):
                                  f"{mode} {r['action']}: fixed_key is not the fixed combo")
 
     def test_merged_row_keeps_merged_key_but_single_fixed_key(self):
-        # windows omni_settings: profile alias SUPER+I merges with the fixed
-        # entry SUPER+ALT+I; the main table keeps the merged key (intentional),
+        # windows task_view: profile alias SUPER+TAB merges with the fixed
+        # entry SUPER+ALT+O; the main table keeps the merged key (intentional),
         # but fixed_key must hold only the fixed combo.
         rows = {r["action"]: r for r in _engine().cheatsheet("windows")}
-        row = rows["omni_settings"]
+        row = rows["task_view"]
         self.assertIn("/", row["key"], "alias row must stay merged")
-        self.assertIn("SUPER + I", row["key"])
-        self.assertEqual(row["fixed_key"], "SUPER + ALT + I")
+        self.assertIn("SUPER + TAB", row["key"])
+        self.assertEqual(row["fixed_key"], "SUPER + ALT + O")
 
     def test_guide_combos_are_fixed_only_in_every_mode(self):
         # Acceptance: the onboarding guide (fixed rows via fixed_key) shows

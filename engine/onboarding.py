@@ -115,6 +115,13 @@ def _sh_quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+MENU_MODE_ICONS = {
+    "windows": "\U000F05B3",  # 󰖳 (Windows)
+    "mac": "\U000F0035",      # 󰀵 (macOS)
+    "omarchy": "\U000F0570",  # 󰕰 (Omarchy)
+}
+
+
 def render_menu_block(profiles: List[Dict[str, Any]], cli: str) -> str:
     """The managed block. Mode rows are a snapshot of `omni-profile list --json`;
     install/import re-render it. `checked` reads the tmpfs state broadcast (cheap,
@@ -128,8 +135,9 @@ def render_menu_block(profiles: List[Dict[str, Any]], cli: str) -> str:
         pid = str(p.get("id", ""))
         if not re.match(r"^[a-z0-9][a-z0-9_-]{0,31}$", pid):
             continue
+        mode_icon = MENU_MODE_ICONS.get(pid, "\uf11c")
         lines.append(_row(f"{MENU_ROOT_ID}.mode-{pid}", {
-            "icon": "\uf11c",
+            "icon": mode_icon,
             "label": str(p.get("name") or pid),
             "description": str(p.get("description") or ""),
             "checked": f"[[ \"$(jq -r .mode {state} 2>/dev/null)\" == {pid} ]]",
@@ -139,10 +147,10 @@ def render_menu_block(profiles: List[Dict[str, Any]], cli: str) -> str:
         "icon": "\uf013", "label": "打开设置",
         "action": "omarchy-shell shell summon omni.settings '{}'"}))
     lines.append(_row(f"{MENU_ROOT_ID}.cheatsheet", {
-        "icon": "\uf059", "label": "速查表",
+        "icon": "\uf11c", "label": "速查表",
         "action": "omarchy-shell shell summon omni.cheat-sheet '{}'"}))
     lines.append(_row(f"{MENU_ROOT_ID}.guide", {
-        "icon": "\uf05a", "label": "上手指南",
+        "icon": "\U000F00BA", "label": "上手指南",
         "action": "omarchy-shell shell summon omni.cheat-sheet '{\"guide\":true}'"}))
     lines.append(BLOCK_END)
     return "\n".join(lines) + "\n"

@@ -26,6 +26,8 @@ LUA_DISPATCHERS = {
     "toggle_floating": "hl.dsp.window.float({ action = 'toggle' })",
     "workspace_next": "hl.dsp.focus({ workspace = 'm+1' })",
     "workspace_prev": "hl.dsp.focus({ workspace = 'm-1' })",
+    "move_window_monitor_left": '((type(o) == "table" and type(o.workspaces) == "table" and type(o.workspaces.move_window_to_monitor) == "function") and o.workspaces.move_window_to_monitor("l") or hl.dsp.window.move({ monitor = "l" }))',
+    "move_window_monitor_right": '((type(o) == "table" and type(o.workspaces) == "table" and type(o.workspaces.move_window_to_monitor) == "function") and o.workspaces.move_window_to_monitor("r") or hl.dsp.window.move({ monitor = "r" }))',
     # Single-expression Lua so they embed directly into o.bind(combo, name, <expr>).
     # Without these, maximize/restore fall through to an empty default_arg and bind a no-op.
     "maximize_window": "hl.dsp.window.fullscreen({ mode = 'maximized' })",
@@ -308,7 +310,7 @@ class OmniPalEngine:
     # --- Configuration persistence (~/.config/omnipal/persistence.json; default enabled to remember last state) ---
 
     def get_persistence_status(self) -> Dict[str, Any]:
-        """Returns the persistence state: {enabled, profile, window_policy, path, updated_at}.
+        """Returns the persistence state: {enabled, profile, window_policy, titlebars, path, updated_at}.
         By default, configuration persistence is enabled to preserve user choice across reboots,
         unless explicitly disabled in ~/.config/omnipal/persistence.json."""
         path = persistence_file_path()
@@ -316,6 +318,7 @@ class OmniPalEngine:
             "enabled": True,
             "profile": None,
             "window_policy": None,
+            "titlebars": None,
             "path": str(path),
             "updated_at": None
         }
@@ -335,6 +338,8 @@ class OmniPalEngine:
                 if status["enabled"]
                 else None
             )
+            tb = data.get("titlebars")
+            status["titlebars"] = tb if status["enabled"] and isinstance(tb, bool) else None
             status["updated_at"] = data.get("updated_at")
         return status
 
@@ -354,11 +359,21 @@ class OmniPalEngine:
             return policy
         return None
 
+    def get_persisted_titlebars(self) -> Optional[bool]:
+        """Returns the enabled persisted titlebars choice (True/False) for daemon/startup use, or None."""
+        status = self.get_persistence_status()
+        if status.get("enabled"):
+            tb = status.get("titlebars")
+            if isinstance(tb, bool):
+                return tb
+        return None
+
     def set_persistence(
         self,
         enabled: bool,
         profile: Optional[str] = None,
         window_policy: Optional[str] = None,
+        titlebars: Optional[bool] = None,
         source: str = "unspecified",
     ) -> bool:
         """Enables/disables profile and window policy persistence. Writes ONLY ~/.config/omnipal/persistence.json (H-1)."""
@@ -369,6 +384,7 @@ class OmniPalEngine:
                 "enabled": False,
                 "profile": None,
                 "window_policy": None,
+                "titlebars": None,
                 "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
             }
             try:
@@ -409,10 +425,19 @@ class OmniPalEngine:
             log_policy_write("persistence.json", old_policy, target_policy,
                              source if window_policy else f"{source} (implicit)")
 
+        target_titlebars = (
+            titlebars
+            if titlebars is not None
+            else cur_persisted.get("titlebars")
+        )
+        if target_titlebars is not None and not isinstance(target_titlebars, bool):
+            target_titlebars = str(target_titlebars).lower() in ("true", "1", "on", "yes")
+
         data = {
             "enabled": True,
             "profile": target_profile,
             "window_policy": target_policy,
+            "titlebars": target_titlebars,
             "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
         try:
@@ -1335,6 +1360,10 @@ end
         them back (with no daemon running, the binds are simply lost)."""
         if not shutil.which("hyprctl"):
             return
+        persisted = self.get_persisted_titlebars()
+        if persisted is False:
+            # User explicitly chose to disable titlebars; do not force reload to bring them up
+            return
         try:
             res = subprocess.run(["hyprctl", "plugin", "list", "-j"], capture_output=True, text=True, timeout=0.5, check=False)
             if res.returncode == 0 and res.stdout.strip():
@@ -1410,6 +1439,9 @@ end
                     self._write_workspace_layout_file(ws_id, "floating")
                     self._ensure_hyprbars_if_floating()
                 self._notify_omarchy_layout()
+                persisted_tb = self.get_persisted_titlebars()
+                if persisted_tb is not None:
+                    self.set_titlebars(persisted_tb, sync_persistence=False)
             return ok
         elif target_mode == "scrolling":
             if not force and cur_applied == "scrolling":
@@ -1475,6 +1507,9 @@ end
             active_m = st.get("mode", "omarchy")
             if active_m != "omarchy":
                 self._reinject_active_bindings(active_m)
+            persisted_tb = self.get_persisted_titlebars()
+            if persisted_tb is not None:
+                self.set_titlebars(persisted_tb, sync_persistence=False)
             return True
 
     def _disable_float_rules(self) -> Optional[bool]:
@@ -1635,7 +1670,7 @@ end
         default_state = {
             "version": __version__,
             "mode": "omarchy",
-            "name": "Omarchy 原生模式",
+            "name": "原生",
             "display": self.profiles.get("omarchy", {}).get("display", {"icon": "⊡", "brief": "OMA", "color": "#a3be8c"}),
             "active_bindings_count": 0,
             "status": "idle",
@@ -2418,7 +2453,79 @@ end
             return str(spec)
         return "+".join([m.capitalize() for m in mods] + [key])
 
-    def cheatsheet(self, mode: Optional[str] = None) -> List[Dict[str, Any]]:
+    def omarchy_core_bindings(self) -> List[Dict[str, Any]]:
+        """Returns the prominent Omarchy 4.5 native system shortcuts (AI Agent Quake, Superwhisper, etc.)."""
+        return [
+            {"action": "omarchy_quake", "mod": "SUPER", "key": "grave", "name": "Quake 智能体终端"},
+            {"action": "omarchy_superwhisper", "mod": "ALT", "key": "space", "name": "Superwhisper 语音输入"},
+            {"action": "omarchy_input_method", "mod": "SUPER", "key": "i", "name": "切换输入法"},
+            {"action": "omarchy_workspace_layout", "mod": "SUPER", "key": "l", "name": "切换工作区布局"},
+            {"action": "minimize_window", "mod": "SUPER", "key": "m", "name": "最小化窗口到 Dock"},
+            {"action": "app_launcher", "mod": "SUPER", "key": "space", "name": "Omarchy 系统菜单 / 启动器"},
+            {"action": "omarchy_wallpaper_switcher", "mod": "SUPER ALT", "key": "space", "name": "壁纸切换器"},
+        ]
+
+    def detect_platform_preference(self) -> Dict[str, Any]:
+        """Detects hardware vendor and system architecture to recommend the most natural profile.
+        Checks DMI sys_vendor, product_name, and Asahi Linux Apple Silicon device tree.
+        """
+        vendor = ""
+        product = ""
+        for p in ("/sys/class/dmi/id/sys_vendor", "/sys/devices/virtual/dmi/id/sys_vendor"):
+            try:
+                v = Path(p).read_text(encoding="utf-8").strip()
+                if v:
+                    vendor = v
+                    break
+            except OSError:
+                pass
+
+        for p in ("/sys/class/dmi/id/product_name", "/sys/devices/virtual/dmi/id/product_name"):
+            try:
+                prod = Path(p).read_text(encoding="utf-8").strip()
+                if prod:
+                    product = prod
+                    break
+            except OSError:
+                pass
+
+        dt_apple = False
+        dt_path = Path("/proc/device-tree/compatible")
+        if dt_path.exists():
+            try:
+                compat = dt_path.read_bytes().decode("latin1", errors="ignore").lower()
+                if "apple," in compat:
+                    dt_apple = True
+                    if not vendor:
+                        vendor = "Apple"
+            except OSError:
+                pass
+
+        vendor_lower = vendor.lower()
+        if "apple" in vendor_lower or dt_apple:
+            display_vendor = vendor if "apple" in vendor_lower else "Apple"
+            return {
+                "vendor": display_vendor,
+                "product": product or ("Apple Silicon" if dt_apple else "Mac"),
+                "recommended_profile": "mac",
+                "reason": "检测到 Apple 硬件环境，推荐使用符合 macOS 肌肉记忆的 Command / Option 快捷键方案",
+            }
+        elif vendor:
+            return {
+                "vendor": vendor,
+                "product": product or "PC",
+                "recommended_profile": "windows",
+                "reason": f"检测到 {vendor} PC 硬件架构，推荐使用对齐 Windows 11 的 Super/Alt 快捷键方案",
+            }
+        else:
+            return {
+                "vendor": "PC/Generic",
+                "product": product or "Linux Device",
+                "recommended_profile": "windows",
+                "reason": "通用 PC 硬件架构，默认推荐 Windows 11 快捷键方案",
+            }
+
+    def cheatsheet(self, mode: Optional[str] = None, include_omarchy: bool = False) -> List[Dict[str, Any]]:
         """Returns structured cheatsheet data from single source of truth."""
         mode = (mode or self.get_state().get("mode", "omarchy")).lower().strip()
         profile = self.profiles.get(mode)
@@ -2446,6 +2553,21 @@ end
                 "category": action_meta.get("category", "other"),
                 "description": action_meta.get("description", "")
             })
+
+        if mode == "omarchy" or include_omarchy:
+            for b in self.omarchy_core_bindings():
+                action_id = b["action"]
+                action_meta = self.actions_catalog.get(action_id, {})
+                combo = format_combo(b.get("mod", ""), b.get("key", ""))
+                if any(x["key"] == combo for x in sheet):
+                    continue
+                sheet.append({
+                    "action": action_id,
+                    "key": combo,
+                    "name": b.get("name") or action_meta.get("name", action_id),
+                    "category": action_meta.get("category", "omarchy"),
+                    "description": action_meta.get("description", "")
+                })
         # Fixed entry points are live in every mode (incl. Omarchy 原生模式).
         # A fixed combo always wins: a profile row on the very same keys is
         # dropped so the fixed entry is never shadowed.
@@ -2667,10 +2789,13 @@ end
                     return "true" in line.lower()
         except (OSError, subprocess.SubprocessError) as _e:
             _debug(f"Failed to check titlebars option: {_e}")
+        persisted = self.get_persisted_titlebars()
+        if persisted is not None:
+            return persisted
         return False
 
-    def set_titlebars(self, enabled: bool) -> bool:
-        """Enables or disables window titlebars via Hyprland Lua eval."""
+    def set_titlebars(self, enabled: bool, sync_persistence: bool = True) -> bool:
+        """Enables or disables window titlebars via Hyprland Lua eval, and persists the choice."""
         if enabled:
             lua = (
                 'local paths = require("default.hypr.paths"); '
@@ -2687,6 +2812,10 @@ end
                 'local titlebar = colors.lighter_background or colors.selection or background; '
                 'local foreground = colors.foreground or "rgb(c0caf5)"; '
                 'local window = [[window = "address:%WINDOW%"]]; '
+                'local so = "/usr/lib/omarchy-hyprland-titlebars/titlebars.so"; '
+                'if type(hl) == "table" and type(hl.plugin) == "table" and type(hl.plugin.load) == "function" then '
+                '  local f = io.open(so, "r"); if f then f:close(); hl.plugin.load(so) end '
+                'end; '
                 'hl.config({ plugin = { hyprbars = { enabled = true, bar_height = 30, bar_color = titlebar, '
                 'col = { text = foreground }, bar_text_font = "monospace", bar_text_size = 12, '
                 'bar_text_weight = "normal", bar_text_align = "left", bar_buttons_alignment = "right", '
@@ -2700,15 +2829,67 @@ end
                 '{ icon = "−", action = "omarchy-hyprland-window-minimize %WINDOW%" } }) do '
                 'hl.plugin.hyprbars.add_button({ bg_color = titlebar, fg_color = foreground, size = 20, icon = button.icon, action = button.action }) end'
             )
-            return self._eval_lua(lua)
+            ok = self._eval_lua(lua)
         else:
-            return self._eval_lua('hl.config({ plugin = { hyprbars = { enabled = false } } })')
+            ok = self._eval_lua('hl.config({ plugin = { hyprbars = { enabled = false } } })')
+
+        if ok and sync_persistence:
+            try:
+                if self.get_persistence_status().get("enabled"):
+                    self.set_persistence(True, titlebars=enabled, source="titlebars")
+            except Exception as _e:
+                _debug(f"Failed to sync persistence for titlebars: {_e}")
+        return ok
 
     def toggle_titlebars(self) -> bool:
         """Toggles window titlebars and returns the new state."""
         cur = self.get_titlebars_status()
-        self.set_titlebars(not cur)
-        return not cur
+        new_st = not cur
+        self.set_titlebars(new_st)
+        return new_st
+
+    def toggle_desktop(self) -> bool:
+        """Toggles between showing desktop (minimizing active workspace windows) and restoring them."""
+        _ensure_hyprland_instance()
+        ws_info = self.get_active_workspace_info()
+        ws_id = ws_info.get("id") if ws_info else None
+        if ws_id is None:
+            return False
+
+        state_file = _resolve_run_dir() / f"desktop_minimized_{ws_id}.json"
+        clients = [
+            c for c in self.get_windows()
+            if str(c.get("workspace", {}).get("id")) == str(ws_id)
+            and not c.get("pinned", False)
+        ]
+
+        if clients:
+            addrs = [str(c.get("address")) for c in clients if c.get("address")]
+            try:
+                self._ensure_run_dir()
+                atomic_write_json(state_file, addrs)
+            except OSError as _e:
+                _debug(f"Failed to record desktop minimized windows: {_e}")
+            for addr in addrs:
+                if shutil.which("omarchy-hyprland-window-minimize"):
+                    subprocess.run(["omarchy-hyprland-window-minimize", addr], capture_output=True, timeout=1.0)
+                else:
+                    self._eval_lua(f'hl.dispatch(hl.dsp.window.move({{ workspace = "special:minimized", window = "address:{addr}" }}))')
+            return True
+        elif state_file.exists():
+            try:
+                with open(state_file, "r", encoding="utf-8") as f:
+                    addrs = json.load(f)
+            except (OSError, ValueError):
+                addrs = []
+            try:
+                state_file.unlink(missing_ok=True)
+            except OSError:
+                pass
+            for addr in addrs:
+                self._eval_lua(f'hl.dispatch(hl.dsp.window.move({{ workspace = "{ws_id}", window = "address:{addr}" }}))')
+            return True
+        return False
 
     def snap(self, zone: str, target_address: Optional[str] = None, no_hud: bool = False) -> bool:
         """Triggers visual snap feedback and dispatches the corresponding window management action."""
@@ -3188,6 +3369,7 @@ end"""
             from omarchy_version import check_omarchy_version  # type: ignore
         ov = check_omarchy_version(self.root_dir)
         report["omarchy"] = ov
+        report["platform"] = self.detect_platform_preference()
         if ov["status"] == "too_old":
             report["issues"].append(f"Omarchy {ov['detected']} is older than required {ov['minimum']}; plugins will fail to load")
             report["fixes"].append("Run omarchy-update to upgrade Omarchy")

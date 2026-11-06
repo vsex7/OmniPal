@@ -9,6 +9,7 @@ import qs.Ui
 import "Icons.js" as Icons
 import "CheatSheetData.js" as SheetData
 import "Takeovers.js" as Takeovers
+import "I18n.js" as I18n
 
 // OmniPal 快捷键 HUD（omni.cheat-sheet）
 //
@@ -34,6 +35,22 @@ Item {
 
   // ---------------------------------------------------------- view state
   property bool opened: false
+  property string langPath: (Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")) + "/omnipal/language"
+  property string currentLang: "zh"
+  function t(text) { return I18n.t(text, root.currentLang) }
+
+  FileView {
+    id: langFile
+    path: root.langPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: {
+      var txt = (text() || "").trim().toLowerCase()
+      if (txt === "en" || txt === "zh") root.currentLang = txt
+    }
+    onFileChanged: reload()
+  }
   // "" = 显示当前生效模式；非空 = 预览指定 Profile。
   property string requestedMode: ""
 
@@ -603,7 +620,7 @@ Item {
 
           Text {
             textFormat: Text.PlainText
-            text: "快捷键速查表"
+            text: root.t("快捷键速查表")
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
@@ -628,7 +645,7 @@ Item {
           foreground: root.foreground
           accent: root.accent
           font.family: root.fontFamily
-          placeholderText: "搜索 · /"
+          placeholderText: root.t("搜索 · /")
           selectByMouse: true
           Keys.onEscapePressed: function(event) {
             if (searchInput.text !== "") searchInput.text = ""
@@ -948,7 +965,7 @@ Item {
           textFormat: Text.PlainText
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: "Esc 关闭 · / 搜索 · Tab 切分类 · R 刷新 · G 上手指南 · 按住 Super/Alt/Ctrl/Shift 高亮关联键位"
+          text: root.t("Esc 关闭 · / 搜索 · Tab 切分类 · R 刷新 · G 上手指南 · 按住 Super/Alt/Ctrl/Shift 高亮关联键位")
           color: root.foreground
           opacity: 0.42
           font.family: root.fontFamily
@@ -993,7 +1010,7 @@ Item {
 
           Text {
             textFormat: Text.PlainText
-            text: "上手指南"
+            text: root.t("上手指南")
             color: Commons.Color.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
@@ -1057,7 +1074,7 @@ Item {
                 Text {
                   visible: step.index === 1 && root.fixedRows.length === 0
                   textFormat: Text.PlainText
-                  text: "暂时读不到，可以在速查表的「OmniPal 固定入口」分组里查看。"
+                  text: root.currentLang === "en" ? "Currently unavailable, view under 'OmniPal Fixed Shortcuts' category." : "暂时读不到，可以在速查表的「OmniPal 固定入口」分组里查看。"
                   color: Commons.Color.muted
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
@@ -1076,7 +1093,7 @@ Item {
               anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
               textFormat: Text.PlainText
-              text: "以后按 G，或在 Omarchy 菜单 Setup → 快捷键模式 → 上手指南 重新打开"
+              text: root.currentLang === "en" ? "Press G later, or reopen via Omarchy Menu Setup -> Keybinding Profile -> Onboarding Guide" : "以后按 G，或在 Omarchy 菜单 Setup → 快捷键模式 → 上手指南 重新打开"
               color: Commons.Color.muted
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
@@ -1090,7 +1107,7 @@ Item {
               spacing: Style.space(6)
 
               Button {
-                text: "打开设置"
+                text: root.t("打开设置")
                 bordered: true
                 foreground: Commons.Color.foreground
                 accent: Commons.Color.accent
@@ -1100,7 +1117,7 @@ Item {
               }
 
               Button {
-                text: "知道了"
+                text: root.t("知道了")
                 bordered: true
                 selected: true
                 foreground: Commons.Color.foreground
